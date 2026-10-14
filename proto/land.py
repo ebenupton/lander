@@ -40,7 +40,7 @@ F = 115                   # focal length, pixels
 HORIZON = 4               # screen y of the horizon
 # the palette (proto/swatch35.py's numbering): the user's picks
 LAND = [1, 3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
-SEAC = [0, 2, 5, 15, 17, 27]
+SEAC = [0, 2, 15, 17]
 STEPS = 16                # camera positions a tile (coarse panning: few distinct depths)
 
 

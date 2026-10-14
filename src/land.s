@@ -266,6 +266,10 @@ start:  ldx #<cmd_load              ; TABLES to $3000, then to bank 4
         lda #14
         ldx #4
         jsr OSBYTE
+        lda #$7D                   ; the system VIA's interrupts off but vertical
+        sta $FE4E                  ; sync's (no OS keyboard scan, clock or sound:
+        lda #$7F                   ; the keys are read directly), the user VIA's
+        sta $FE6E                  ; all off
         lda #0
         sta back
         jsr setback

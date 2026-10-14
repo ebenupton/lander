@@ -499,7 +499,7 @@ init:   lda #0
 
 ; ---------------------------------------------------------------- project
 ; Lander's block of NX x NZ corners (proto/land.py: project): the columns' map x
-; (CX: cxt - 5 + i), each drawn row's map row (czt + ZBACK - j, far to near, j
+; (CX: cxt - 5 + i, i from XSKIP: NX, tables.inc's, the corners drawn), each drawn row's map row (czt + ZBACK - j, far to near, j
 ; from ZSKIP: the far ZSKIP rows not drawn); with
 ; bank 4 paged, every corner's height (into PY); bank 5, each land strip's boxes'
 ; bytes (CLE, CLO: the tile at its left column and near row); bank 7, by the
@@ -545,9 +545,9 @@ project:
         sta np
         lda #NZ-ZSKIP
         sta nr
-        lda cxt                    ; the columns' map x
+        lda cxt                    ; the drawn columns' map x
         sec
-        sbc #5
+        sbc #5-XSKIP
         ldx #0
 :       and #63
         sta CX,x

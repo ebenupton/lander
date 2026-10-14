@@ -45,7 +45,9 @@ XSKIP = 1                 # the corner columns not drawn either side (their tile
                           # left and right columns)
 XCLIP = 1152              # the clip planes in x, 8.8 tiles from the camera either side (4.5)
 ZCLIP = 10                # the near clip plane's depth, tiles (the ship's 15, less 5)
-ZON = False               # the near clip on (the BBC: SPACE toggles it)
+                          # (always on)
+ZFCLIP = 17               # the far clip plane's depth, tiles (the near's, and 7)
+FON = False               # the far clip on (the BBC: SPACE toggles it)
 ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
@@ -144,19 +146,27 @@ def project(hm, cx, cz):
     tiles.  Clipped in x at -XCLIP and +XCLIP tiles from the camera: a row's points
     the edge there (its height between corners 1 and 2, or 10 and 11, by fx, as
     lerp), corners 2..10 between (at fx 0, corner 10 is on the right edge: the edge
-    repeats it)."""
-    xt, zt, fx = cx >> 8, cz >> 8, cx & 255
+    repeats it).  Clipped in z at ZCLIP (near: its row between the corner rows
+    either side, by 1 - fz, a line or more below the row before) and, if FON, at
+    ZFCLIP (far: likewise, a line or more above the row after; at fz 0 a corner row
+    is on it)."""
+    xt, zt, fx, fz = cx >> 8, cz >> 8, cx & 255, cz & 255
     xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]      # corners 1..11
     rows = []
     jc = ZBACK - ZCLIP                    # (the corner row the near clip replaces)
-    for j in range(ZSKIP, NZ):
+    jf = ZSKIP - 1 if FON and fz else ZSKIP   # (the far clip's, from it and the next)
+    for j in range(jf, jc + 1):
         z = zt + ZBACK - j
         r = recip((z << 8) - cz)
         hs = [int(hm[0][z % MAP, x % MAP]) for x in xs]
-        if ZON and j == jc:               # on the near clip plane: from the row
+        if j == jc:                       # on the near clip plane: from the row
             r = recip(ZCLIP << 8)         # before by 1 - fz
             hp = [int(hm[0][(z + 1) % MAP, x % MAP]) for x in xs]
-            hs = [lerp(a, b, 256 - (cz & 255)) for a, b in zip(hp, hs)]
+            hs = [lerp(a, b, 256 - fz) for a, b in zip(hp, hs)]
+        elif j < ZSKIP:                   # on the far clip plane: to the row after by
+            r = recip(ZFCLIP << 8)        # 1 - fz
+            hn = [int(hm[0][(z - 1) % MAP, x % MAP]) for x in xs]
+            hs = [lerp(a, b, 256 - fz) for a, b in zip(hs, hn)]
         pts = [(-XCLIP, lerp(hs[0], hs[1], fx))]
         pts += [((x << 8) - cx - 128, h) for x, h in zip(xs[1:-1], hs[1:-1])]
         pts += [(XCLIP, lerp(hs[-2], hs[-1], fx))]
@@ -165,21 +175,15 @@ def project(hm, cx, cz):
             sx = XC + ((dx * r + 32768) >> 16)
             sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))
-        row = clip([(sx, min(sy, YLIM), h) for sx, sy, h in row])
-        if ZON and j == jc:               # (at least a line below the row before: the
+        row = clip(row)
+        if j == jc:                       # (at least a line below the row before: the
             row = [(x, max(y, py + 1), h) # strip between can be thin)
                    for (x, y, h), (_, py, _) in zip(row, rows[-1][1])]
+        if j == jf + 1 and jf < ZSKIP:    # (the far clip's: a line or more above this)
+            rows[0] = (rows[0][0], [(x, min(y, ny - 1), h)
+                                    for (x, y, h), (_, ny, _) in zip(rows[0][1], row)])
         rows.append((z, row))
-        if any(sy >= YLIM for _, sy, _ in row) or (ZON and j == jc):
-            break                         # (the rows nearer: off the screen, or clipped)
     return xs, rows
-
-
-def off(top, bot, i):
-    """Box i between rows top and bot (points) touches the screen's edges: a corner
-    clipped at XL or XR or at YLIM (crudely, the box is then not drawn)."""
-    return any(x <= XL or x >= XR or y >= YLIM
-               for x, y, *_ in (top[i], top[i + 1], bot[i], bot[i + 1]))
 
 
 TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC's map: 4 bits a tile)
@@ -208,7 +212,7 @@ def frame(hm, cx, cz):
         if not S.ok(t, b):
             bad += 1
             continue
-        cols = [None if off(top, bot, i) else colour(hm, x, z1, k + 1, len(rows) - 1) for i, x in enumerate(xs[:-1])]
+        cols = [colour(hm, x, z1, k + 1, len(rows) - 1) for x in xs[:-1]]
         m = S.mask(t, b)
         img[m >= 0] = np.array(cols)[m[m >= 0]] + 1
     return img, bad, len(rows) - 1

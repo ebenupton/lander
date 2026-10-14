@@ -104,9 +104,11 @@ LAH1    = $1660-YSKY               ; screen 1
         .assert YGND+2-YSKY <= $60, error, "LAH, ENTL: $60 lines each"
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
-ZCF     = $07D0                    ; the near clip on (1; shipb.s's keys: SPACE)
-LJ      = $07B0                    ; each row's leading corners at XL or left
-RJ      = $07C0                    ; and its first at XR or right
+ZCF     = $07D0                    ; the far clip on (1; SPACE toggles it)
+ZB      = $07D1                    ; project's: ZBACK less the first row's j (ZSKIP,
+RN      = $07D2                    ; less 1 with the far clip's row), the near clip's
+DIB     = $07D3                    ; row (j ZBACK - ZCLIP, less it), the first row's
+FACT    = $07D4                    ; di (less 16 j, czs) and the far clip's row (1)
 
 SWT     = $9400                    ; init's line tables, in bank 4's free space: two a
                                    ; page, by line (YSKY..YGND+1: no page crossed)
@@ -268,7 +270,7 @@ go:     jsr init
 
 loop:   lda #<B6_KEYS              ; (bank 6: the keys, the ship's controls)
         jsr call6
-        jsr space                  ; SPACE: the near clip on or off
+        jsr space                  ; SPACE: the far clip on or off
         jsr project
         jsr strips                 ; (waiting for the flip before drawing)
         jsr readout
@@ -280,7 +282,7 @@ vsync:  php
         plp
         rts
 
-; SPACE (read directly, the system VIA's auto-scan off a moment): the near clip
+; SPACE (read directly, the system VIA's auto-scan off a moment): the far clip
 ; (ZCF) on or off as it goes down (down now, not last time).
 space:  sei
         lda #$7F
@@ -571,10 +573,33 @@ cph     = lqx+1
 .endmacro
 
 project:
-        lda #NX                    ; (always: the strips' np, nr)
+        lda #NX                    ; (always: the strips' np)
         sta np
-        lda #NZ-ZSKIP
-        sta nr
+        ldx #0                     ; the far clip's row: on, and fz not 0 (a
+        lda ZCF                    ; corner row is on it then)
+        beq :+
+        lda czs
+        beq :+
+        inx
+:       stx FACT
+        txa
+        clc
+        adc #ZBACK-ZSKIP
+        sta ZB
+        txa
+        clc
+        adc #ZBACK-ZCLIP-ZSKIP
+        sta RN
+        tay
+        iny
+        sty nr                     ; (the near clip's row the last)
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        adc #(ZBACK-ZSKIP)*16-DI0  ; (C clear)
+        sta DIB
         lda cxt                    ; the drawn columns' map x
         sec
         sbc #5-XSKIP
@@ -590,7 +615,7 @@ project:
         stx pr
 @h:     lda czt
         clc
-        adc #ZBACK-ZSKIP
+        adc ZB
         sec
         sbc pr
         and #63
@@ -613,7 +638,7 @@ project:
         tax
         inc pr
         lda pr
-        cmp #NZ-ZSKIP
+        cmp nr
         beq :+
         jmp @h
 :
@@ -2916,9 +2941,8 @@ oswblk: .res 9
 
 ; ---------------------------------------------------------------- bank 7
         .segment "B7CODE"
-; (bank 7) Each row's y's (SYT7: clamped at YLIM) and x's (fast, or clipr),
-; its leading corners at XL or left (LJ) and its first at XR or right (RJ);
-; the first row reaching YLIM the last (nr: the rows nearer are off the screen).
+; (bank 7) Each row's y's (SYT7) and x's (fast, or clipr), the near clip's row
+; (RN) the last, on its plane, and the far clip's (row 0 with FACT) on its.
 prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         lsr a
         lsr a
@@ -2935,11 +2959,16 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         asl a
         sta @lq0+1
         sta @lq1+1
-        lda ZCF                    ; the near clip: its row's heights (all
-        beq :+                     ; still raw)
-        lda #(ZBACK-ZCLIP-ZSKIP)*16
+        lda RN                     ; the near clip: its row's heights (all still
+        asl a                      ; raw), and the far clip's
+        asl a
+        asl a
+        asl a
         sta tmp
         jsr zlerp
+        lda FACT
+        beq :+
+        jsr flerp
 :       lda #0
         sta pr
 @r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0 (j = pr + ZSKIP)
@@ -2948,18 +2977,21 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         asl a
         asl a
         sta tmp                    ; (16 j: the row's place in PX, PY)
-        lda #(ZBACK-ZSKIP)*16-DI0
+        lda DIB
         sec
         sbc tmp
         sec
         sbc czs
         tay
-        lda ZCF                    ; the near clip's row: on its plane (its
-        beq :+                     ; heights: zlerp's, above)
-        lda pr
-        cmp #ZBACK-ZCLIP-ZSKIP
+        lda pr                     ; the clips' rows: on their planes (their
+        cmp RN                     ; heights: zlerp's, flerp's)
         bne :+
         ldy #ZCLIP*16-DI0
+:       lda FACT
+        beq :+
+        lda pr
+        bne :+
+        ldy #ZFCLIP*16-DI0
 :       sty xt1                    ; (di)
         lda R7L,y
         sta rl
@@ -3031,11 +3063,9 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         lda CLP7,y                 ; past the screen's edges: clipr
         beq @nx
         jsr clipr
-@nx:    lda ZCF                    ; the near clip's row: a line or more below
-        beq @lj                    ; the row before (then the last)
-        lda pr
-        cmp #ZBACK-ZCLIP-ZSKIP
-        bne @lj
+@nx:    lda pr                     ; the near clip's row: a line or more below
+        cmp RN                     ; the row before (then the last)
+        bne @fc
         ldx tmp
         ldy #NX
 :       lda PY-16,x
@@ -3046,56 +3076,24 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
 :       inx
         dey
         bne :--
-@lj:    ldx tmp                    ; LJ: the leading corners at x <= XL
-        ldy #0
-:       lda PX,x
-        cmp #XL+1
+        rts
+@fc:    cmp #1                     ; the far clip's row: a line or more above
+        bne @nr                    ; this (row 1)
+        lda FACT
+        beq @nr
+        ldx #0
+        ldy #NX
+:       lda PY+16,x
+        sec
+        sbc #1
+        cmp PY,x
         bcs :+
-        inx
-        iny
-        cpy #NX
-        bne :-
-:       tya
-        ldy pr
-        sta LJ,y
-        lda tmp                    ; RJ: the first corner at x >= XR
-        clc
-        adc #NX-1
-        tax
-        ldy #NX
-:       lda PX,x
-        cmp #XR
-        bcc :+
-        dex
+        sta PY,x
+:       inx
         dey
-        bne :-
-:       tya
-        ldy pr
-        sta RJ,y
-        ldx tmp                    ; reaching YLIM: the last row
-        ldy #NX
-:       lda PY,x
-        cmp #YLIM
-        beq @last
-        inx
-        dey
-        bne :-
-        lda ZCF                    ; (the near clip's row: the last)
-        beq :+
-        lda pr
-        cmp #ZBACK-ZCLIP-ZSKIP
-        beq @last
-:       inc pr
-        lda pr
-        cmp #NZ-ZSKIP
-        beq :+
+        bne :--
+@nr:    inc pr
         jmp @r
-:       sta nr
-        rts
-@last:  ldx pr
-        inx
-        stx nr
-        rts
 
 
 ; The near clip's row's heights (X: 16 j, raw): from the row before's by 1 -
@@ -3136,6 +3134,40 @@ zlerp:  lda czs
         dec tmp+1
         bne :-
 @d:     rts
+
+; The far clip's row's heights (row 0, raw): to row 1's by 1 - fz (land.lerp,
+; LERPQ7: q = 16 - czs; fz not 0).
+flerp:  lda #16
+        sec
+        sbc czs
+        pha
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>LERPQ7
+        sta @fq+2
+        pla
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta @fq+1
+        ldx #NX-1
+:       lda PY+16,x                ; b - a + 12
+        sec
+        sbc PY,x
+        clc
+        adc #12
+        tay
+@fq:    lda LERPQ7,y
+        clc
+        adc PY,x
+        sta PY,x
+        dex
+        bpl :-
+        rts
 
 ; A row the screen's edges clip (X: 16 j): its corners left of XL onto XL, those
 ; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +
@@ -3307,13 +3339,12 @@ cyc:    sta cdy
 ; ---------------------------------------------------------------- bank 5
         .segment "B5CODE"
 ; (bank 5) Each land strip's boxes' bytes (CLE, CLO): box i the tile at its left
-; column and the near row's, black if a corner is at XL or left, XR or right
-; (i < max LJ, i >= min RJ - 1) or at YLIM (the near row's).
+; column and the near row's.
 pcol5:  lda #1
         sta pr
 @cs:    lda czt
         clc
-        adc #ZBACK-ZSKIP
+        adc ZB
         sec
         sbc pr
         and #63
@@ -3333,71 +3364,35 @@ pcol5:  lda #1
         asl a
         sta hp0
         sta hp1
-        lda pr                     ; the strip's stores (16 (strip - 1) on), the
-        asl a                      ; near row's ys (16 strip)
+        lda pr                     ; the strip's stores: 16 (strip - 1) on
         asl a
         asl a
         asl a
-        sta @y0+1
-        ora #1
-        sta @y1+1
-        and #$F0
+        asl a
         sec
         sbc #16
         sta tmp
         clc
         adc #<CLE
         sta @se+1
-        sta @se2+1
         lda #>CLE
         adc #0
         sta @se+2
-        sta @se2+2
         lda tmp
         clc
         adc #<CLO
         sta @so+1
-        sta @so2+1
         lda #>CLO
         adc #0
         sta @so+2
-        sta @so2+2
-        ldx pr                     ; the boxes drawn: max LJ .. min RJ - 2
-        lda LJ-1,x
-        cmp LJ,x
-        bcs :+
-        lda LJ,x
-:       sta tmp
-        lda RJ-1,x
-        cmp RJ,x
-        bcc :+
-        lda RJ,x
-:       sec
-        sbc #1
-        sta tmp+1
-        ldx #0
-@b:     cpx tmp
-        bcc @k
-        cpx tmp+1
-        bcs @k
-@y0:    lda PY,x
-        cmp #YLIM
-        beq @k
-@y1:    lda PY,x                   ; (+ 1: @y1's operand)
-        cmp #YLIM
-        beq @k
-        ldy CX,x
+        ldx #NX-2
+@b:     ldy CX,x
         lda (hp0),y
 @se:    sta CLE,x
         lda (hp1),y
 @so:    sta CLO,x
-        jmp @n
-@k:     lda #0                     ; (black)
-@se2:   sta CLE,x
-@so2:   sta CLO,x
-@n:     inx
-        cpx #NX-1
-        bne @b
+        dex
+        bpl @b
         inc pr
         lda pr
         cmp nr

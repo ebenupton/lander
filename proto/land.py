@@ -29,8 +29,10 @@ import strip as S
 
 MAP = 64                  # tiles a side (the map wraps)
 HSCALE = 16               # height units a tile
-HMAX = 12                 # heights 0..HMAX (softened: under a tile)
-SEA = 5                   # sea level: lower corners are flattened to it
+HMAX = int(__import__('os').environ.get('LAND_HMAX', 15))   # heights 0..HMAX (softened:
+                          # under a tile), sea level 0 (LAND_HMAX: the tests')
+SEA = 0                   # sea level: lower corners are flattened to it
+SEAS = -10 / 12            # the six-sine sum's sea level (39% of corners under it)
 # Lander's camera (Lander.arm): TILES_X = 13, TILES_Z = 11 corners (12 x 10 tiles),
 # the block's corners at z = 20 - fz - j (j 0..10, far to near) and x = -5.5 - fx + i
 # (i 0..12: landscapeOffset's -LANDSCAPE_X, less xCamera's fraction) tiles from the
@@ -49,9 +51,10 @@ ZCLIP = 10                # the near clip plane's depth, tiles (the ship's 15, l
 ZFCLIP = 16               # the far clip plane's depth, tiles (the near's, and 6)
 FON = True                # the far clip on (always)
 ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
-CAMH = int(__import__('os').environ.get('LAND_CAMH', 80))   # camera height, height units
-                          # (HSCALE a tile: 5; LAND_CAMH: the tests', to push the land off
-                          # the bottom)
+CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height above the
+                          # ground at the ship (ZSHIP ahead, at the camera's x), height
+                          # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
+ZSHIP = 15                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
 HORIZON = 20              # screen y of the horizon
 XC = 128                  # screen x of the centre (Lander's 160 of 320)
@@ -65,21 +68,22 @@ STEPS = 16                # camera positions a tile (coarse panning: few distinc
 
 
 def heightmap():
-    """Lander's altitude formula (six sines; the sum spans +-5 tiles there), scaled to
-    0..HMAX and softened; corners below SEA flattened to it.  Also each tile's base
-    (Lander's: bits 2 and 3 of the raw altitude, i.e. a hash) and a sea shade."""
-    h = np.zeros((MAP, MAP), dtype=int)
+    """Lander's altitude formula (six sines; the sum spans +-5 tiles there), the
+    corners below SEAS at sea level (0), the rest scaled to 1..HMAX (softened).  Also
+    each tile's base (Lander's: bits 2 and 3 of the raw altitude, i.e. a hash)."""
+    s = np.zeros((MAP, MAP))
     base = np.zeros((MAP, MAP), dtype=int)
     t = 2 * math.pi / MAP
     for z in range(MAP):
         for x in range(MAP):
             a, b = x * t, z * t
-            s = (2 * math.sin(a - 2 * b) + 2 * math.sin(4 * a + 3 * b) + 2 * math.sin(3 * b - 5 * a)
-                 + 2 * math.sin(7 * a + 5 * b) + math.sin(5 * a + 11 * b) + math.sin(10 * a + 7 * b))
-            h[z, x] = round((s + 10) / 20 * HMAX)
-            raw = int((s + 10) / 20 * (1 << 24))      # Lander's altitude, finely
+            s[z, x] = (2 * math.sin(a - 2 * b) + 2 * math.sin(4 * a + 3 * b) + 2 * math.sin(3 * b - 5 * a)
+                       + 2 * math.sin(7 * a + 5 * b) + math.sin(5 * a + 11 * b) + math.sin(10 * a + 7 * b))
+            raw = int((s[z, x] + 10) / 20 * (1 << 24))      # Lander's altitude, finely
             base[z, x] = (raw >> 2) & 3
-    return np.maximum(h, SEA), base
+    land = s >= SEAS
+    h = np.where(land, 1 + np.round((s - SEAS) / (s.max() - SEAS) * (HMAX - 1)), 0).astype(int)
+    return h, base
 
 
 def lander_rgb(base, bright):
@@ -142,6 +146,16 @@ def clip(row):
     return [tuple(p) for p in pts]
 
 
+def ground(hm, cx, cz):
+    """The ground's height under the ship: ZSHIP tiles ahead of the camera, at its x
+    (x + 128: corner i's x is (xt - 5 + i) - cx - 0.5 tiles), between the four corners
+    round it (lerp: across, then down)."""
+    x, z = cx + 128, cz + ZSHIP * 256
+    xi, xf, zi, zf = x >> 8, x & 255, z >> 8, z & 255
+    g = lambda i, j: int(hm[0][j % MAP, i % MAP])
+    return lerp(lerp(g(xi, zi), g(xi + 1, zi), xf), lerp(g(xi, zi + 1), g(xi + 1, zi + 1), xf), zf)
+
+
 def project(hm, cx, cz):
     """The rows, far to near, each (its tile z, [(sx, sy, height)] across); and the
     columns' tile x (each point's: box i is tile xs[i]).  Camera (cx, cz) in 8.8
@@ -154,6 +168,7 @@ def project(hm, cx, cz):
     is on it)."""
     xt, zt, fx, fz = cx >> 8, cz >> 8, cx & 255, cz & 255
     xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]      # corners 1..11
+    hg = ground(hm, cx, cz)               # (the camera: CAMH above it)
     rows = []
     jc = ZBACK - ZCLIP                    # (the corner row the near clip replaces)
     jp = ZBACK - ZFCLIP                   # (the corner row on the far clip plane at fz 0)
@@ -177,7 +192,7 @@ def project(hm, cx, cz):
         row = []
         for dx, h in pts:
             sx = XC + ((dx * r + 32768) >> 16)
-            sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
+            sy = HORIZON + (((CAMH + hg - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))
         row = clip(row)
         if j == jc:                       # (at least a line below the row before: the

@@ -1187,7 +1187,9 @@ t_gl:    inx
 :       cmp tdx2
         bcc :+
         sbc tdx2
+        pha                        ; (tg_inc's A)
         jsr tg_inc
+        pla
         jmp :-
 :       sta terr
         lda tyy
@@ -2994,6 +2996,7 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         asl a
         sta @lq0+1
         sta @lq1+1
+        jsr hgnd                   ; the heights less the ground's under the ship
         lda RN                     ; the near clip: its row's heights (all still
         asl a                      ; raw), and the far clip's
         asl a
@@ -3032,7 +3035,21 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         sta rl
         lda R7H,y
         sta rh
-        tya                        ; di * 16: the row's SYT7, and B0's for cxs
+        tya                        ; di * 32: the row's SYT7
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>SYT7
+        sta syp+1
+        tya
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta syp
+        tya                        ; di * 16: its B0's for cxs
         lsr a
         lsr a
         lsr a
@@ -3043,20 +3060,15 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         asl a
         asl a
         asl a
-        sta syp
         sta lp
         sta hp0
         sta hp1
-        lda tmp+1
-        clc
-        adc #>SYT7
-        sta syp+1
         ldx tmp                    ; the edges' heights: corners 1 to 2, and 10
         lda PY+1,x                 ; to 11, by fx (LERPQ7: land.lerp)
         sec
         sbc PY,x
         clc
-        adc #12
+        adc #LQOFF
         tay
 @lq0:   lda LERPQ7,y
         clc
@@ -3066,7 +3078,7 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         sec
         sbc PY+NX-2,x
         clc
-        adc #12
+        adc #LQOFF
         tay
 @lq1:   lda LERPQ7,y
         clc
@@ -3131,6 +3143,103 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         jmp @r
 
 
+; The ground under the ship (land.ground: ZSHIP ahead at the camera's x, corner
+; rows j ZBACK - ZSHIP and the next farther, columns CX 4 + (cxs >= 8) and the
+; next, across by (cxs + 8) & 15 sixteenths, then down by czs: LERPQ7), and
+; every raw height (rows 0..nr-1) less it, + HMAX (SYT7's index).
+hgnd:   lda #ZBACK-ZSHIP           ; its row: ZBACK - ZSHIP less the first's j
+        sec                        ; (ZBACK - ZB)
+        sbc #ZBACK
+        clc
+        adc ZB
+        asl a
+        asl a
+        asl a
+        asl a
+        sta tmp                    ; (16 r)
+        lda cxs                    ; its column: 4, or 5 at cxs >= 8
+        cmp #8
+        lda #4
+        adc #0
+        clc
+        adc tmp
+        tax                        ; X: 16 r + its column
+        lda cxs                    ; across: q = (cxs + 8) & 15
+        clc
+        adc #8
+        and #15
+        jsr lqrow
+        lda PY+1,x                 ; the near corners
+        sec
+        sbc PY,x
+        clc
+        adc #LQOFF
+        tay
+        lda (lp),y
+        clc
+        adc PY,x
+        sta tmp+1                  ; (hx0)
+        lda PY-15,x                ; the far corners (the row before: 16 back)
+        sec
+        sbc PY-16,x
+        clc
+        adc #LQOFF
+        tay
+        lda (lp),y
+        clc
+        adc PY-16,x                ; (hx1)
+        sec
+        sbc tmp+1
+        clc
+        adc #LQOFF
+        pha
+        lda czs                    ; down: q = czs
+        jsr lqrow
+        pla
+        tay
+        lda (lp),y
+        clc
+        adc tmp+1                  ; hg
+        eor #$FF                   ; HMAX - hg
+        sec
+        adc #HMAX
+        sta tmp+1
+        ldx #0                     ; every row's heights + it
+@r:     ldy #NX-1
+:       lda PY,x
+        clc
+        adc tmp+1
+        sta PY,x
+        inx
+        dey
+        bpl :-
+        txa
+        clc
+        adc #16-NX
+        tax
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        cmp nr
+        bcc @r
+        rts
+lqrow:  pha                        ; lp: LERPQ7's row q (A)
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>LERPQ7
+        sta lp+1
+        pla
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta lp
+        rts
+
 ; The near clip's row's heights (X: 16 j, raw): from the row before's by 1 -
 ; fz (land.lerp, LERPQ7: q = 16 - czs; none at fz 0: the row itself).
 zlerp:  lda czs
@@ -3159,7 +3268,7 @@ zlerp:  lda czs
         sec
         sbc PY-16,x
         clc
-        adc #12
+        adc #LQOFF
         tay
 @zq:    lda LERPQ7,y
         clc
@@ -3194,7 +3303,7 @@ flerp:  lda #16
         sec
         sbc PY,x
         clc
-        adc #12
+        adc #LQOFF
         tay
 @fq:    lda LERPQ7,y
         clc

@@ -218,6 +218,9 @@ slope:  sty dv
         bcs @s
         tay
         lda (dr),y
+        .ifdef DRT2R                ; (LAND's bank 4 DRT holds 2r; bank 6's, r)
+        lsr a
+        .endif
         tax
         lda (dq),y
         rts
@@ -227,6 +230,9 @@ slope:  sty dv
         bcs @s
         tay
         lda (dr),y
+        .ifdef DRT2R                ; (LAND's bank 4 DRT holds 2r; bank 6's, r)
+        lsr a
+        .endif
         beq @x                     ; exact: -q, 0
         eor #$FF                   ; Y - r
         sec

@@ -9,6 +9,7 @@
 ; ============================================================================
         .setcpu "6502"
         .include "tables.inc"      ; (LAND's: DQT, DRT in bank 4)
+DRT2R   = 1                        ; (LAND's DRT: 2r, D mod a doubled)
 
 OSWRCH  = $FFEE
 OSBYTE  = $FFF4

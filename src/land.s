@@ -1265,14 +1265,12 @@ t_seg:  stx tj
         lda DVL,y
         ora terr
         tay
-t_dr:   lda DRT,y                  ; r = dx mod |dy|: r2 = 2r
-        asl a
-        sta rr2
 t_dq:   lda DQT,y                  ; q2 = dx div |dy|: q = q2 / 2
         sta rq2
         lsr a
         sta rq
-        lda rr2                    ; rem = r + |dy| (q2 odd)
+t_dr:   lda DRT,y                  ; r2 = 2 (dx mod |dy|) (DRT holds 2r)
+        sta rr2                    ; rem = r + |dy| (q2 odd)
         bcc :+
         adc ra2                    ; (C set: 2r + 2|dy| + 1)
 :       lsr a                      ; (C clear if rem = 0)
@@ -1478,6 +1476,7 @@ divs:   lda dva
 :       sty rq
         sta rrem
         jmp dv2
+        .res 3                     ; (keeps the layout: DRT's 2r saved 3 bytes)
 divt:   ldy dva                    ; (D div a, D mod a: q2, and q, rem, r2 from them)
         lda DVH,y
         sta @q+2
@@ -1486,19 +1485,18 @@ divt:   ldy dva                    ; (D div a, D mod a: q2, and q, rem, r2 from 
         lda DVL,y
         ora dvd
         tay
-@r:     lda DRT,y                  ; r = D mod a: r2 = 2r
-        asl a
-        sta rr2
 @q:     lda DQT,y                  ; q2 = D div a: q = q2 / 2
         sta rq2
         lsr a
         sta rq
-        lda rr2                    ; rem = r + a (q2 odd)
+@r:     lda DRT,y                  ; r2 = 2 (D mod a) (DRT holds 2r)
+        sta rr2                    ; rem = r + a (q2 odd)
         bcc :+
         adc ra2                    ; (C set: 2r + 2a + 1)
 :       lsr a
         sta rrem
         rts
+        .res 3                     ; (keeps the layout)
 dv2:    asl a                      ; 2D = 2q (2a) + 2 rem
         sta rr2
         lda rq
@@ -1549,20 +1547,18 @@ tr_inc: inc tyv
         cmp #64
         bcs slow
         lda DVH,y
-        sta :++ + 2
-        lda DVR,y
         sta :+ + 2
+        lda DVR,y
+        sta :++ + 2
         lda DVL,y
         ora dvd
         tay
-:       lda DRT,y                  ; r = D mod a: r2 = 2r
-        asl a
-        sta rr2
 :       lda DQT,y                  ; q2 = D div a: q = q2 / 2
         sta rq2
         lsr a
         sta rq
-        lda rr2                    ; rem = r + a (q2 odd)
+:       lda DRT,y                  ; r2 = 2 (D mod a) (DRT holds 2r)
+        sta rr2                    ; rem = r + a (q2 odd)
         bcc :+
         adc ra2                    ; (C set: 2r + 2a + 1)
 :       lsr a                      ; (C clear if rem = 0)
@@ -1659,6 +1655,7 @@ rungs:  lda xl
         cpy dva
         bne @rs                    ; (C clear: Y < a)
         beq @nr
+        .res 3                     ; (keeps the layout)
 :       adc dvd                    ; (C set: + 2a; C clear after)
         sta rrem
         txa
@@ -1682,6 +1679,7 @@ rungs:  lda xl
         jmp @r
 :       rts
 @lslj:  jmp @lsl                   ; (in reach)
+        .res 3                     ; (keeps the layout)
 @lft:   sta LO,x                   ; leaning left: xb .. xt-1
         eor #$FF                   ; RTP = alloc - LO
         sec

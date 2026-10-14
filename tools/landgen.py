@@ -13,7 +13,7 @@ And:
   MAP + z*64 + x          a tile corner's height (bits 0-3) and its tile's colour pick
                           (bits 4-7: LANDT or SEAT gives the palette entry)
   DE, DO + palette entry  a dither's bytes on even and odd lines (swatch35 numbering)
-  DQT, DRT + a*64 + D    D div a, D mod a (a 1..31, D 0..63); DVH, DVR, DVL + a:
+  DQT, DRT + a*64 + D    D div a, 2 (D mod a) (a 1..31, D 0..63); DVH, DVR, DVL + a:
                           its row's pages and offset
   COLO, COLQ + cxs*16 + i the camera's x step's column i: tile (from cxt) and
                           sixteenths; NPT + cxs: how many
@@ -90,7 +90,7 @@ def build():
     for a in range(1, 32):
         for d in range(64):
             put('DQT', a * 64 + d, d // a)
-            put('DRT', a * 64 + d, d % a)
+            put('DRT', a * 64 + d, 2 * (d % a))    # 2r: r2 directly
         put('DVH', a, (ADDR['DQT'] + a * 64) >> 8)
         put('DVR', a, (ADDR['DRT'] + a * 64) >> 8)
         put('DVL', a, (a * 64) & 255)

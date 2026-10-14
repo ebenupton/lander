@@ -30,7 +30,9 @@
 ; after an odd, for the screen and half being drawn) from its first line's entry to an RTS planted at the line after it.
 ;
 ; Memory.  LAND loads at $1900 and loads TABLES (tools/landgen.py) into
-; sideways RAM bank 4, paged in throughout; then it closes !BOOT and takes the
+; sideways RAM bank 4, paged in throughout, TABLES2 into bank 5 (project's
+; colours, a moment) and SHIPB (shipb.s: the keys and the ship) into bank 6
+; (call6, between the frame's parts); then it closes !BOOT and takes the
 ; filing system's workspace:
 ;   $0400, $0500  ROWA, ROWB: a row's line by pixel (a strip's top and bottom)
 ;   $0600         RTBUF: the rungs' transition lines
@@ -58,6 +60,9 @@ ROMCOPY = $F4
 CRTC_IDX = $FE00
 CRTC_DAT = $FE01
 BANK    = 4                        ; sideways RAM: the tables
+BANK3   = 6                        ; and the ship's (shipb.s: the keys too)
+B6_KEYS = $8000
+B6_SHIP = $8003
 BANK2   = 5                        ; and the tiles' colours (project's, a moment)
 
 YSKY    = 68                       ; proto/frame.py's
@@ -239,8 +244,12 @@ mo:     .res 1
         .code
 ; ---------------------------------------------------------------- start
         .assert * = $1900, error, "start must be first: *RUN enters at $1900"
-start:  ldx #<cmd_load2             ; TABLES2 to bank 5, TABLES to bank 4 (by
-        ldy #>cmd_load2            ; $3000)
+start:  ldx #<cmd_load3             ; SHIPB to bank 6, TABLES2 to bank 5,
+        ldy #>cmd_load3            ; TABLES to bank 4 (by $3000)
+        lda #BANK3
+        jsr ldbank
+        ldx #<cmd_load2
+        ldy #>cmd_load2
         lda #BANK2
         jsr ldbank
         ldx #<cmd_load
@@ -286,9 +295,12 @@ start:  ldx #<cmd_load2             ; TABLES2 to bank 5, TABLES to bank 4 (by
         sta vflip
         sta vlast
 
-loop:   jsr keys
+loop:   lda #<B6_KEYS              ; (bank 6: the keys, the ship's controls)
+        jsr call6
         jsr project
         jsr strips                 ; (waiting for the flip before drawing)
+        lda #<B6_SHIP              ; the ship, over the land (and the screen's
+        jsr call6                  ; TOPS, BOTS widened to take it off again)
         jsr readout
         jsr flip
         jmp loop
@@ -298,7 +310,19 @@ vsync:  php
         plp
         rts
 
+; Bank 6's routine at $8000 + A (B6_KEYS or B6_SHIP), bank 4 paged back after.
+call6:  sta @j+1
+        lda #BANK3
+        sta ROMCOPY
+        sta ROMSEL
+@j:     jsr $8000
+        lda #BANK
+        sta ROMCOPY
+        sta ROMSEL
+        rts
+
 cmd_load: .byte "LOAD TABLES 3000", 13
+cmd_load3: .byte "LOAD SHIPB 3000", 13
 cmd_load2: .byte "LOAD TABLES2 3000", 13
 
 ; *LOAD (X, Y: the command) to $3000, then the 16K there to bank A (which is
@@ -549,64 +573,6 @@ init:   lda #0
         dex
         bpl :-
         rts
-
-; ---------------------------------------------------------------- keys
-; Arrows: left and right in x, up and down (away and towards) in z.  Read
-; from the keyboard directly (the system VIA, its auto-scan off a moment).
-SVIA_ORB = $FE40
-SVIA_DDRA = $FE43
-SVIA_ORA_NH = $FE4F
-.macro KEY code, routine
-        .local no
-        lda #code
-        sta SVIA_ORA_NH
-        lda SVIA_ORA_NH            ; (bit 7: pressed)
-        bpl no
-        jsr routine
-no:
-.endmacro
-keys:   sei
-        lda #$7F                   ; bits 0-6 out: the key to test
-        sta SVIA_DDRA
-        lda #3                     ; keyboard auto-scan off
-        sta SVIA_ORB
-        KEY $19, left
-        KEY $79, right
-        KEY $39, away
-        KEY $29, towards
-        lda #$0B                   ; and on
-        sta SVIA_ORB
-        cli
-        rts
-left:   dec cxs
-        bpl :+
-        lda #15
-        sta cxs
-        dec cxt
-:       rts
-right:  inc cxs
-        lda cxs
-        cmp #16
-        bne :+
-        lda #0
-        sta cxs
-        inc cxt
-:       rts
-towards:
-        dec czs
-        bpl :+
-        lda #15
-        sta czs
-        dec czt
-:       rts
-away:   inc czs
-        lda czs
-        cmp #16
-        bne :+
-        lda #0
-        sta czs
-        inc czt
-:       rts
 
 ; ---------------------------------------------------------------- project
 ; The columns (CT, CQ: tile, sixteenths; np of them), the rows far to near
@@ -2160,6 +2126,7 @@ gn_d:   stx tj
         lsr a
         lsr a
         jsr sethalf
+        ldy tj                     ; (sethalf leaves Y its STAB's)
         lda (bsp),y
         pha
         lda (tsp),y

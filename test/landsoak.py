@@ -2,8 +2,11 @@
 """Run LAND's own code in py65 for many frames, panning, and check each frame's screen
 against proto/frame.py's (the frame alone on black), byte for byte.
 
-    python3 test/landsoak.py [frames] [seed] [step]   (step: the most a frame pans, in
-                                                     sixteenths of a tile; default 2)
+    python3 test/landsoak.py [frames] [seed] [step] [ship]   (step: the most a frame pans,
+                                     in sixteenths of a tile; default 2.  ship: each frame
+                                     also draws the ship (bank 6's B6_SHIP), at a random
+                                     orientation and place, and the screen must be the
+                                     land with tools/shipgen.py's ship over it)
 
 build/land/LAND at $1900 and TABLES at $8000 (bank 4, as LAND pages it); init once,
 then each frame: the camera set, project, strips, flip (both screens in turn, so
@@ -22,6 +25,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import land as L      # noqa: E402
 import frame as F     # noqa: E402
 import landgen as G   # noqa: E402
+import shipgen as SG  # noqa: E402
 import points as P    # noqa: E402
 
 B = os.path.join(ROOT, 'build', 'land')
@@ -30,9 +34,9 @@ PIXM = [0x88, 0x44, 0x22, 0x11]
 DB = [G.dither_bytes(e) for e in range(35)]
 
 
-def labels():
+def labels(f='labels.txt'):
     out = {}
-    for ln in open(os.path.join(B, 'labels.txt')):
+    for ln in open(os.path.join(B, f)):
         _, a, name = ln.split()
         out[name.lstrip('.')] = int(a, 16)
     return out
@@ -69,7 +73,8 @@ def machine():
     to ROMSEL, $FE30, pages one in at $8000), init run: (mpu, labels)."""
     lab = labels()
     banks = {4: open(os.path.join(B, 'TABLES'), 'rb').read(),
-             5: open(os.path.join(B, 'TABLES2'), 'rb').read()}
+             5: open(os.path.join(B, 'TABLES2'), 'rb').read(),
+             6: open(os.path.join(B, 'SHIPB'), 'rb').read().ljust(0x4000, b'\0')}
     mem = ObservableMemory()
 
     cur = [4]
@@ -95,10 +100,14 @@ def main():
     frames = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     rng = np.random.default_rng(int(sys.argv[2]) if len(sys.argv) > 2 else 1)
     step = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+    ship = 'ship' in sys.argv[4:]
     mpu, lab = machine()
+    lab6 = labels('shipb_labels.txt')
     hm = L.heightmap()
     cx, cz = 40 << 8, 30 << 8
     cyc = {'project': [], 'strips': []}
+    if ship:
+        cyc['ship'] = []
     fails = 0
     for f in range(frames):
         if f:
@@ -111,8 +120,16 @@ def main():
         m[lab['czt']], m[lab['czs']] = (cz >> 8) & 63, (cz >> 4) & 15
         scr = 0x3000 if m[lab['back']] == 0 else 0x5800
         m[lab['vcount']] = (m[lab['vflip']] + 1) & 255     # (a vertical sync since the flip)
-        for r in cyc:
+        for r in ('project', 'strips'):
             cyc[r].append(call(mpu, lab[r]))
+        if ship:
+            k, p = int(rng.integers(SG.NDIR)), int(rng.integers(SG.NPITCH))
+            sx, sy = int(rng.integers(18, 238)), int(rng.integers(F.YSKY + 18, F.YGND - 18))
+            m[0xFE30] = 6
+            for n, v in (('shk', k), ('shp', p), ('shx', sx), ('shy', sy)):
+                m[lab6[n]] = v
+            cyc['ship'].append(call(mpu, 0x8003))
+            m[0xFE30] = 4
         # the projection
         xs, rows = L.project(hm, (cx >> 8 & 63) << 8 | cx & 255, (cz >> 8 & 63) << 8 | cz & 255)
         np_, nr = m[lab['np']], m[lab['nr']]
@@ -127,6 +144,8 @@ def main():
                     perr.append(f'row {r}: {got} want {want}')
         img = np.zeros((P.H, P.W), np.uint8)
         F.draw(img, hm, cx, cz)
+        if ship:
+            SG.draw(img, k, p, sx, sy)
         want = screen_bytes(img)
         got = bytes(m[scr:scr + 10240])
         bad = [i for i in range(10240) if got[i] != want[i]]

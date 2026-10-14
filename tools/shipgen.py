@@ -101,12 +101,14 @@ def entry(kk, p):
 
 
 # Lander's colours + brightness, through the four inks' dithers: nearest-colour picks
-# lose the facets (the top's greens all land on one dither), so each of the ship's
-# three hues has a ramp of dithers, dark to light, indexed by the green channel Lander
-# would show (its colour's green + the brightness, to 15).
-RAMPS = {'green': [26] * 8 + [16] * 3 + [18] * 2 + [3] * 2 + [6],
-         'cyan': [34] * 4 + [31] * 3 + [25] * 3 + [15] * 3 + [0] * 3,
-         'orange': [22] * 10 + [11] * 6}
+# lose the facets (the top's greens all land on one dither) and the landscape uses
+# every green, so each of the ship's three hues has a ramp of dithers the land and sea
+# never use (proto/land.py's LAND, SEAC), dark to light, indexed by the green channel
+# Lander would show (its colour's green + the brightness, to 15): its top greys, its
+# underside magentas, its exhaust pink.
+RAMPS = {'green': [19] * 8 + [8] * 3 + [4] * 2 + [7] * 3,
+         'cyan': [34] * 4 + [33] * 3 + [30] * 3 + [24] * 3 + [14] * 3,
+         'orange': [13] * 10 + [12] * 6}
 HUE = {0x080: 'green', 0x040: 'green', 0x088: 'cyan', 0x044: 'cyan', 0xC80: 'orange'}
 
 

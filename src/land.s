@@ -1106,13 +1106,12 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         adc #MARGIN+3
         and #$FC
         sta xr
+        sta TX+1,x
+        sta BX+1,x
         lda TY,x
         sta TY+1,x
         lda BY,x
         sta BY+1,x
-        lda xr
-        sta TX+1,x
-        sta BX+1,x
         lda TY+1
         sta TY
         lda BY+1
@@ -1121,13 +1120,13 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         lda #0
         sta CE
         sta CO
-        ldx np
         sta CE,x
         sta CO,x
 @bot:   lda ns                     ; the bottom row's line
         cmp nr
         beq :+
         jmp traceb
+        .res 4                     ; (the layout kept)
 :
         ldy xl                     ; the ground's: to each column's lowest land
 :       tya                        ; line last time or this (BOTS, CURB)

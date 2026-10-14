@@ -648,6 +648,15 @@ project:
         ldy cxs                    ; the columns (landgen's COLO, COLQ, NPT)
         lda NPT,y
         sta np
+        tax                        ; (the rows' right pinned column: np - 1)
+        dex
+        stx @pxr+1
+        stx @pyc+1
+        stx @zc+1
+        txa
+        clc
+        adc #<PY
+        sta @pyr+1
         tya
         asl a
         asl a
@@ -743,32 +752,17 @@ project:
         sta PX,x                   ; bank 5, after)
         lda PINR,y
         ldy pr
-        sta PINRX,y
-        pha
-        txa
-        clc
-        adc np
-        tay
-        pla
-        sta PX-1,y
+        sta PINRX,y                ; (into PX: @ix's)
 @py:    ldy #0                     ; its y: the pinned columns' (interpolated)
         jsr pinc
         tay
         lda (syp),y
         sta PY,x
-        ldy np
-        dey
-        sty tj
+@pyc:   ldy #0                     ; (np - 1: project's)
         jsr pinc
         tay
         lda (syp),y
-        pha
-        txa
-        clc
-        adc tj
-        tay
-        pla
-        sta PY,y
+@pyr:   sta PY,x                   ; (PY + np - 1: project's)
         lda zq                     ; then the inner ones: whole corners
         bne @zr
         PYI 1
@@ -787,11 +781,9 @@ project:
         beq @col
         jmp @row
 @zr:    txa                        ; (a pinned row: interpolated down; X: the
-        adc #<PY                   ; column, PY's store row X's: C clear, 16 *
-        sta @zs+1                  ; row + PY < 256)
-        ldy np
-        dey
-        sty @zc+1
+        clc                        ; column, PY's store row X's: 16 * row + PY
+        adc #<PY                   ; < 256; @zc: project's np - 1)
+        sta @zs+1
         ldx #1
 :       ldy CT,x
         lda (hp0),y
@@ -848,25 +840,14 @@ project:
         PXT_ 5
         PXT_ 6
         PXT_ 7                     ; (np 8: overwritten by the pinned one, below)
+        ldy pr                     ; the right pinned x
+        lda PINRX,y
+@pxr:   sta PX,x                   ; (PX + np - 1: project's)
         ldx pr
         inx
         stx pr
         cpx nr
         bne @ix
-        ldx #0                     ; (the right pinned x again, for np 8)
-:       txa
-        asl a
-        asl a
-        asl a
-        asl a
-        clc
-        adc np
-        tay
-        lda PINRX,x
-        sta PX-1,y
-        inx
-        cpx nr
-        bne :-
         lda #1                     ; each land strip's boxes: their tiles'
         sta pr                     ; colours (CMAPE, CMAPO), the tile row its
 @cs:    ldx pr                     ; bottom row's

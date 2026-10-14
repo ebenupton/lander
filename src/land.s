@@ -1049,47 +1049,71 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         beq :+
         dex
 :       stx rec
-        lda ns                     ; the top row: row ns-1 (the sky: row 0)
-        beq :+
-        sec
-        sbc #1
-        asl a
-        asl a
-        asl a
-        asl a
-:       sta tmp
-        lda ns                     ; the bottom row: row ns (the ground: nr-1)
+        ; the points and the boxes: a land strip's top row ns-1, bottom row ns,
+        ; boxes CLE + 16 * (ns - 1) + box - 1 (CE, CO np: zeroed below)
+        lda ns
+        beq @r                     ; (A = 0: row 0)
         cmp nr
-        bne :+
-        sbc #1                     ; (C set)
-:       asl a
+        beq @g
+        asl a                      ; (C clear: ns < 16)
         asl a
         asl a
         asl a
-        sta tmp+1
+        adc #$F0
+        tay
         ldx #1
-@p:     ldy tmp
-        lda PX,y
+@p:     lda PX,y
         sta TX,x
         lda PY,y
-        ldy ns
-        bne :+
-        lda #YSKY
-:       sta TY,x
-        ldy tmp+1
-        lda PX,y
+        sta TY,x
+        lda PX+16,y
         sta BX,x
-        lda PY,y
-        ldy ns
-        cpy nr
-        bne :+
-        lda #YGND
-:       sta BY,x
-        inc tmp
-        inc tmp+1
+        lda PY+16,y
+        sta BY,x
+        lda CLE,y
+        sta CE,x
+        lda CLO,y
+        sta CO,x
+        iny
         inx
         cpx np1
         bcc @p
+        bcs @m
+        ; the sky (row 0 both, the top at YSKY) and the ground (row nr-1
+        ; both, the bottom at YGND): boxes black
+@g:     asl a                      ; (C clear: 4 shifts of nr < 16)
+        asl a
+        asl a
+        asl a
+        adc #$F0
+@r:     tay
+        ldx #1
+@q:     lda PX,y
+        sta TX,x
+        sta BX,x
+        lda PY,y
+        sta TY,x
+        sta BY,x
+        lda #0
+        sta CE,x
+        sta CO,x
+        iny
+        inx
+        cpx np1
+        bcc @q
+        ldx np
+        lda ns
+        bne @gb
+        lda #YSKY
+:       sta TY,x
+        dex
+        bne :-
+        beq @m
+@gb:    lda #YGND
+:       sta BY,x
+        dex
+        bne :-
+@m:
         ; the margins: a byte boundary MARGIN or more beyond the bottom row
         lda BX+1
         sec
@@ -1122,34 +1146,6 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         ldx np
         sta CE,x
         sta CO,x
-        lda ns                     ; CLE + 16 * (ns - 1) + box - 1
-        asl a
-        asl a
-        asl a
-        asl a
-        sec
-        sbc #16
-        tay
-        ldx #1
-@c:     lda #0
-        sta ve
-        sta vo
-        lda ns
-        beq :+
-        cmp nr
-        beq :+
-        lda CLE,y
-        sta ve
-        lda CLO,y
-        sta vo
-:       lda ve
-        sta CE,x
-        lda vo
-        sta CO,x
-        iny
-        inx
-        cpx np
-        bcc @c
         ; the top row's line
         lda ns
         bne @widen

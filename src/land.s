@@ -1280,10 +1280,8 @@ t_dr:   lda DRT,y                  ; r2 = 2 (dx mod |dy|) (DRT holds 2r)
         adc #0                     ; (rem > 0)
         adc BX,x                   ; (C clear)
         tax
-        ldy dva                    ; the runs between: q2 or q2 + 1
-        cpy #2
-        bcc :+
-        ldy rq2
+        ldy rq2                    ; the runs between: q2 or q2 + 1 (|dy| >= 2:
+                                   ; t_one's 1)
         lda TENL,y
         sta jv0+1
 tv_h0:  lda TENH4,y
@@ -1292,7 +1290,7 @@ tv_h0:  lda TENH4,y
         sta jv1+1
 tv_h1:  lda TENH4+1,y
         sta jv1+2
-:       txa
+        txa
         sec
         sbc tcnt
         tay
@@ -1305,6 +1303,7 @@ tf_h:   lda TENH4,y
         ldy dva                    ; (Y: the runs left after this one)
         lda tyv
 tf_j:   jmp t_back
+        .res 5
 t_one:  lsr a                      ; |dy| 1: the first run to x0 + ceil(dx / 2)
         adc BX,x
         tax

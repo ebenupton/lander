@@ -1487,6 +1487,7 @@ rungs:  lda xl
         sbc TY,x
         sta rD
         lda BX,x
+        sta rend                   ; (the last pixel's end: xb either way)
         cmp TX,x
         bne :+
         sta LO,x                   ; upright: none
@@ -1534,42 +1535,17 @@ rungs:  lda xl
         sec
         sbc rrem
 :       sta rrem
-        cmp #1
-        lda #0
-        rol a                      ; (rem > 0)
-        clc
-        adc TY,x
+        cmp #1                     ; (C: rem > 0)
+        lda TY,x
         adc rq
         ldy TX,x                   ; the pixels, from xt out
-        pha
-        lda BX,x
-        cmp TX,x
-        bcc @left
-        lda HI,x
-        sta rend
-        pla
+        cpy rend
+        bcs @ll
 @rl:    sta (rtp),y                ; leaning right: xt .. xb-1
         iny
         cpy rend
         beq @nx
-        jsr @step
-        jmp @rl
-@left:  lda LO,x
-        sta rend
-        pla
-@ll:    dey                        ; leaning left: xt-1 .. xb
-        sta (rtp),y
-        cpy rend
-        beq @nx
-        jsr @step
-        jmp @ll
-@nx:    ldx tj
-        inx
-        cpx np1
-        bcs :+
-        jmp @r
-:       rts
-@step:  tax                        ; the next pixel's: + 2D / 2a, by e
+@rs:    tax                        ; the next pixel's: + 2D / 2a, by e
         lda rrem
         sec
         sbc rr2
@@ -1578,12 +1554,51 @@ rungs:  lda xl
         sta rrem
         txa
         adc rq2
-        rts
+        sta (rtp),y
+        iny
+        cpy rend
+        bne @rs
+        beq @nx
 :       sta rrem
         txa
         clc
         adc rq2
-        rts
+        sta (rtp),y
+        iny
+        cpy rend
+        bne @rs
+        beq @nx
+@ll:    dey                        ; leaning left: xt-1 .. xb
+        sta (rtp),y
+        cpy rend
+        beq @nx
+@ls:    tax                        ; (C set: Y > rend)
+        lda rrem
+        sbc rr2
+        bcs :+
+        adc ra2                    ; (C set after)
+        sta rrem
+        txa
+        adc rq2
+        dey
+        sta (rtp),y
+        cpy rend
+        bne @ls
+        beq @nx
+:       sta rrem
+        txa
+        clc
+        adc rq2
+        dey
+        sta (rtp),y
+        cpy rend
+        bne @ls
+@nx:    ldx tj
+        inx
+        cpx np1
+        bcs :+
+        jmp @r
+:       rts
 
 ; ---------------------------------------------------------------- columns
 cols:   lda topa+1                 ; this strip's rows' pages

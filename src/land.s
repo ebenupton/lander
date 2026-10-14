@@ -2096,9 +2096,8 @@ s2_h:   lda LAHSB0,x
         rts
 s2_run: ldx yy
         ldy tj
+        sty yy                     ; (run reads neither)
         jsr run
-        lda tj
-        sta yy
         ldx sx_
         rts
 

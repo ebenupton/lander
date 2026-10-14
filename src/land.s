@@ -1474,7 +1474,7 @@ rungs:  lda xl
         lda BY,x
         sec
         sbc TY,x
-        sta rD
+        sta dvd                    ; (D)
         lda BX,x
         sta rend                   ; (the last pixel's end: xb either way)
         cmp TX,x
@@ -1495,7 +1495,7 @@ rungs:  lda xl
         sta HI,x
         sec
         sbc TX,x
-@a:     sta rq                     ; (a)
+@a:     sta dva                    ; (a)
         asl a
         sta ra2                    ; 2a
         lda alloc                  ; RTP = alloc - LO
@@ -1509,15 +1509,11 @@ rungs:  lda xl
         sta rtp+1
         lda alloc                  ; alloc += a
         clc
-        adc rq
+        adc dva
         sta alloc
         bcc :+
         inc alloc+1
-:       lda rq                     ; q, rem = D div 2a, mod; q2, r2 = 2D's
-        sta dva
-        lda rD
-        sta dvd
-        jsr divs
+:       jsr divs                   ; q, rem = D div 2a, mod; q2, r2 = 2D's
         lda rrem                   ; the first pixel's line: yt + q + (rem > 0),
         beq :+                     ; and how far short of the next: e = 2a - rem
         lda ra2                    ; (0 if rem = 0)

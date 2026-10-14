@@ -124,7 +124,7 @@ def project(hm, cx, cz):
     return xs, rows
 
 
-TILERND = np.random.default_rng(12345).integers(0, 1 << 16, (MAP, MAP))
+TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC's map: 4 bits a tile)
 
 
 def colour(hm, i, j, row, nrows):

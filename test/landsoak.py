@@ -75,7 +75,8 @@ def machine():
     lab = labels()
     banks = {4: open(os.path.join(B, 'TABLES'), 'rb').read(),
              5: open(os.path.join(B, 'TABLES2'), 'rb').read(),
-             6: open(os.path.join(B, 'SHIPB'), 'rb').read().ljust(0x4000, b'\0')}
+             6: open(os.path.join(B, 'SHIPB'), 'rb').read().ljust(0x4000, b'\0'),
+             7: open(os.path.join(B, 'TABLES7'), 'rb').read()}
     mem = ObservableMemory()
 
     cur = [4]
@@ -143,7 +144,7 @@ def main():
             perr.append(f'np {np_} nr {nr}, want {len(xs)} {len(rows)}')
         else:
             for r, (_, row) in enumerate(rows):
-                got = [(m[0x0700 + 16 * r + i], m[0x0760 + 16 * r + i]) for i in range(np_)]
+                got = [(m[0x0700 + 16 * r + i], m[0x0800 + 16 * r + i]) for i in range(np_)]
                 want = [(sx, sy) for sx, sy, _ in row]
                 if got != want:
                     perr.append(f'row {r}: {got} want {want}')

@@ -44,6 +44,8 @@ XLEFT = 1408              # the left corner's x, 8.8 tiles (5.5), less fx
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 52429              # focal length, 8.8 pixels (204.8 = 256 * 256 / 320)
 HORIZON = 40              # screen y of the horizon
+XC, XR = 126, 252         # screen x of the centre, and the right edge (the last byte
+                          # boundary: the land is drawn in x 0..251)
 # the palette (proto/swatch35.py's numbering): the user's picks
 LAND = [1, 3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
 SEAC = [0, 2, 15, 17]
@@ -105,7 +107,7 @@ def corner(hm, x, z):
 
 
 def clip(row):
-    """The row's points clipped to the screen (x 0..255): the points beyond an edge
+    """The row's points clipped to the screen (x 0..XR): the points beyond an edge
     moved onto it, at the row's y where it crosses it (rounded), so the strips' end
     rungs there are vertical, along the edge."""
     pts = [list(p) for p in row]
@@ -118,13 +120,13 @@ def clip(row):
         for i in range(k):
             pts[i][0], pts[i][1] = 0, yc
     k = len(pts) - 1
-    while pts[k][0] > 255:
+    while pts[k][0] > XR:
         k -= 1
     if k < len(pts) - 1:
         (x0, y0, _), (x1, y1, _) = pts[k], pts[k + 1]
-        yc = y0 + ((y1 - y0) * (255 - x0) * 2 + (x1 - x0)) // (2 * (x1 - x0))
+        yc = y0 + ((y1 - y0) * (XR - x0) * 2 + (x1 - x0)) // (2 * (x1 - x0))
         for i in range(k + 1, len(pts)):
-            pts[i][0], pts[i][1] = 255, yc
+            pts[i][0], pts[i][1] = XR, yc
     return [tuple(p) for p in pts]
 
 
@@ -141,7 +143,7 @@ def project(hm, cx, cz):
         for x in xs:
             h = int(hm[0][z % MAP, x % MAP])
             dx = (x << 8) - cx - 128
-            sx = 128 + ((dx * r + 32768) >> 16)
+            sx = XC + ((dx * r + 32768) >> 16)
             sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))
         rows.append((z, clip(row)))

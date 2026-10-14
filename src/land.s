@@ -64,23 +64,19 @@ BANK    = 4                        ; sideways RAM: the tables
 BANK3   = 6                        ; and the ship's (shipb.s: the keys too)
 B6_KEYS = $8000
 B6_SHIP = $8003
+BANK7   = 7                        ; and the projection (project's)
 BANK2   = 5                        ; and the tiles' colours (project's, a moment)
 
-YSKY    = 68                       ; proto/frame.py's
-YGND    = 143
+                                   ; (YSKY, YGND: proto/frame.py's, tables.inc)
 MARGIN  = 0                        ; (to the byte boundary: the land extents clear the rest)
-ZFARDI  = NDI - 1
 
 ROWA    = $0400
 ROWB    = $0500
 RTBUF   = $0600
-PX      = $0700                    ; the rows', far to near: 16 a row (6 at most)
-PY      = $0760
-CLE     = $0900                    ; the land strips' box bytes: 16 a strip (5)
-CLO     = $0950
-CTC     = $09A0                    ; each box's tile (its middle's)
-CT      = $0A20                    ; the columns': tile, sixteenths
-CQ      = $0A30
+PX      = $0700                    ; the rows', far to near: 16 a row (NZ)
+PY      = $0800
+CLE     = $0900                    ; the land strips' box bytes: 16 a strip (NZ - 1)
+CLO     = $09A0
 TX      = $0A40                    ; the strip's: top row (margins at 0, np+1)
 TY      = $0A50
 BX      = $0A60                    ; bottom row
@@ -95,39 +91,36 @@ SPB     = $0B00                    ; the slow way: each pixel's box at the top
 STL     = $0B10                    ; and transitions (4 a pixel: line, step)
 STD     = $0B20
 GLY     = $1800                    ; the readout's characters: 16 bytes each
-ENTH    = $1700+160-YSKY           ; (lines YSKY..YGND+1 only, after ENTL's)
+ENTL    = $0D00-YSKY               ; each line's entry in STAB (low, high: lines
+ENTH    = $0D60-YSKY               ; YSKY..YGND+1)
 TOPS    = $0C00                    ; by screen, column: the land's highest line last time
 BOTS    = $0C80                    ; and lowest
 CURT    = $0B60                    ; this frame's
 CURB    = $0BA0
 STAB    = $0E00
-LAH     = $1600+160-YSKY           ; each line's 2 * (y >> 3) (lines YSKY..YGND+1)
+LAH     = $16C0-YSKY               ; each line's 2 * (y >> 3) (lines YSKY..YGND+1)
 LAH0    = $1600-YSKY               ; and its address's high byte, screen 0 (left half)
-LAH1    = $1600+80-YSKY            ; screen 1
-ENTL    = $1700
-RZT     = $0B30                    ; the rows': tile, sixteenths, depth index
-RZQ     = $0B38
-RDI     = $0B40
-RML     = $0B48                    ; each row's map row address
-RMH     = $0B50
-PINRX   = $0B58                    ; and its right pinned column's x
+LAH1    = $1660-YSKY               ; screen 1
+        .assert YGND+2-YSKY <= $60, error, "LAH, ENTL: $60 lines each"
+CX      = $0B30                    ; project's: the columns' map x
+PXX     = $0B40                    ; and a clipped row's x's high bytes
 
 SWT     = $9400                    ; init's line tables, in bank 4's free space: two a
                                    ; page, by line (YSKY..YGND+1: no page crossed)
 EXLB    = SWT                      ; run's entries (low), and high by STAB
-LAHSB0  = SWT+$6C                  ; each line's address, high byte: by screen and half
+LAHSB0  = SWT+$60                  ; each line's address, high byte: by screen and half
 LAHSB1  = SWT+$100
-LAHSB2  = SWT+$16C
+LAHSB2  = SWT+$160
 LAHSB3  = SWT+$200
-EXHB0   = SWT+$26C
+EXHB0   = SWT+$260
 EXHB1   = SWT+$300
-EXHB2   = SWT+$36C
+EXHB2   = SWT+$360
 EXHB3   = SWT+$400
-ENTB0   = SWT+$46C                 ; each STAB's ENTH
+ENTB0   = SWT+$460                 ; each STAB's ENTH
 ENTB1   = SWT+$500
-ENTB2   = SWT+$56C
+ENTB2   = SWT+$560
 ENTB3   = SWT+$600
-        .assert YGND+1+$6C < $100, error, "SWT: a line table crosses a page"
+        .assert YGND+1 < YSKY+$60 && YGND+1+$60 < $100, error, "SWT: a line table crosses a page"
 OP_STAY = $99
 OP_LDAZ = $A5
 OP_TXA  = $8A
@@ -503,263 +496,104 @@ init:   lda #0
         rts
 
 ; ---------------------------------------------------------------- project
-; The columns (CT, CQ: tile, sixteenths; np of them), the rows far to near
-; (RZT, RZQ, RDI), then each row's points (PX, PY: 16 a row) and each land
-; strip's boxes' bytes (CLE, CLO: 16 a strip).
-; project's: inner column i's x (vx's top byte, then vx += r << 8; C clear
-; before and after), and its y at an inner row (a whole corner).  X: 16 * row.
-.macro PXI i
-        lda vx+1
-        adc rl
-        sta vx+1
-        lda vx+2
-        sta PX+i,x
-        adc rh
-        sta vx+2
-.endmacro
-.macro PXT_ i                       ; (bank 5) inner column i's x, from PXT
-        ldy #i
-        lda (lp),y
-        sta PX+i,x
+; Lander's block of NX x NZ corners (proto/land.py: project): the columns' map x
+; (CX: cxt - 5 + i), each row's map row (czt + ZBACK - j, far to near); with
+; bank 4 paged, every corner's height (into PY); bank 5, each land strip's boxes'
+; bytes (CLE, CLO: the tile at its left column and near row); bank 7, by the
+; row's depth index (di = 16 (ZBACK - j) - czs - DI0), its y's (SYT7, from the
+; heights) and x's (B0 + i r, its x * 256 for corner i: B0L/H/X, R7L/H), the
+; rows overhanging the screen (CLP) clipped (land.clip).
+        .assert <PY = 0, error, "PY page-aligned"
+cd      = zq                       ; (cyc's)
+cn      = ha
+cdy     = hb
+cpl     = lqx
+cph     = lqx+1
+.macro PH i                         ; (bank 4) corner i's height: PY
+        ldy CX+i
+        lda (hp0),y
+        and #15
+        sta PY+i,x
 .endmacro
 .macro CBOX i                       ; (bank 5) box i's colour: CMAPE, CMAPO
-        ldy CTC+i
+        ldy CX+i
         lda (hp0),y
         sta CLE-16+i,x
         lda (hp1),y
         sta CLO-16+i,x
 .endmacro
-.macro PYI i
-        ldy CT+i
-        lda (hp0),y
-        and #15
-        tay
+.macro PYS i                        ; (bank 7) corner i's y: SYT7 by its height
+        ldy PY+i,x
         lda (syp),y
         sta PY+i,x
 .endmacro
+.macro PXS i                        ; (bank 7) corner i's x (B's high byte, in A),
+        sta PX+i,x                  ; then B += r (C clear: no row overflows here)
+        tay
+        lda vx
+        adc rl
+        sta vx
+        tya
+        adc rh
+.endmacro
 
 project:
-        ldy cxs                    ; the columns (landgen's COLO, COLQ, NPT)
-        lda NPT,y
+        lda #NX                    ; (always: the strips' np, nr)
         sta np
-        tax                        ; (the rows' right pinned column: np - 1)
-        dex
-        stx @pxr+1
-        stx @pyc+1
-        stx @zc+1
-        txa
-        clc
-        adc #<PY
-        sta @pyr+1
-        tya
-        asl a
-        asl a
-        asl a
-        asl a
-        tay
-        lda COLQ,y                 ; (both pinned columns' sixteenths)
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta lqx
-        lda #>LERPQ
-        adc #0
-        sta lqx+1                  ; (C clear: LERPQ's page + 1 < $100)
-        ldx #0
-:       lda COLO,y                 ; (C clear, then X < np)
-        adc cxt
-        and #63
-        sta CT,x
-        iny
-        inx
-        cpx np
-        bne :-
-        ldy czs                    ; the rows, far to near (ROWO, ROWQ, ROWD, NRT)
-        lda NRT,y
+        lda #NZ
         sta nr
-        tya
-        asl a
-        asl a
-        asl a
-        tay
+        lda cxt                    ; the columns' map x
+        sec
+        sbc #5
         ldx #0
-:       lda ROWO,y                 ; (C clear: czs < 16, then X < nr)
-        adc czt
-        and #63
-        sta RZT,x
-        lda ROWQ,y
-        sta RZQ,x
-        lda ROWD,y
-        sta RDI,x
-        iny
+:       and #63
+        sta CX,x
+        clc
+        adc #1
         inx
-        cpx nr
+        cpx #NX
         bne :-
-        lda #0
-        sta pr
-@row:   ldx pr                     ; a row: its map rows, SYT's, LERPQ's
-        ldy RZT,x
+        ldx #0                     ; (bank 4) each row's heights
+        stx pr
+@h:     lda czt
+        clc
+        adc #ZBACK
+        sec
+        sbc pr
+        and #63
+        tay
         lda MRL,y
         sta hp0
-        sta RML,x
         lda MRH,y
         sta hp0+1
-        sta RMH,x
-        iny
-        tya
-        and #63
-        tay
-        lda MRL,y
-        sta hp1
-        lda MRH,y
-        sta hp1+1
-        lda RZQ,x
-        sta zq
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta lqz
-        lda #>LERPQ
-        adc #0
-        sta lqz+1
-        ldy RDI,x                  ; di
-        lda SYPL,y
-        sta syp
-        lda SYPH,y
-        sta syp+1
-        txa
-        asl a
-        asl a
-        asl a
-        asl a
-        tax                        ; (X: 16 * row, throughout)
-        stx tmp
-        lda PINL,y                 ; its pinned columns' x (the inner ones' from
-        sta PX,x                   ; bank 5, after)
-        lda PINR,y
-        ldy pr
-        sta PINRX,y                ; (into PX: @ix's)
-@py:    ldy #0                     ; its y: the pinned columns' (interpolated)
-        jsr pinc
-        tay
-        lda (syp),y
-        sta PY,x
-@pyc:   ldy #0                     ; (np - 1: project's)
-        jsr pinc
-        tay
-        lda (syp),y
-@pyr:   sta PY,x                   ; (PY + np - 1: project's)
-        lda zq                     ; then the inner ones: whole corners
-        bne @zr
-        PYI 1
-        PYI 2
-        PYI 3
-        PYI 4
-        PYI 5
-        PYI 6
-        lda np
-        cmp #9
-        bne @nx
-        PYI 7
-@nx:    inc pr
-        lda pr
-        cmp nr
-        beq @col
-        jmp @row
-@zr:    txa                        ; (a pinned row: interpolated down; X: the
-        clc                        ; column, PY's store row X's: 16 * row + PY
-        adc #<PY                   ; < 256; @zc: project's np - 1)
-        sta @zs+1
-        ldx #1
-:       ldy CT,x
+        stx @ph+1                  ; (PY + 16 j: PY page-aligned)
+        ldx #NX-1
+:       ldy CX,x
         lda (hp0),y
         and #15
-        sta ha
-        lda (hp1),y
-        and #15                    ; (lerpz; C clear: the adc #<PY, or the
-        adc #13                    ; bcc)
-        sbc ha
-        tay
-        lda (lqz),y                ; (C set: heights 0..HMAX, HMAX <= 12)
-        adc ha                     ; (LERPQ: less 1)
-        tay
-        lda (syp),y
-@zs:    sta PY,x
-        inx
-@zc:    cpx #0
-        bcc :-
-        ldx tmp
-        jmp @nx
-@col:   lda #BANK2                 ; bank 5: each row's inner columns' x (PXT)
-        sta ROMCOPY
-        sta ROMSEL
-        lda cxs                    ; (16 * cxs < 256)
-        asl a
-        asl a
-        asl a
-        asl a
-        sta @c16+1
-        ldx #0
-        stx pr
-@ix:    lda RDI,x                  ; PXT + di*128 + cxs*8
-        lsr a
-        ora #>PXT                  ; (+: di < 64, >PXT's low 6 bits 0)
-        sta lp+1
-@c16:   lda #0                     ; ((di & 1) << 7) | 8 * cxs
-        ror a
-        sta lp
-        txa
-        asl a
-        asl a
-        asl a
-        asl a
+@ph:    sta PY,x
+        dex
+        bpl :-
+        lda @ph+1
+        clc
+        adc #16
         tax
-        PXT_ 1
-        PXT_ 2
-        PXT_ 3
-        PXT_ 4
-        PXT_ 5
-        PXT_ 6
-        PXT_ 7                     ; (np 8: overwritten by the pinned one, below)
-        ldy pr                     ; the right pinned x
-        lda PINRX,y
-@pxr:   sta PX,x                   ; (PX + np - 1: project's)
-        ldx pr
-        inx
-        stx pr
-        cpx nr
-        bne @ix
-        lda cxs                    ; each box's tile: the one at its middle
-        asl a                      ; (COLC, ROWC: cxt's, czt's on)
-        asl a
-        asl a
-        asl a
-        tay
-        ldx #0
-:       lda COLC,y
+        inc pr
+        lda pr
+        cmp #NZ
+        beq :+
+        jmp @h
+:
+        lda #BANK2                 ; (bank 5) each land strip's boxes: their
+        sta ROMCOPY                ; tiles' bytes, the near row's
+        sta ROMSEL
+        lda #1
+        sta pr
+@cs:    lda czt
         clc
-        adc cxt
-        and #63
-        sta CTC,x
-        iny
-        inx
-        cpx #8
-        bne :-
-        lda #1                     ; each land strip's boxes: their tiles'
-        sta pr                     ; colours (CMAPE, CMAPO), its tile row
-@cs:    lda czs
-        asl a
-        asl a
-        asl a
-        ora pr
-        tay
-        lda ROWC,y
-        clc
-        adc czt
+        adc #ZBACK
+        sec
+        sbc pr
         and #63
         tax
         lsr a
@@ -783,94 +617,278 @@ project:
         asl a
         asl a
         tax                        ; 16 * strip + 16
-        CBOX 0
-        CBOX 1
-        CBOX 2
-        CBOX 3
-        CBOX 4
-        CBOX 5
-        CBOX 6
-        lda np
-        cmp #9
-        bne :+
-        CBOX 7
-:
+        .repeat NX-1, i
+        CBOX i
+        .endrepeat
         inc pr
         lda pr
-        cmp nr
+        cmp #NZ
         beq :+
         jmp @cs
-        .res 4                     ; (the layout kept)
 :
-        lda #BANK
+        lda #BANK7                 ; (bank 7) each row's y's and x's
+        sta ROMCOPY
+        sta ROMSEL
+        lda #0
+        sta pr
+@r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0
+        asl a
+        asl a
+        asl a
+        asl a
+        sta tmp                    ; (16 j: the row's place in PX, PY)
+        lda #ZBACK*16-DI0
+        sec
+        sbc tmp
+        sec
+        sbc czs
+        tay
+        lda R7L,y
+        sta rl
+        lda R7H,y
+        sta rh
+        tya                        ; di * 16: the row's SYT7, and B0's for cxs
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta tmp+1
+        tya
+        asl a
+        asl a
+        asl a
+        asl a
+        sta syp
+        sta lp
+        sta hp0
+        sta hp1
+        lda tmp+1
+        clc
+        adc #>SYT7
+        sta syp+1
+        ldx tmp
+        .repeat NX, i
+        PYS i
+        .endrepeat
+        lda tmp+1
+        clc
+        adc #>CLP
+        sta lp+1
+        lda tmp+1
+        clc
+        adc #>B0L
+        sta hp0+1
+        lda tmp+1
+        clc
+        adc #>B0H
+        sta hp1+1
+        ldy cxs
+        lda (lp),y                 ; clipped?
+        beq :+
+        jmp @clip
+:
+        lda (hp0),y
+        sta vx
+        lda (hp1),y
+        clc
+        .repeat NX, i
+        PXS i
+        .endrepeat
+@nx:    inc pr
+        lda pr
+        cmp #NZ
+        beq :+
+        jmp @r
+:       lda #BANK
         sta ROMCOPY
         sta ROMSEL
         rts
-        .res 6                     ; (spare: keeps the strips' code in place)
+@clip:  jsr clipr
+        jmp @nx
 
-; ha to A by the column's sixteenths (LERPX, inline) or the row's (lerpz, pinc's):
-; land.lerp, by LERPQ.  X kept.
-.macro LERPX
-        clc                        ; (A + 13, C clear: - ha - 1)
-        adc #13
-        sbc ha
-        tay
-        lda (lqx),y                ; (C set: heights 0..HMAX, HMAX <= 12)
-        adc ha                     ; (LERPQ: less 1)
-.endmacro
-        .assert HMAX <= 12, error, "LERPQ's users: A + 12 - ha must not borrow"
-; Pinned column Y's height at the row (across by its sixteenths, and down by
-; the row's if it is pinned too): A.  X kept.
-pinc:   lda CT,y
-        tay
-        lda (hp0),y
-        and #15
-        sta ha
+; A row the screen's edges clip (X: 16 j, Y: cxs; hp0, hp1: its B0L, B0H; its
+; B0X): each corner's x as 9 bits (PX, PXX), then those left of 0 onto 0, those
+; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +
+; floor(((y1 - y0) n 2 + d) / 2d), n the distance to the edge, d the segment's
+; width).
+clipr:  lda (hp0),y
+        sta vx
+        lda (hp1),y
+        sta vx+1
+        lda tmp+1
+        clc
+        adc #>B0X
+        sta hp1+1
+        lda (hp1),y
+        sta vx+2
+        ldy #0
+:       lda vx+1                   ; x's: B >> 8, 9 bits (B += r)
+        sta PX,x
+        lda vx+2
+        sta PXX,y
+        lda vx
+        clc
+        adc rl
+        sta vx
+        lda vx+1
+        adc rh
+        sta vx+1
+        lda vx+2
+        adc #0
+        sta vx+2
+        inx
         iny
-        tya
-        and #63
-        sta xt1
-        tay
-        lda (hp0),y
-        and #15
-        LERPX
-        ldy zq
-        beq @d
-        sta hb
-        ldy xt1
+        cpy #NX
+        bne :-
+        ldx tmp
+        ldy #0                     ; the left edge: the first corner on (x >= 0)
+:       lda PXX,y
+        bpl :+
+        iny
+        bne :-
+:       tya
+        beq @rt
+        sta tj                     ; k
+        clc
+        adc tmp
+        tax                        ; X: 16 j + k
+        lda PX,x                   ; d = x1 - x0 (x0 < 0)
+        sec
+        sbc PX-1,x
+        sta cd
+        lda PX-1,x                 ; n = -x0
+        eor #$FF
+        clc
+        adc #1
+        sta cn
+        lda PY,x                   ; dy = y1 - y0
+        sec
+        sbc PY-1,x
+        jsr cyc
+        sta cdy
+        lda tj
+        clc
+        adc tmp
+        tax
+        lda cdy
+        clc
+        adc PY-1,x                 ; yc
+        ldy tj                     ; corners 0..k-1 onto (0, yc)
+        ldx tmp
+:       sta PY,x
+        lda #0
+        sta PX,x
+        lda PY,x
+        inx
         dey
+        bne :-
+@rt:    ldy #NX-1                  ; the right edge: the last corner on (x <= XR)
+:       lda PXX,y
+        bne :+
         tya
-        and #63
-        tay
-        lda (hp1),y
-        and #15
-        sta ha
-        ldy xt1
-        lda (hp1),y
-        and #15
-        LERPX
-        clc                        ; (lerpz, inline: hb to A)
-        adc #13
-        sbc hb
-        tay
-        lda (lqz),y                ; (C set)
-        adc hb
+        clc
+        adc tmp
+        tax
+        lda PX,x
+        cmp #XR+1
+        bcc :++
+:       dey
+        bpl :--
+:       cpy #NX-1
+        beq @d
+        sty tj                     ; k
+        tya
+        clc
+        adc tmp
+        tax                        ; X: 16 j + k
+        lda PX+1,x                 ; d = x1 - x0 (x1 > XR: 9 bits)
+        sec
+        sbc PX,x
+        sta cd
+        lda #XR                    ; n = XR - x0
+        sec
+        sbc PX,x
+        sta cn
+        lda PY+1,x
+        sec
+        sbc PY,x
+        jsr cyc
+        sta cdy
+        lda tj
+        clc
+        adc tmp
+        tax
+        lda cdy
+        clc
+        adc PY,x                   ; yc
+        ldy tj                     ; corners k+1..NX-1 onto (XR, yc)
+:       iny
+        cpy #NX
+        beq @d
+        inx
+        sta PY,x
+        pha
+        lda #XR
+        sta PX,x
+        pla
+        bne :-                     ; (yc > 0)
 @d:     rts
 
-; The map's row A (mod 64): its address in (X, Y).
-maprow: and #63
-        pha
-        lsr a
-        lsr a
+; floor((A n 2 + d) / 2d), A signed (dy), n = cn, d = cd (1..127): A.  The
+; product by adding, the quotient by subtracting (both small).
+cyc:    sta cdy
+        lda #0
+        sta cpl
+        sta cph
+        ldy cn
+        beq @m
+@a:     lda cdy                    ; + dy, n times (16 bits, signed)
+        bpl :+
+        dec cph
+:       clc
+        adc cpl
+        sta cpl
+        bcc :+
+        inc cph
+:       dey
+        bne @a
+@m:     asl cpl                    ; * 2, + d
+        rol cph
+        lda cpl
         clc
-        adc #>MAP
-        tay
-        pla
-        and #3
-        lsr a
-        ror a
-        ror a                      ; (A & 3) << 6
+        adc cd
+        sta cpl
+        bcc :+
+        inc cph
+:       lda cd                     ; 2d
+        asl a
+        sta cd
+        ldy #0                     ; floor(N / 2d): N >= 0 by subtracting; N < 0
+        lda cph                    ; by adding (q from 0 down)
+        bmi @n
+@p:     lda cpl
+        sec
+        sbc cd
         tax
+        lda cph
+        sbc #0
+        bcc @pq
+        sta cph
+        stx cpl
+        iny
+        bne @p
+@pq:    tya
+        rts
+@n:     dey                        ; N + 2d (q - 1) until N >= 0
+        lda cpl
+        clc
+        adc cd
+        sta cpl
+        lda cph
+        adc #0
+        sta cph
+        bmi @n
+        tya
         rts
 
 ; ---------------------------------------------------------------- strips
@@ -1149,7 +1167,8 @@ traceb: lda bota+1
         bcs :+
         sta tcnt
 :       tya
-        adc np                     ; (C clear)
+        clc
+        adc np
         tay
         lda PX-1,y
         adc #3
@@ -1312,9 +1331,11 @@ fl_3:   sta ROWB+3,x
         inx
         inx
         inx
+        cpx #4                     ; (wrapped: done)
+        bcc :+
         cpx fe
         bcc fl_0
-        ldx fe
+:       ldx fe
 t_back:                            ; (the fills' way back: X the run's end)
 t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         dey
@@ -2137,9 +2158,9 @@ sethalf:
         sta r_eh2+2
         lda #OP_STAY               ; run2's RTSes back (its pages change)
         ldx rE+1
-sh_1:   sta $9C00,x
+sh_1:   sta TPE0*256,x
         ldx rO+1
-sh_2:   sta $A100,x
+sh_2:   sta TPO0*256,x
         sty pY+1                   ; (none planted: Y < YSKY)
         lda tpe,y
         sta pr0+2
@@ -2164,8 +2185,8 @@ sh_2:   sta $A100,x
         sta np_h2+2
         sta rc_h+2
         rts
-tpe:    .byte $9C, $9E, $9F, $A0     ; (tools/landgen.py's TPE, TPO)
-tpo:    .byte $A1, $A2, $BD, $93
+tpe:    .byte TPE0, TPE1, TPE2, TPE3 ; (tools/landgen.py's)
+tpo:    .byte TPO0, TPO1, TPO2, TPO3
 exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3)
 exhh:   .byte >(EXHB0), >(EXHB1), >(EXHB2), >(EXHB3)
 lahsl:  .byte <(LAHSB0), <(LAHSB1), <(LAHSB2), <(LAHSB3)
@@ -3024,8 +3045,12 @@ tcol:   .res 1
 ; palette, the readout's characters, the screen narrowed; then LAND's `go`
 ; (whose init clears the screens, this with them).
         .segment "BOOT"
-start:  ldx #<cmd_load3             ; SHIPB to bank 6, TABLES2 to bank 5,
-        ldy #>cmd_load3            ; TABLES to bank 4 (by $3000)
+start:  ldx #<cmd_load7             ; TABLES7 to bank 7, SHIPB to bank 6,
+        ldy #>cmd_load7            ; TABLES2 to bank 5, TABLES to bank 4
+        lda #BANK7
+        jsr ldbank
+        ldx #<cmd_load3
+        ldy #>cmd_load3            ; (each by $3000)
         lda #BANK3
         jsr ldbank
         ldx #<cmd_load2
@@ -3058,6 +3083,7 @@ start:  ldx #<cmd_load3             ; SHIPB to bank 6, TABLES2 to bank 5,
 
 cmd_load: .byte "LOAD TABLES 3000", 13
 cmd_load3: .byte "LOAD SHIPB 3000", 13
+cmd_load7: .byte "LOAD TABLES7 3000", 13
 cmd_load2: .byte "LOAD TABLES2 3000", 13
 
 ; *LOAD (X, Y: the command) to $3000, then the 16K there to bank A (which is

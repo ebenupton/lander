@@ -78,6 +78,7 @@ PX      = $0700                    ; the rows', far to near: 16 a row (6 at most
 PY      = $0760
 CLE     = $0900                    ; the land strips' box bytes: 16 a strip (5)
 CLO     = $0950
+CTC     = $09A0                    ; each box's tile (its middle's)
 CT      = $0A20                    ; the columns': tile, sixteenths
 CQ      = $0A30
 TX      = $0A40                    ; the strip's: top row (margins at 0, np+1)
@@ -246,38 +247,9 @@ mo:     .res 1
 
         .code
 ; ---------------------------------------------------------------- start
-        .assert * = $1900, error, "start must be first: *RUN enters at $1900"
-start:  ldx #<cmd_load3             ; SHIPB to bank 6, TABLES2 to bank 5,
-        ldy #>cmd_load3            ; TABLES to bank 4 (by $3000)
-        lda #BANK3
-        jsr ldbank
-        ldx #<cmd_load2
-        ldy #>cmd_load2
-        lda #BANK2
-        jsr ldbank
-        ldx #<cmd_load
-        ldy #>cmd_load
-        lda #BANK
-        jsr ldbank
-        lda #119                   ; close !BOOT (an EXEC file): the filing
-        jsr OSBYTE                 ; system's workspace is then ours
-        ldx #0                     ; the palette (!BOOT has set MODE 1)
-:       lda vdu_init,x
-        jsr OSWRCH
-        inx
-        cpx #vdu_end-vdu_init
-        bne :-
-        jsr glyphs
-        ldx #0                     ; narrow the screen: 64 bytes by 20 rows
-:       lda crtc_regs,x
-        sta CRTC_IDX
-        lda crtc_regs+1,x
-        sta CRTC_DAT
-        inx
-        inx
-        cpx #crtc_end-crtc_regs
-        bne :-
-        jsr init
+; (LANDS, at $7000, has loaded the banks and set the screen up: it ends here.)
+        .assert * = $1900, error, "go must be first"
+go:     jsr init
         sei                        ; count vertical syncs (event 4)
         lda #<vsync
         sta EVNTV
@@ -323,53 +295,6 @@ call6:  sta @j+1
         sta ROMCOPY
         sta ROMSEL
         rts
-
-cmd_load: .byte "LOAD TABLES 3000", 13
-cmd_load3: .byte "LOAD SHIPB 3000", 13
-cmd_load2: .byte "LOAD TABLES2 3000", 13
-
-; *LOAD (X, Y: the command) to $3000, then the 16K there to bank A (which is
-; left paged in).
-ldbank: pha
-        jsr OSCLI
-        pla
-        sei
-        sta ROMCOPY
-        sta ROMSEL
-        cli
-        lda #$30
-        sta ptr+1
-        lda #$80
-        sta tmp+1
-        ldy #0
-        sty ptr
-        sty tmp
-        ldx #$40
-:       lda (ptr),y
-        sta (tmp),y
-        iny
-        bne :-
-        inc ptr+1
-        inc tmp+1
-        dex
-        bne :-
-        rts
-
-vdu_init:
-        .byte 19, 1, 6, 0, 0, 0
-        .byte 19, 2, 5, 0, 0, 0
-        .byte 19, 3, 3, 0, 0, 0
-vdu_end:
-
-crtc_regs:
-        .byte 1, 64                ; displayed characters
-        .byte 2, 90                ; hsync, to centre the 64
-        .byte 6, 20                ; displayed rows
-        .byte 7, 28                ; vsync, to centre the 20
-        .byte 12, >($3000/8)
-        .byte 13, <($3000/8)
-        .byte 10, $20              ; cursor off
-crtc_end:
 
 ; Show the screen just drawn (from the next frame), and draw the other.
 flip:   lda #12
@@ -598,7 +523,7 @@ init:   lda #0
         sta PX+i,x
 .endmacro
 .macro CBOX i                       ; (bank 5) box i's colour: CMAPE, CMAPO
-        ldy CT+i
+        ldy CTC+i
         lda (hp0),y
         sta CLE-16+i,x
         lda (hp1),y
@@ -808,18 +733,50 @@ project:
         stx pr
         cpx nr
         bne @ix
+        lda cxs                    ; each box's tile: the one at its middle
+        asl a                      ; (COLC, ROWC: cxt's, czt's on)
+        asl a
+        asl a
+        asl a
+        tay
+        ldx #0
+:       lda COLC,y
+        clc
+        adc cxt
+        and #63
+        sta CTC,x
+        iny
+        inx
+        cpx #8
+        bne :-
         lda #1                     ; each land strip's boxes: their tiles'
-        sta pr                     ; colours (CMAPE, CMAPO), the tile row its
-@cs:    ldx pr                     ; bottom row's
-        lda RML,x
+        sta pr                     ; colours (CMAPE, CMAPO), its tile row
+@cs:    lda czs
+        asl a
+        asl a
+        asl a
+        ora pr
+        tay
+        lda ROWC,y
+        clc
+        adc czt
+        and #63
+        tax
+        lsr a
+        lsr a
+        ora #>CMAPE                ; (CMAPE: $8000, 64 a row)
+        sta hp0+1
+        ora #>CMAPO
+        sta hp1+1
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
         sta hp0
         sta hp1
-        lda RMH,x
-        clc
-        adc #>(CMAPE-MAP)
-        sta hp0+1
-        adc #>(CMAPO-CMAPE)
-        sta hp1+1
         lda pr
         asl a
         asl a
@@ -2970,54 +2927,9 @@ PIXM:   .byte $88, $44, $22, $11
 ; At each flip: the vertical syncs since the last (dvs, the last 8); the
 ; readout: 400 / their sum, frames a second, to a tenth (FPSL, FPSH: 4000 /
 ; sum), at the top left.
-glyphs: ldx #0                     ; each character's 8 lines, as MODE 1
-@c:     stx tcol                   ; bytes in colour 3: left 4 pixels, right 4
-        lda gchars,x
-        sta oswblk
-        lda #10
-        ldx #<oswblk
-        ldy #>oswblk
-        jsr OSWORD
-        lda tcol
-        asl a
-        asl a
-        asl a
-        asl a
-        tax
-        ldy #0
-@l:     lda oswblk+1,y
-        and #$F0
-        sta tmp
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora tmp
-        sta GLY,x
-        lda oswblk+1,y
-        and #$0F
-        sta tmp
-        asl a
-        asl a
-        asl a
-        asl a
-        ora tmp
-        sta GLY+8,x
-        inx
-        iny
-        cpy #8
-        bne @l
-        ldx tcol
-        inx
-        cpx #gchars_end-gchars
-        bne @c
-        rts
-gchars: .byte "0123456789. FPS"
-gchars_end:
-G_DOT   = 10
-G_SP    = 11
+G_DOT   = 10                       ; (the readout's characters, GLY: LANDS's
+G_SP    = 11                       ; glyphs makes them)
 G_F     = 12
-oswblk: .res 9
 
 readout:
         ldx #7                     ; the sum
@@ -3105,3 +3017,135 @@ vlast:  .res 1
 tcol:   .res 1
 
         .assert * <= $3000, error, "code over the screen"
+
+; ---------------------------------------------------------------- LANDS
+; LANDS: the start, run once from $7000 (!BOOT: *LOAD LAND, *RUN LANDS): the
+; banks loaded (each file *LOADed to $3000, below this, and copied), the
+; palette, the readout's characters, the screen narrowed; then LAND's `go`
+; (whose init clears the screens, this with them).
+        .segment "BOOT"
+start:  ldx #<cmd_load3             ; SHIPB to bank 6, TABLES2 to bank 5,
+        ldy #>cmd_load3            ; TABLES to bank 4 (by $3000)
+        lda #BANK3
+        jsr ldbank
+        ldx #<cmd_load2
+        ldy #>cmd_load2
+        lda #BANK2
+        jsr ldbank
+        ldx #<cmd_load
+        ldy #>cmd_load
+        lda #BANK
+        jsr ldbank
+        lda #119                   ; close !BOOT (an EXEC file): the filing
+        jsr OSBYTE                 ; system's workspace is then ours
+        ldx #0                     ; the palette (!BOOT has set MODE 1)
+:       lda vdu_init,x
+        jsr OSWRCH
+        inx
+        cpx #vdu_end-vdu_init
+        bne :-
+        jsr glyphs
+        ldx #0                     ; narrow the screen: 64 bytes by 20 rows
+:       lda crtc_regs,x
+        sta CRTC_IDX
+        lda crtc_regs+1,x
+        sta CRTC_DAT
+        inx
+        inx
+        cpx #crtc_end-crtc_regs
+        bne :-
+        jmp go
+
+cmd_load: .byte "LOAD TABLES 3000", 13
+cmd_load3: .byte "LOAD SHIPB 3000", 13
+cmd_load2: .byte "LOAD TABLES2 3000", 13
+
+; *LOAD (X, Y: the command) to $3000, then the 16K there to bank A (which is
+; left paged in).
+ldbank: pha
+        jsr OSCLI
+        pla
+        sei
+        sta ROMCOPY
+        sta ROMSEL
+        cli
+        lda #$30
+        sta ptr+1
+        lda #$80
+        sta tmp+1
+        ldy #0
+        sty ptr
+        sty tmp
+        ldx #$40
+:       lda (ptr),y
+        sta (tmp),y
+        iny
+        bne :-
+        inc ptr+1
+        inc tmp+1
+        dex
+        bne :-
+        rts
+
+vdu_init:
+        .byte 19, 1, 6, 0, 0, 0
+        .byte 19, 2, 5, 0, 0, 0
+        .byte 19, 3, 3, 0, 0, 0
+vdu_end:
+
+crtc_regs:
+        .byte 1, 64                ; displayed characters
+        .byte 2, 90                ; hsync, to centre the 64
+        .byte 6, 20                ; displayed rows
+        .byte 7, 28                ; vsync, to centre the 20
+        .byte 12, >($3000/8)
+        .byte 13, <($3000/8)
+        .byte 10, $20              ; cursor off
+crtc_end:
+
+glyphs: ldx #0                     ; each character's 8 lines, as MODE 1
+@c:     stx tcol                   ; bytes in colour 3: left 4 pixels, right 4
+        lda gchars,x
+        sta oswblk
+        lda #10
+        ldx #<oswblk
+        ldy #>oswblk
+        jsr OSWORD
+        lda tcol
+        asl a
+        asl a
+        asl a
+        asl a
+        tax
+        ldy #0
+@l:     lda oswblk+1,y
+        and #$F0
+        sta tmp
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora tmp
+        sta GLY,x
+        lda oswblk+1,y
+        and #$0F
+        sta tmp
+        asl a
+        asl a
+        asl a
+        asl a
+        ora tmp
+        sta GLY+8,x
+        inx
+        iny
+        cpy #8
+        bne @l
+        ldx tcol
+        inx
+        cpx #gchars_end-gchars
+        bne @c
+        rts
+gchars: .byte "0123456789. FPS"
+gchars_end:
+oswblk: .res 9
+

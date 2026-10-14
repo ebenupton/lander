@@ -33,7 +33,7 @@ def strips_of(hm, cx, cz, m=M):
     xs, rows = L.project(hm, cx, cz)
     pts = [[(sx, sy) for sx, sy, _ in row] for _, row in rows]
     n = len(xs) - 1
-    cols = [[L.colour(hm, x >> 8, rows[k + 1][0] >> 8, 0, 0) for x in xs[:-1]]
+    cols = [[L.colour(hm, L.mid(x, x1), L.mid(rows[k][0], rows[k + 1][0]), 0, 0) for x, x1 in zip(xs, xs[1:])]
             for k in range(len(rows) - 1)]
     sky = [(x, YSKY) for x, _ in pts[0]]
     gnd = [(x, YGND) for x, _ in pts[-1]]

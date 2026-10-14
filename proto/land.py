@@ -135,6 +135,12 @@ def project(hm, cx, cz):
 TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC's map: 4 bits a tile)
 
 
+def mid(a, b):
+    """The tile at the middle of a to b (8.8): a cell's tile, the one covering most of
+    it (a cell merged with a sliver next to a pinned edge takes the larger tile's)."""
+    return ((a + b) >> 1) >> 8
+
+
 def colour(hm, i, j, row, nrows):
     """A tile's palette entry (swatch35 numbering): a random pick, fixed per tile (the
     BBC's map holds it), from the sea set if both its front corners are at sea level,
@@ -158,7 +164,7 @@ def frame(hm, cx, cz):
         if not S.ok(t, b):
             bad += 1
             continue
-        cols = [colour(hm, (x >> 8), (z1 >> 8), k + 1, len(rows) - 1) for x in xs[:-1]]
+        cols = [colour(hm, mid(x, x1), mid(z0, z1), k + 1, len(rows) - 1) for x, x1 in zip(xs, xs[1:])]
         m = S.mask(t, b)
         img[m >= 0] = np.array(cols)[m[m >= 0]] + 1
     return img, bad, len(rows) - 1

@@ -161,7 +161,8 @@ def build():
 
 def build2():
     """Bank 5: each tile's colour (land.colour: the sea set if both its front
-    corners are at sea level), as its dither's bytes: CMAPE, CMAPO + z*64 + x."""
+    corners are at sea level), as its dither's bytes: CMAPE, CMAPO + z*64 + x; and
+    which tile colours each box (COLC, ROWC: land.mid's, the tile at its middle)."""
     img = bytearray(0x4000)
     hm = L.heightmap()
     for z in range(L.MAP):
@@ -176,10 +177,18 @@ def build2():
             for i in range(1, len(xs) - 1):
                 img[ADDR2['PXT'] - BASE + di * 128 + cxs * 8 + i] = \
                     128 + (((xs[i] - 16 * cxs) * r + 32768) >> 16)
+    for cxs in range(16):                   # COLC + cxs*16 + i: box i's tile (from
+        xs = L.grid_lines(16 * cxs - L.W, 16 * cxs + L.W, L.XGAP)   # cxt): its middle's
+        for i in range(len(xs) - 1):
+            img[ADDR2['COLC'] - BASE + cxs * 16 + i] = L.mid(xs[i], xs[i + 1]) & 255
+    for czs in range(16):                   # ROWC + czs*8 + r: land strip r's tile row
+        zs = L.grid_lines(16 * czs + L.ZNEAR, 16 * czs + L.ZFAR, L.ZGAP)[::-1]
+        for r in range(1, len(zs)):         # (from czt): its middle's
+            img[ADDR2['ROWC'] - BASE + czs * 8 + r] = L.mid(zs[r - 1], zs[r]) & 255
     return img
 
 
-ADDR2 = dict(CMAPE=0x8000, CMAPO=0x9000, PXT=0xA000)
+ADDR2 = dict(CMAPE=0x8000, CMAPO=0x9000, PXT=0xA000, COLC=0xBC80, ROWC=0xBD80)
 
 
 def main():

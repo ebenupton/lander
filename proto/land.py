@@ -47,7 +47,7 @@ XCLIP = 1152              # the clip planes in x, 8.8 tiles from the camera eith
 ZCLIP = 10                # the near clip plane's depth, tiles (the ship's 15, less 5)
                           # (always on)
 ZFCLIP = 16               # the far clip plane's depth, tiles (the near's, and 6)
-FON = False               # the far clip on (the BBC: SPACE toggles it)
+FON = True                # the far clip on (always)
 ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)

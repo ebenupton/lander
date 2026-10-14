@@ -104,7 +104,7 @@ LAH1    = $1660-YSKY               ; screen 1
         .assert YGND+2-YSKY <= $60, error, "LAH, ENTL: $60 lines each"
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
-ZCF     = $07D0                    ; the far clip on (1; SPACE toggles it)
+ZCF     = $07D0                    ; the far clip on (1: always, init's)
 ZB      = $07D1                    ; project's: ZBACK less the first row's j, the
 RN      = $07D2                    ; near clip's row (j ZBACK - ZCLIP, less it), the
 DIB     = $07D3                    ; first row's di (less 16 j, czs), and the far
@@ -270,7 +270,6 @@ go:     jsr init
 
 loop:   lda #<B6_KEYS              ; (bank 6: the keys, the ship's controls)
         jsr call6
-        jsr space                  ; SPACE: the far clip on or off
         jsr project
         jsr strips                 ; (waiting for the flip before drawing)
         jsr readout
@@ -281,34 +280,6 @@ vsync:  php
         inc vcount
         plp
         rts
-
-; SPACE (read directly, the system VIA's auto-scan off a moment): the far clip
-; (ZCF) on or off as it goes down (down now, not last time).
-space:  sei
-        lda #$7F
-        sta $FE43
-        lda #3
-        sta $FE40
-        lda #$62                   ; (SPACE)
-        sta $FE4F
-        lda $FE4F
-        and #$80
-        tax
-        lda #$0B
-        sta $FE40
-        cli
-        txa
-        eor spcl
-        stx spcl
-        sta tmp
-        txa
-        and tmp
-        beq :+
-        lda ZCF
-        eor #1
-        sta ZCF
-:       rts
-spcl:   .byte 0                    ; (SPACE last time: bit 7)
 
 ; Bank 6's routine at $8000 + A (B6_KEYS or B6_SHIP), bank 4 paged back after.
 call6:  sta @j+1
@@ -362,8 +333,9 @@ setback:
 ; ---------------------------------------------------------------- init
 ; (no OS calls: the soak test runs it.)  Both screens black; STAB; ENTL, ENTH;
 ; LAH; the camera.
-init:   lda #0
-        sta ZCF                    ; (the near clip off)
+init:   lda #1                     ; (the far clip on: always)
+        sta ZCF
+        lda #0
         tay
         sta ptr
         ldx #$30

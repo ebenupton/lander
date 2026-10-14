@@ -7,8 +7,7 @@ against proto/frame.py's (the frame alone on black), byte for byte.
                                      also draws the ship (bank 6's B6_SHIP), at a random
                                      orientation and place, and the screen must be the
                                      land with tools/shipgen.py's ship over it; shipc:
-                                     the same, the ship near where LAND keeps it; fclip:
-                                     the far clip on; ftoggle: on and off every 5 frames)
+                                     the same, the ship near where LAND keeps it)
 
 build/land/LAND at $1900 and TABLES at $8000 (bank 4, as LAND pages it); init once,
 then each frame: the camera set, project, strips, flip (both screens in turn, so
@@ -105,8 +104,7 @@ def main():
     step = int(sys.argv[3]) if len(sys.argv) > 3 else 2
     ship = 'ship' in sys.argv[4:] or 'shipc' in sys.argv[4:]
     near = 'shipc' in sys.argv[4:]
-    L.FON = 'fclip' in sys.argv[4:]                  # the far clip (LAND's ZCF)
-    ftog = 'ftoggle' in sys.argv[4:]                 # (on and off every 5 frames)
+
     mpu, lab = machine()
     lab6 = labels('shipb_labels.txt')
     hm = L.heightmap()
@@ -126,9 +124,6 @@ def main():
         m[lab['czt']], m[lab['czs']] = (cz >> 8) & 63, (cz >> 4) & 15
         scr = 0x3000 if m[lab['back']] == 0 else 0x5800
         m[lab['vcount']] = (m[lab['vflip']] + 1) & 255     # (a vertical sync since the flip)
-        if ftog and f % 5 == 0:
-            L.FON = not L.FON
-        m[0x07D0] = 1 if L.FON else 0                       # (land.s's ZCF)
         for r in ('project', 'strips'):
             cyc[r].append(call(mpu, lab[r]))
         if ship:

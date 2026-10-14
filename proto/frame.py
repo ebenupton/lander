@@ -20,7 +20,7 @@ import strip as S
 
 STEP = 1                  # the most steps a frame the pan moves
 M = 8                    # the margin boxes' width, pixels
-YSKY, YGND = 64, 157      # the sky's and the ground's flat rows
+YSKY, YGND = 64, 159      # the sky's and the ground's flat rows (YGND: the screen's last)
 BLACK = 34                # swatch35's K4
 
 

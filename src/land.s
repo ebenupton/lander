@@ -92,16 +92,16 @@ STL     = $0B10                    ; and transitions (4 a pixel: line, step)
 STD     = $0B20
 GLY     = $1800                    ; the readout's characters: 16 bytes each
 ENTL    = $0D00-YSKY               ; each line's entry in STAB (low, high: lines
-ENTH    = $0D60-YSKY               ; YSKY..YGND+1)
+ENTH    = $0D61-YSKY               ; YSKY..YGND+1, 97 each)
 TOPS    = $0C00                    ; by screen, column: the land's highest line last time
 BOTS    = $0C80                    ; and lowest
 CURT    = $0B60                    ; this frame's
 CURB    = $0BA0
 STAB    = $0E00
-LAH     = $16C0-YSKY               ; each line's 2 * (y >> 3) (lines YSKY..YGND+1)
+LAH     = $16C2-YSKY               ; each line's 2 * (y >> 3) (lines YSKY..YGND+1)
 LAH0    = $1600-YSKY               ; and its address's high byte, screen 0 (left half)
-LAH1    = $1660-YSKY               ; screen 1
-        .assert YGND+2-YSKY <= $60, error, "LAH, ENTL: $60 lines each"
+LAH1    = $1661-YSKY               ; screen 1
+        .assert YGND+2-YSKY <= 97, error, "LAH, ENTL: 97 lines each"
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
 ZCF     = $07D0                    ; the far clip on (1: always, init's)
@@ -111,21 +111,23 @@ DIB     = $07D3                    ; first row's di (less 16 j, czs), and the fa
 FACT    = $07D4                    ; clip's row (1: row 0, from the rows either side)
 
 SWT     = $9400                    ; init's line tables, in bank 4's free space: two a
-                                   ; page, by line (YSKY..YGND+1: no page crossed)
-EXLB    = SWT                      ; run's entries (low), and high by STAB
-LAHSB0  = SWT+$60                  ; each line's address, high byte: by screen and half
-LAHSB1  = SWT+$100
-LAHSB2  = SWT+$160
-LAHSB3  = SWT+$200
-EXHB0   = SWT+$260
-EXHB1   = SWT+$300
-EXHB2   = SWT+$360
-EXHB3   = SWT+$400
-ENTB0   = SWT+$460                 ; each STAB's ENTH
-ENTB1   = SWT+$500
-ENTB2   = SWT+$560
-ENTB3   = SWT+$600
-        .assert YGND+1 < YSKY+$60 && YGND+1+$60 < $100, error, "SWT: a line table crosses a page"
+                                   ; page, by line (YSKY..YGND+1, 97 lines): one at
+                                   ; its page's start (its base before the page: a
+                                   ; read crosses it, a cycle more), one 97 on (none)
+EXLB    = SWT+97-YSKY              ; run's entries (low), and high by STAB
+LAHSB0  = SWT+$100+97-YSKY         ; each line's address, high byte: by screen and half
+LAHSB1  = SWT+$200+97-YSKY
+LAHSB2  = SWT+$300+97-YSKY
+LAHSB3  = SWT+$400+97-YSKY
+EXHB0   = SWT+$400-YSKY
+EXHB1   = SWT+$500-YSKY
+EXHB2   = SWT+$500+97-YSKY
+EXHB3   = SWT+$600+97-YSKY
+ENTB0   = SWT-YSKY                 ; each STAB's ENTH
+ENTB1   = SWT+$100-YSKY
+ENTB2   = SWT+$200-YSKY
+ENTB3   = SWT+$300-YSKY
+        .assert YGND+2-YSKY <= 97 && 97+YGND+1-YSKY < $100, error, "SWT: a line table crosses its page"
 OP_STAY = $99
 OP_LDAZ = $A5
 OP_TXA  = $8A

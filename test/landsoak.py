@@ -2,7 +2,8 @@
 """Run LAND's own code in py65 for many frames, panning, and check each frame's screen
 against proto/frame.py's (the frame alone on black), byte for byte.
 
-    python3 test/landsoak.py [frames] [seed]
+    python3 test/landsoak.py [frames] [seed] [step]   (step: the most a frame pans, in
+                                                     sixteenths of a tile; default 2)
 
 build/land/LAND at $1900 and TABLES at $8000 (bank 4, as LAND pages it); init once,
 then each frame: the camera set, project, strips, flip (both screens in turn, so
@@ -65,6 +66,7 @@ def screen_bytes(img):
 def main():
     frames = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     rng = np.random.default_rng(int(sys.argv[2]) if len(sys.argv) > 2 else 1)
+    step = int(sys.argv[3]) if len(sys.argv) > 3 else 2
     lab = labels()
     mpu = MPU()
     code = open(os.path.join(B, 'LAND'), 'rb').read()
@@ -79,8 +81,8 @@ def main():
     fails = 0
     for f in range(frames):
         if f:
-            cx += 16 * int(rng.integers(-2, 3))
-            cz += 16 * int(rng.integers(-2, 3))
+            cx += 16 * int(rng.integers(-step, step + 1))
+            cz += 16 * int(rng.integers(-step, step + 1))
         cx &= 0xFFFF
         cz &= 0xFFFF
         m = mpu.memory

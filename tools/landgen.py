@@ -17,6 +17,7 @@ And:
                           (bits 4-7: LANDT or SEAT gives the palette entry)
   LERP + (b-a+12)*16 + q  (b - a) * q / 16, rounded as land.lerp (q: 16ths of a tile)
   DE, DO + palette entry  a dither's bytes on even and odd lines (swatch35 numbering)
+  DQT, DRT + a*64 + D    D div 2a, D mod 2a (a 1..31, D 0..63)
   FPSL, FPSH + s          4000 / s: the readout's frames a second (tenths), s the
                           vertical syncs of the last 8 frames
 """
@@ -30,7 +31,7 @@ import swatch35 as SW  # noqa: E402
 BASE = 0x8000
 ADDR = dict(MAP=0x8000, SYT=0x9000, VX0=0x9400, VX1=0x9800, VX2=0x9C00, LERP=0xA000,
             PINL=0xA200, PINR=0xA240, RLO=0xA280, RHI=0xA2C0, DE=0xA300, DO=0xA340,
-            LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500)
+            LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00)
 NDI = (L.ZFAR - L.ZNEAR) // 16 + 1
 
 
@@ -83,6 +84,10 @@ def build():
     for r in range(16):
         put('LANDT', r, L.LAND[r % len(L.LAND)])
         put('SEAT', r, L.SEAC[r % len(L.SEAC)])
+    for a in range(1, 32):
+        for d in range(64):
+            put('DQT', a * 64 + d, d // (2 * a))
+            put('DRT', a * 64 + d, d % (2 * a))
     for s in range(256):
         f = (4000 + s // 2) // s if s else 0       # frames a second, tenths, over 8 frames
         put('FPSL', s, f)

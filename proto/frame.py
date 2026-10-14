@@ -40,7 +40,7 @@ def strips_of(hm, cx, cz, m=M):
     pairs = [(sky, pts[0], [BLACK] * n)] + list(zip(pts, pts[1:], cols)) + [(pts[-1], gnd, [BLACK] * n)]
     out = []
     for t, b, c in pairs:
-        xl = max(0, (b[0][0] - m) & ~3)          # (on the screen)
+        xl = max(L.XL, (b[0][0] - m) & ~3)       # (within the clip)
         xr = min(L.XR, (b[-1][0] + m + 3) & ~3)
         out.append(([(xl, t[0][1])] + t + [(xr, t[-1][1])],
                     [(xl, b[0][1])] + b + [(xr, b[-1][1])],

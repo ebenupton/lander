@@ -169,13 +169,13 @@ def build7():
         for h in range(L.HMAX + 1):
             put('SYT7', di * 16 + h, L.HORIZON + (((L.CAMH - h) * r + L.HSCALE * 128) // (L.HSCALE * 256)))
         for cxs in range(16):
-            dx0 = -6 * 256 - cxs * 16
+            dx0 = -5 * 256 - cxs * 16 - 128
             b0 = ((dx0 * r + 32768) >> 8) + L.XC * 256
             put('B0L', di * 16 + cxs, b0)
             put('B0H', di * 16 + cxs, b0 >> 8)
             put('B0X', di * 16 + cxs, b0 >> 16)
             x12 = (b0 + (L.NX - 1) * r) >> 8
-            put('CLP', di * 16 + cxs, 1 if (b0 >> 8) < 0 or x12 > L.XR else 0)
+            put('CLP', di * 16 + cxs, 1 if (b0 >> 8) < L.XL or x12 > L.XR else 0)
     return img
 
 
@@ -189,7 +189,7 @@ def main():
         for k, v in list(ADDR.items()) + list(ADDR2.items()) + list(ADDR7.items()):
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=TNB, MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34,
-                      NX=L.NX, NZ=L.NZ, ZBACK=L.ZBACK, DI0=DI0, XC=L.XC, XR=L.XR,
+                      NX=L.NX, NZ=L.NZ, ZBACK=L.ZBACK, DI0=DI0, XC=L.XC, XL=L.XL, XR=L.XR,
                       YSKY=YSKY, YGND=YGND, R2OFF=R2OFF,
                       TPE0=TPE[0], TPE1=TPE[1], TPE2=TPE[2], TPE3=TPE[3],
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])

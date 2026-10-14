@@ -497,7 +497,7 @@ init:   lda #0
 
 ; ---------------------------------------------------------------- project
 ; Lander's block of NX x NZ corners (proto/land.py: project): the columns' map x
-; (CX: cxt - 6 + i), each row's map row (czt + ZBACK - j, far to near); with
+; (CX: cxt - 5 + i), each row's map row (czt + ZBACK - j, far to near); with
 ; bank 4 paged, every corner's height (into PY); bank 5, each land strip's boxes'
 ; bytes (CLE, CLO: the tile at its left column and near row); bank 7, by the
 ; row's depth index (di = 16 (ZBACK - j) - czs - DI0), its y's (SYT7, from the
@@ -544,7 +544,7 @@ project:
         sta nr
         lda cxt                    ; the columns' map x
         sec
-        sbc #6
+        sbc #5
         ldx #0
 :       and #63
         sta CX,x
@@ -707,7 +707,7 @@ project:
         jmp @nx
 
 ; A row the screen's edges clip (X: 16 j, Y: cxs; hp0, hp1: its B0L, B0H; its
-; B0X): each corner's x as 9 bits (PX, PXX), then those left of 0 onto 0, those
+; B0X): each corner's x as 9 bits (PX, PXX), then those left of XL onto XL, those
 ; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +
 ; floor(((y1 - y0) n 2 + d) / 2d), n the distance to the edge, d the segment's
 ; width).
@@ -741,11 +741,18 @@ clipr:  lda (hp0),y
         cpy #NX
         bne :-
         ldx tmp
-        ldy #0                     ; the left edge: the first corner on (x >= 0)
-:       lda PXX,y
-        bpl :+
-        iny
-        bne :-
+        ldy #0                     ; the left edge: the first corner on (x >= XL)
+@lf:    lda PXX,y
+        bne @ln                    ; (x < 0)
+        tya
+        clc
+        adc tmp
+        tax
+        lda PX,x
+        cmp #XL
+        bcs :+
+@ln:    iny
+        bne @lf
 :       tya
         beq @rt
         sta tj                     ; k
@@ -756,10 +763,9 @@ clipr:  lda (hp0),y
         sec
         sbc PX-1,x
         sta cd
-        lda PX-1,x                 ; n = -x0
-        eor #$FF
-        clc
-        adc #1
+        lda #XL                    ; n = XL - x0
+        sec
+        sbc PX-1,x
         sta cn
         lda PY,x                   ; dy = y1 - y0
         sec
@@ -773,10 +779,10 @@ clipr:  lda (hp0),y
         lda cdy
         clc
         adc PY-1,x                 ; yc
-        ldy tj                     ; corners 0..k-1 onto (0, yc)
+        ldy tj                     ; corners 0..k-1 onto (XL, yc)
         ldx tmp
 :       sta PY,x
-        lda #0
+        lda #XL
         sta PX,x
         lda PY,x
         inx

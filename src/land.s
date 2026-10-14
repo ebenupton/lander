@@ -269,8 +269,6 @@ loop:   lda #<B6_KEYS              ; (bank 6: the keys, the ship's controls)
         jsr call6
         jsr project
         jsr strips                 ; (waiting for the flip before drawing)
-        lda #<B6_SHIP              ; the ship, over the land (and the screen's
-        jsr call6                  ; TOPS, BOTS widened to take it off again)
         jsr readout
         jsr flip
         jmp loop

@@ -483,22 +483,32 @@ init:   lda #0
         rts
 
 ; ---------------------------------------------------------------- keys
-; Arrows: left and right in x, up and down (away and towards) in z.
-.macro KEY inkey, routine
+; Arrows: left and right in x, up and down (away and towards) in z.  Read
+; from the keyboard directly (the system VIA, its auto-scan off a moment).
+SVIA_ORB = $FE40
+SVIA_DDRA = $FE43
+SVIA_ORA_NH = $FE4F
+.macro KEY code, routine
         .local no
-        lda #129
-        ldx #<(256 - inkey)
-        ldy #$FF
-        jsr OSBYTE
-        cpx #$FF
-        bne no
+        lda #code
+        sta SVIA_ORA_NH
+        lda SVIA_ORA_NH            ; (bit 7: pressed)
+        bpl no
         jsr routine
 no:
 .endmacro
-keys:   KEY 26, left
-        KEY 122, right
-        KEY 58, away
-        KEY 42, towards
+keys:   sei
+        lda #$7F                   ; bits 0-6 out: the key to test
+        sta SVIA_DDRA
+        lda #3                     ; keyboard auto-scan off
+        sta SVIA_ORB
+        KEY $19, left
+        KEY $79, right
+        KEY $39, away
+        KEY $29, towards
+        lda #$0B                   ; and on
+        sta SVIA_ORB
+        cli
         rts
 left:   dec cxs
         bpl :+

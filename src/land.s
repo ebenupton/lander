@@ -1223,8 +1223,7 @@ t_next: ldx tj
         cpx np1
         bcs t_end
 t_seg:  stx tj
-        lda BX+1,x
-        sta tx1
+        lda BX+1,x                 ; (tx1: t_fl0's, for t_old and t_steep)
         sec
         sbc BX,x
         beq t_dx0
@@ -1330,6 +1329,8 @@ t_fl0:  lda tyv                    ; the run pending to x0 (not including), and
         pla
         sta tyv
         ldx tj
+        lda BX+1,x                 ; (x1: t_old's and t_steep's)
+        sta tx1
         rts
 t_fl:   txa                        ; the run pending to X (not including): back
         sec                        ; by t_fr

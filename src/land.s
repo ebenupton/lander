@@ -785,7 +785,13 @@ project:
         sta ha
         lda (hp1),y
         and #15
-        jsr lerpz
+        clc                        ; (lerpz)
+        adc #13
+        sbc ha
+        tay
+        lda (lqz),y
+        clc
+        adc ha
         tay
         lda (syp),y
         ldy tj
@@ -895,19 +901,17 @@ project:
 
 ; ha to A by the column's sixteenths (lerpx) or the row's (lerpz): land.lerp,
 ; by LERPQ.  X kept.
-lerpx:  sec
+lerpx:  clc                        ; (A + 13, C clear: - ha - 1)
+        adc #13
         sbc ha
-        clc
-        adc #12
         tay
         lda (lqx),y
         clc
         adc ha
         rts
-lerpz:  sec
+lerpz:  clc                        ; (A + 13, C clear: - ha - 1)
+        adc #13
         sbc ha
-        clc
-        adc #12
         tay
         lda (lqz),y
         clc

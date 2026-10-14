@@ -56,7 +56,7 @@ CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height abov
                           # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
 ZSHIP = 15                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
-HORIZON = 20              # screen y of the horizon
+HORIZON = 0               # screen y of the horizon
 XC = 128                  # screen x of the centre (Lander's 160 of 320)
 YLIM = 156                # the lowest a row's corner goes (proto/frame.py's YGND - 1)
 XL, XR = 4, 252           # the edges the rows are clipped to, either side of XC alike

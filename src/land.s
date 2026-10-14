@@ -2482,9 +2482,9 @@ split2: ldx ri
         cpx flr1
         bcs @rd
 @rl:    stx yy
-@rl2:   ldy kk                     ; the next transition, or the floor
-        lda TRL,y
-        ldy kb
+        ldy kb                     ; the next transition, or the floor
+@rl3:   lda TRL,y
+        ldy kk
         cmp TRL,y
         bcc :+
         lda TRL,y
@@ -2495,15 +2495,47 @@ split2: ldx ri
         beq @tr
         bcc @tr
         tay
-        jsr bytes2
+        lda me                     ; (bytes2, inline)
+        and bpos2
+        eor re
+        sta ve
+        eor le
+        and bpos
+        eor ve
+        sta ve
+        lda mo
+        and bpos2
+        eor ro
+        sta vo
+        eor lo2
+        and bpos
+        eor vo
+        sta vo
         ldx yy
         sty yy
         jsr run
         ldx yy
         cpx flr1
         bcs @rd
-@tr:    jsr catch2                 ; (X = yy, kept)
-        jmp @rl2
+@tr:    ldy kk                     ; (catch2, inline: X = yy)
+:       txa
+        cmp TRL,y
+        bcc :+
+        lda TRB,y
+        sta bpos
+        iny
+        bne :-
+:       sty kk
+        ldy kb
+:       txa
+        cmp TRL,y
+        bcc :+
+        lda TRB,y
+        sta bpos2
+        iny
+        bne :-
+:       sty kb
+        jmp @rl3                   ; (Y = kb)
 @rd:    rts
 
 ; bpos, bpos2 by their transitions at or above line X.

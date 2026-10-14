@@ -1255,7 +1255,7 @@ t_seg:   stx tj
         cmp terr
         bcc :+
         jmp t_steep
-:       sty tsy                    ; ($EE or $CE: +1 or -1 below)
+:       sty t_inc                  ; ($EE or $CE: +1 or -1 below)
         tay
         bne :+
         lda tx1                    ; level: one fill
@@ -1263,9 +1263,7 @@ t_seg:   stx tj
         inc fe
         lda BX,x
         tax
-        lda tr_y+1
-        jsr fill
-        jmp t_next
+        jmp t_run                  ; (Y = 0: the last run)
 :       sta dva                    ; a run a y: the steps at x0 + ceil(dx (2k-1) / 2|dy|)
         asl a                      ; (k = 1 .. |dy|; ragged.transitions' sum)
         sta ra2
@@ -1288,43 +1286,44 @@ t_seg:   stx tj
         sta fe                     ; the first step
         lda BX,x
         tax
-        lda dva
-        sta tcnt
-t_run:  lda tr_y+1
-        jsr fill
-        ldx fe
-        lda tsy
-        cmp #$EE
-        lda tr_y+1
-        bcc :+
-        adc #0                     ; (C set: + 1)
-        jmp :++
-:       sbc #0                     ; (C clear: - 1)
-:       sta tr_y+1
+        ldy dva                    ; (Y: the runs left after this one)
+t_run:  lda tr_y+1                 ; (bota) from X to (not including) fe: A,
+        cpx fe                     ; 4 at a time (up to 3 more: the next run's,
+        bcs fl_d                   ; or the next segment's, put right after)
+fl_0:   sta ROWB,x
+fl_1:   sta ROWB+1,x
+fl_2:   sta ROWB+2,x
+fl_3:   sta ROWB+3,x
+        inx
+        inx
+        inx
+        inx
+        cpx fe
+        bcc fl_0
+fl_d:   ldx fe                     ; (C set)
+t_inc:  inc tr_y+1                 ; (INC or DEC: as tr_inc, patched)
+        dey
+        bmi t_next
+        beq t_last
         lda rrem                   ; the next step: + 2dx / 2|dy|, by e
-        cmp rr2
-        bcs :+
-        adc ra2
-        sec
         sbc rr2
+        bcs :+
+        adc ra2                    ; (C set after: + 1)
         sta rrem
-        lda fe                     ; (C set: + 1)
+        lda fe
         adc rq2
-        jmp :++
-:       sbc rr2
-        sta rrem
+        sta fe
+        jmp t_run
+:       sta rrem
         lda fe
         clc
         adc rq2
-:       sta fe
-        dec tcnt
-        bne t_run
-        lda tx1                    ; the last run, to x1
+        sta fe
+        jmp t_run
+t_last: lda tx1                    ; the last run, to x1
         sta fe
         inc fe
-        lda tr_y+1
-        jsr fill
-        jmp t_next
+        jmp t_run
 t_old:  lda dva                    ; (dx >= 64 or |dy| >= 32) a pixel at a time
         asl a
         sta tdy2
@@ -1378,21 +1377,6 @@ tg_inc: lda tr_inc                 ; tyy +- 1, as tr_inc
 :       dec tyy
         rts
 
-; (bota) from X to (not including) fe: A, 4 at a time (up to 3 more: the next
-; run's, or the next segment's, put right after).  X spoilt.
-fill:   cpx fe
-        bcs fl_d
-fl_0:   sta ROWB,x
-fl_1:   sta ROWB+1,x
-fl_2:   sta ROWB+2,x
-fl_3:   sta ROWB+3,x
-        inx
-        inx
-        inx
-        inx
-        cpx fe
-        bcc fl_0
-fl_d:   rts
 
 ; rq, rrem = dvd div 2a, mod (a = dva, ra2 = 2a); rq2, rr2: 2 dvd's.  divt:
 ; by DQT, DRT (a < 32, dvd < 64); divs: by them if it can, else subtracting.

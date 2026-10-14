@@ -57,7 +57,7 @@ YLIM = 156                # the lowest a row's corner goes (proto/frame.py's YGN
 XL, XR = 4, 252           # the edges the rows are clipped to, either side of XC alike
                           # (XR the last byte boundary: the land is drawn in x 4..251)
 # the palette (proto/swatch35.py's numbering): the user's picks
-LAND = [1, 3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
+LAND = [3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
 SEAC = [0, 2, 15, 17]
 STEPS = 16                # camera positions a tile (coarse panning: few distinct depths)
 

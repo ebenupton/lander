@@ -1288,10 +1288,9 @@ t_seg:   stx tj
 :       sta rrem
         cmp #1
         lda BX,x
+        tax                        ; (C kept)
         adc rq
         sta fe                     ; the first step
-        lda BX,x
-        tax
         ldy dva                    ; (Y: the runs left after this one)
 t_run:  lda tr_y+1                 ; (bota) from X to (not including) fe: A,
         cpx fe                     ; 4 at a time (up to 3 more: the next run's,

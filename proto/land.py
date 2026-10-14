@@ -222,8 +222,8 @@ def _targets(hm):
     raw = {}
     for j in range(MAP):
         for i in range(MAP):
-            if g(i + 1, j) == SEA and g(i, j) == SEA:
-                continue
+            if all(g(i + dx, j + dz) == SEA for dx in (0, 1) for dz in (0, 1)):
+                continue                  # (sea: all four corners at sea level)
             hs = (g(i, j), g(i + 1, j), g(i, j + 1), g(i + 1, j + 1))
             alt = min(1.0, max(0.0, (sum(hs) / 4 - SEA) / (HMAX - SEA)))
             slope = ((hs[0] + hs[2]) - (hs[1] + hs[3])) / 2
@@ -244,7 +244,7 @@ _TGT = {}
 
 def colour(hm, i, j, row, nrows):
     """A tile's palette entry (swatch35 numbering), fixed per tile (the BBC's map
-    holds it).  Sea (both its front corners at sea level): a random pick from the
+    holds it).  Sea (all four corners at sea level: flat): a random pick from the
     sea set.  Land: lit, gently -- the land colour nearest a target on two axes,
     each half a random pick (TILERND, TILERND2) and half the lighting: yellow low
     down, green high up (its corners' mean height); darker where it slopes down to

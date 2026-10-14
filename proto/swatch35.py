@@ -54,8 +54,8 @@ def mphase(out, k, c, m, y):
     if m in (0, 4):
         return out
     blk = {p for p, v in out.items() if v == K}
-    want = {p for p in MPHASE if p not in blk}
-    want = set([p for p in MPHASE if p in want][:m])
+    order = KPHASE if (k, c, m, y) in MBLACK else MPHASE
+    want = set([p for p in order if p not in blk][:m])
     for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
         moved = {((x + dx) & 1, (y_ + dy) & 1): v for (x, y_), v in out.items()}
         if ({p for p, v in moved.items() if v == K} == blk
@@ -77,6 +77,7 @@ def mphase(out, k, c, m, y):
 ALL = [(k, c, m, y) for k, c, m, y in product(range(5), repeat=4) if k + c + m + y == 4]
 ALL.sort(key=lambda t: (t[0], -t[1], -t[3], -t[2]))      # by darkness, then hue
 SHEARED = {ALL[i] for i in (23, 26, 27)}                  # (vertical strips otherwise)
+MBLACK = {ALL[2]}                                         # magenta on the black's grid
 
 
 def main():

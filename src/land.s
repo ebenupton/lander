@@ -2179,10 +2179,8 @@ split:  ldx ri
 :       cmp yy
         beq @tr                    ; (transition at or above: bpos only)
         bcc @tr
-        pha
-        jsr bytes
-        pla
         tay
+        jsr bytes
         ldx yy
         sty yy
         jsr run
@@ -2197,12 +2195,15 @@ split:  ldx ri
         jmp @rl
 @rd:    rts
 
-; Rung X's transitions in the column into TRL, TRB from A, ended by $FF; A:
-; its position in the column at the top (p0).
+; Rung X's transitions in the column into TRL, TRB (bpos as its LM mask) from
+; A, ended by $FF; A: LM of its position in the column at the top (p0).
 mktr:   sta tj
-        lda RTPL,x
+        lda RTPL,x                 ; (rtp: RTP + x4, by position)
+        clc
+        adc x4
         sta rtp
         lda RTPH,x
+        adc #0
         sta rtp+1
         lda BX,x
         jsr clamp4
@@ -2214,35 +2215,29 @@ mktr:   sta tj
         cmp p1
         beq @end
         bcs @lt
-@rt:    sta tmp                    ; leaning right: pixels p0 .. p1-1, p+1 after
-        clc
-        adc x4
         tay
-        lda (rtp),y
+@rt:    lda (rtp),y                ; leaning right: pixels p0 .. p1-1, p+1 after
         sta TRL,x
-        ldy tmp
-        iny
-        sty TRB,x
+        lda LM+1,y
+        sta TRB,x
         inx
-        tya
-        cmp p1
+        iny
+        cpy p1
         bne @rt
         beq @end
-@lt:    sec                        ; leaning left: pixels p0-1 .. p1, p after
-        sbc #1
+@lt:    tay                        ; leaning left: pixels p0-1 .. p1, p after
+:       dey
+        lda LM,y
         sta TRB,x
-        clc
-        adc x4
-        tay
         lda (rtp),y
         sta TRL,x
         inx
-        lda TRB-1,x
-        cmp p1
-        bne @lt
+        cpy p1
+        bne :-
 @end:   lda #$FF
         sta TRL,x
-        lda p0
+        ldy p0
+        lda LM,y
         rts
 
 ; A column two rungs split (ri, ri+1): boxes L, M, R = ri-1, ri, ri+1, the
@@ -2252,14 +2247,14 @@ split2: ldx ri
         sta le
         lda CO-1,x
         sta lo2
-        lda CE,x
-        sta me
-        lda CO,x
-        sta mo
         lda CE+1,x
         sta re
+        eor CE,x
+        sta me                     ; (as me ^ re)
         lda CO+1,x
         sta ro
+        eor CO,x
+        sta mo                     ; (as mo ^ ro)
         lda #0
         jsr mktr
         sta bpos
@@ -2304,10 +2299,8 @@ split2: ldx ri
 :       cmp yy
         beq @tr
         bcc @tr
-        pha
-        jsr bytes2
-        pla
         tay
+        jsr bytes2
         ldx yy
         sty yy
         jsr run
@@ -2340,27 +2333,23 @@ catch2: ldy kk
 :       sty kb
         rts
 
-; ve, vo: split2's bytes (X kept).
-bytes2: ldy bpos2
-        lda me
-        eor re
-        and LM,y
+; ve, vo: split2's bytes (X, Y kept; bpos, bpos2 as LM masks).
+bytes2: lda me
+        and bpos2
         eor re
         sta ve
         lda mo
-        eor ro
-        and LM,y
+        and bpos2
         eor ro
         sta vo
-        ldy bpos
         lda le
         eor ve
-        and LM,y
+        and bpos
         eor ve
         sta ve
         lda lo2
         eor vo
-        and LM,y
+        and bpos
         eor vo
         sta vo
         rts
@@ -2379,18 +2368,15 @@ catchup:
 :       sty kk
         rts
 
-; ve, vo: the split column's bytes at bpos (X, Y kept).
-bytes:  sty tmp
-        ldy bpos
-        lda xe
-        and LM,y
+; ve, vo: the split column's bytes at bpos (an LM mask; X, Y kept).
+bytes:  lda xe
+        and bpos
         eor re
         sta ve
         lda xo
-        and LM,y
+        and bpos
         eor ro
         sta vo
-        ldy tmp
         rts
 LM:     .byte $00, $88, $CC, $EE, $FF
 

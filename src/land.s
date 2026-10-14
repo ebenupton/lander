@@ -363,14 +363,6 @@ setback:
         asl a
         adc #>STAB
         sta stb0
-        lda #<LAH0                 ; fsplit's lines
-        ldx #>LAH0
-        ldy back
-        beq :+
-        lda #<LAH1
-        ldx #>LAH1
-:       sta em_l+1
-        stx em_l+2
         rts
 
 ; ---------------------------------------------------------------- init
@@ -470,6 +462,16 @@ init:   lda #0
         sta LAH0,x
         adc #$28
         sta LAH1,x
+        sec                        ; (+ the half: LAHS)
+        sbc #$28
+        sta LAHS0-YSKY,x
+        adc #0
+        sta LAHS0+80-YSKY,x
+        adc #$28
+        sta LAHS0+240-YSKY,x
+        sec
+        sbc #1
+        sta LAHS0+160-YSKY,x
         pla
         clc
         adc tmp
@@ -1872,14 +1874,22 @@ sethalf:
         lda enthh,y
         sta r_eh1+2
         sta r_eh2+2
+        lda lahsl,y
+        sta ln_h+1
+        sta s2_h+1
+        lda lahsh,y
+        sta ln_h+2
+        sta s2_h+2
         rts
+lahsl:  .byte <(LAHS0-YSKY), <(LAHS0+80-YSKY), <(LAHS0+160-YSKY), <(LAHS0+240-YSKY)
+lahsh:  .byte >(LAHS0-YSKY), >(LAHS0+80-YSKY), >(LAHS0+160-YSKY), >(LAHS0+240-YSKY)
 enthl:  .byte <(ENTHT-YSKY), <(ENTHT+80-YSKY), <(ENTHT+160-YSKY), <(ENTHT+240-YSKY)
 enthh:  .byte >(ENTHT-YSKY), >(ENTHT+80-YSKY), >(ENTHT+160-YSKY), >(ENTHT+240-YSKY)
 
 ; A column a rung (X = ri) splits, its top level: from mx down to the floor,
 ; the boxes split at bpos (the rung's pixels left of it), bpos moving a pixel
-; at each of the rung's transitions in the column; between transitions a run
-; (4 lines or more) or a line at a time.
+; at each of the rung's transitions in the column.  Each bpos's bytes first
+; (BE, BO); then between transitions a single line inline, more by seg2.
 fsplit: lda RTPL,x
         sta rtp
         lda RTPH,x
@@ -1909,24 +1919,33 @@ fsplit: lda RTPL,x
 :       cmp #4
         bcc :+
         lda #4
-:       tax
+:       sta bpos
         lda mx
         sta yy
+        ldx bpos
         cpx p1
-        beq fs_e
-        bcs fs_l
+        bne :+
+        jmp fs_e
+:       bcc fs_r
+        jmp fs_l
 fs_r:   txa                        ; leaning right: pixel x4 + bpos changes at
-        adc x4                     ; its line, bpos + 1 after (C clear)
+        clc                        ; its line, bpos + 1 after
+        adc x4
         tay
         lda (rtp),y
         cmp flr1
         bcs fs_e
         sta tj
-        sbc yy                     ; (C clear: - 1)
-        bcc :+
-        adc #0                     ; (C set: + 1) n
-        jsr emit
-:       inx
+        sec
+        sbc yy
+        beq fs_rn
+        bcc fs_rn
+        cmp #1
+        bne :+
+        jsr line1
+        jmp fs_rn
+:       jsr seg2
+fs_rn:  inx
         cpx p1
         bcc fs_r
 fs_e:   lda flr1                   ; the rest at bpos
@@ -1935,7 +1954,7 @@ fs_e:   lda flr1                   ; the rest at bpos
         sbc yy
         beq :+
         bcc :+
-        jsr emit
+        jmp seg2
 :       rts
 fs_l:   txa                        ; leaning left: pixel x4 + bpos - 1 changes,
         clc                        ; bpos - 1 after
@@ -1948,61 +1967,76 @@ fs_l:   txa                        ; leaning left: pixel x4 + bpos - 1 changes,
         sta tj
         sec
         sbc yy
-        beq :+
-        bcc :+
-        jsr emit
-:       dex
+        beq fs_ln
+        bcc fs_ln
+        cmp #1
+        bne :+
+        jsr line1
+        jmp fs_ln
+:       jsr seg2
+fs_ln:  dex
         cpx p1
         bne fs_l
         beq fs_e
 
-; Lines yy .. tj-1 (A of them) at bpos X: a run if 4 or more, else a line at
-; a time; yy = tj after.  X kept.
-emit:   cmp #4
-        bcs em_run
-        stx sx_
-        txa
-        tay
-        ldx yy
-        lda LM,y
-        sta msk
+; Line yy at bpos X; yy + 1 after.  X kept.
+line1:  ldy yy
+ln_h:   lda LAHS0,y                ; (sethalf: the screen and half's)
+        sta zp_+1
+        tya
+        and #7
+        sta zp_
+        lsr a
+        lda LM,x                   ; (the line's parity's byte at bpos X)
+        bcs :+
+        and xe
+        eor re
         ldy coff
-em_l:   lda LAH0,x                 ; (LAH0 or LAH1: the screen's)
-        ora half
+        sta (zp_),y
+        inc yy
+        rts
+:       and xo
+        eor ro
+        ldy coff
+        sta (zp_),y
+        inc yy
+        rts
+
+; Lines yy .. tj-1 (A of them, 2 or more) at bpos X: a run if 4 or more,
+; else a line at a time; yy = tj after.  X kept.
+seg2:   stx sx_
+        tay
+        lda LM,x
+        and xe
+        eor re
+        sta ve
+        lda LM,x
+        and xo
+        eor ro
+        sta vo
+        tya
+        cmp #4
+        bcs s2_run
+        ldx yy
+        ldy coff
+s2_l:
+s2_h:   lda LAHS0,x
         sta zp_+1
         txa
         and #7
         sta zp_
         lsr a
-        bcs :+
-        lda xe                     ; (the line's parity only)
-        and msk
-        eor re
-        sta (zp_),y
+        lda ve
+        bcc :+
+        lda vo
+:       sta (zp_),y
         inx
         cpx tj
-        bne em_l
-        beq em_d
-:       lda xo
-        and msk
-        eor ro
-        sta (zp_),y
-        inx
-        cpx tj
-        bne em_l
-em_d:   stx yy
+        bne s2_l
+        stx yy
         ldx sx_
         rts
-em_run: lda xe
-        and LM,x
-        eor re
-        sta ve
-        lda xo
-        and LM,x
-        eor ro
-        sta vo
-        stx sx_
-        ldx yy
+s2_run: ldx yy
         ldy tj
         jsr run
         lda tj
@@ -2616,6 +2650,9 @@ putg:   asl a
         inc tcol
         rts
 
+LAHS0:  .res 320                   ; each line's address, high byte: by screen and half (80 each, lines YSKY on)
+BE:     .res 5                     ; fsplit's bytes by bpos
+BO:     .res 5
 ENTHT:  .res 320                   ; each STAB's ENTH (80 a STAB, lines YSKY on)
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8

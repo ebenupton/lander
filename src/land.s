@@ -1861,7 +1861,7 @@ nearpost:
 
 ; Columns the land has left since last time: black from its highest line to
 ; its lowest.
-gone:   ldx #0
+gone:   ldx #63                    ; (right to left: the columns are independent)
 @c:     lda CURT,x
         cmp #$FF
         bne @n
@@ -1895,9 +1895,8 @@ gone:   ldx #0
         sta vo
         jsr run
         ldx tj
-@n:     inx
-        cpx #64
-        bne @c
+@n:     dex
+        bpl @c
         rts
 
 ; The column's half of the screen: A (0 left, 1 right).

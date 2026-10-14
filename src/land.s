@@ -2016,17 +2016,15 @@ c_dbl:   bvs :+                     ; (the slow ways read ys)
 ; at the floor, or the pixels at or below their bottom-row line, read-modify-
 ; write); then black to the land's lowest line last time (BOTS); CURB.  (cols'
 ; inline: back to c_nd.)
-np_h    = nearpost+8               ; (nearpost's LAHS)
 nearpost:
         lda flr                    ; (its bottom level: flr1 = flr)
         cmp flr1
         bne np_z
-        ldx flr
-        lda LAHSB0,x               ; (np_h: sethalf's, the screen and half's)
-        sta zp_+1
-        txa
+        tax
         and #7
         sta zp_
+np_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
+        sta zp_+1
         ldy coff
         lda #0
         sta (zp_),y

@@ -43,7 +43,7 @@ NX, NZ = 13, 11           # corners across and deep
 ZBACK = 20                # the back row's depth, tiles (fz = 0)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
-HORIZON = 40              # screen y of the horizon
+HORIZON = 20              # screen y of the horizon
 XC = 128                  # screen x of the centre (Lander's 160 of 320)
 YLIM = 156                # the lowest a row's corner goes (proto/frame.py's YGND - 1)
 XL, XR = 4, 252           # the edges the rows are clipped to, either side of XC alike

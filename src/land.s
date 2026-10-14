@@ -2098,7 +2098,19 @@ pB8:    lda BOTS,y
         sta ve
         sta vo
         jsr run
-np_n:     jmp c_nd
+        jmp c_nd                   ; (C clear: run keeps it)
+np_n:   lda x4                     ; (C set: c_nd's, inline)
+        adc #3
+        sta x4
+        cmp xr
+        beq np_e
+        tay
+        asl a
+        sta coff
+        beq np_hf
+        jmp c_coly                 ; (V clear: the adc above)
+np_e:   rts
+np_hf:  jmp c_nh
 
 ; Columns the land has left since last time: black from its highest line to
 ; its lowest.  Each column outside this frame's land: none this frame (CURT

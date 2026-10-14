@@ -29,18 +29,18 @@ import strip as S
 
 MAP = 64                  # tiles a side (the map wraps)
 HSCALE = 16               # height units a tile
-# Lander's view (12 tiles across, rows 5 to 11 tiles out, the camera 9 tiles up),
-# scaled by 7/12 so that 7 tiles show across
+# Lander's elevated view, 7 tiles across; a tile's height on screen over its width is
+# about CAMH / depth, so the rows sit around the camera's height out (near-square)
 HMAX = 12                 # heights 0..HMAX (softened: under a tile)
 SEA = 3                   # sea level: lower corners are flattened to it
 W = 896                   # the grid's half-width, 8.8 tiles (3.5)
-ZNEAR, ZFAR = 747, 1643   # the near and far rows, 8.8 tiles in front (2.92, 6.42)
-CAMH = 84                 # camera height, height units (HSCALE a tile: 5.25)
-F = 84                    # focal length, pixels
+ZNEAR, ZFAR = 1024, 1920  # the near and far rows, 8.8 tiles in front (4, 7.5)
+CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
+F = 115                   # focal length, pixels
 HORIZON = 4               # screen y of the horizon
 # the palette (proto/swatch35.py's numbering): the user's picks
-LAND = [1, 3, 6, 10, 11, 16, 18, 21, 22, 26, 28, 32]
-SEAC = [0, 2, 5, 15, 17, 27, 31]
+LAND = [1, 3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
+SEAC = [0, 2, 5, 15, 17, 27]
 STEPS = 16                # camera positions a tile (coarse panning: few distinct depths)
 
 
@@ -124,15 +124,19 @@ def project(hm, cx, cz):
     return xs, rows
 
 
+TILERND = np.random.default_rng(12345).integers(0, 1 << 16, (MAP, MAP))
+
+
 def colour(hm, i, j, row, nrows):
-    """A tile's palette entry (swatch35 numbering): for now random by tile, from the
-    sea picks if both its front corners are at sea level, else the land picks."""
+    """A tile's palette entry (swatch35 numbering): a random pick, fixed per tile (the
+    BBC's map holds it), from the sea set if both its front corners are at sea level,
+    else from the land set."""
     h, base = hm
     a, p = int(h[j % MAP, (i + 1) % MAP]), int(h[j % MAP, i % MAP])
-    rnd = ((i % MAP) * 73 + (j % MAP) * 151 + ((i % MAP) * (j % MAP)) * 29) % 251
+    r = int(TILERND[j % MAP, i % MAP])
     if a == SEA and p == SEA:
-        return SEAC[rnd % len(SEAC)]
-    return LAND[rnd % len(LAND)]
+        return SEAC[r % len(SEAC)]
+    return LAND[r % len(LAND)]
 
 
 def frame(hm, cx, cz):

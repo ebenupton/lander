@@ -98,19 +98,25 @@ def corner(hm, x, z):
     return lerp(lerp(g(xi, zi), g(xi + 1, zi), xf), lerp(g(xi, zi + 1), g(xi + 1, zi + 1), xf), zf)
 
 
-def grid_lines(lo, hi):
-    """Whole-tile positions between lo and hi (8.8), at least half a tile from both,
-    with the two pinned ends: the grid's lines along one axis (no sliver next to a
-    pinned edge; virus drops a line that lands on the edge)."""
-    first = (lo + 128 + 255) >> 8
-    last = (hi - 128) >> 8
+XGAP = 1                  # a column line this close to a pinned edge (8.8 tiles) is
+ZGAP = 128                # dropped, and a row line: columns only on the edge itself (a
+                          # sliver strip is fine across), rows within half a tile (a thin
+                          # strip's rungs would not be steep)
+
+
+def grid_lines(lo, hi, gap):
+    """Whole-tile positions between lo and hi (8.8), at least gap from both, with the
+    two pinned ends: the grid's lines along one axis (virus drops a line that lands on
+    the edge)."""
+    first = (lo + gap + 255) >> 8
+    last = (hi - gap) >> 8
     return [lo] + [k << 8 for k in range(first, last + 1)] + [hi]
 
 
 def project(hm, cx, cz):
     """The rows, far to near, each (z, [(sx, sy, height)] across); and the columns' x."""
-    zs = grid_lines(cz + ZNEAR, cz + ZFAR)[::-1]
-    xs = grid_lines(cx - W, cx + W)
+    zs = grid_lines(cz + ZNEAR, cz + ZFAR, ZGAP)[::-1]
+    xs = grid_lines(cx - W, cx + W, XGAP)
     rows = []
     for z in zs:
         r = recip(z - cz)

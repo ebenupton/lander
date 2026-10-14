@@ -90,13 +90,13 @@ def build():
         put('DVR', a, (ADDR['DRT'] + a * 64) >> 8)
         put('DVL', a, (a * 64) & 255)
     for cxs in range(16):                   # the columns for the camera's x step
-        xs = L.grid_lines(16 * cxs - L.W, 16 * cxs + L.W)
+        xs = L.grid_lines(16 * cxs - L.W, 16 * cxs + L.W, L.XGAP)
         put('NPT', cxs, len(xs))
         for i, x in enumerate(xs):
             put('COLO', cxs * 16 + i, x >> 8)
             put('COLQ', cxs * 16 + i, (x & 255) // 16)
     for czs in range(16):                   # the rows (far to near) for its z step
-        zs = L.grid_lines(16 * czs + L.ZNEAR, 16 * czs + L.ZFAR)[::-1]
+        zs = L.grid_lines(16 * czs + L.ZNEAR, 16 * czs + L.ZFAR, L.ZGAP)[::-1]
         put('NRT', czs, len(zs))
         for r, z in enumerate(zs):
             put('ROWO', czs * 8 + r, z >> 8)
@@ -148,7 +148,7 @@ def build2():
     for di in range(NDI):                   # PXT + di*128 + cxs*8 + i: inner column
         r = L.recip(L.ZNEAR + 16 * di)      # i's x (1..7) at depth di, x step cxs
         for cxs in range(16):
-            xs = L.grid_lines(16 * cxs - L.W, 16 * cxs + L.W)
+            xs = L.grid_lines(16 * cxs - L.W, 16 * cxs + L.W, L.XGAP)
             for i in range(1, len(xs) - 1):
                 img[ADDR2['PXT'] - BASE + di * 128 + cxs * 8 + i] = \
                     128 + (((xs[i] - 16 * cxs) * r + 32768) >> 16)

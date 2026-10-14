@@ -529,9 +529,10 @@ cph     = lqx+1
         sta PY+i,x
 .endmacro
 .macro PXS i                        ; (bank 7) corner i's x (B's high byte, in A),
-        sta PX+i,x                  ; then B += r (C clear: no row overflows here)
-        tay
+        sta PX+i,x                  ; then B += r (16 bits: the edges' beyond them
+        tay                         ; replaced after)
         lda vx
+        clc
         adc rl
         sta vx
         tya
@@ -2887,7 +2888,23 @@ oswblk: .res 9
 ; (bank 7) Each row's y's (SYT7: clamped at YLIM) and x's (fast, or clipr),
 ; its leading corners at XL or left (LJ) and its first at XR or right (RJ);
 ; the first row reaching YLIM the last (nr: the rows nearer are off the screen).
-prow7:  lda #0
+prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>LERPQ7
+        sta @lq0+2
+        sta @lq1+2
+        lda cxs
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta @lq0+1
+        sta @lq1+1
+        lda #0
         sta pr
 @r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0 (j = pr + ZSKIP)
         asl a
@@ -2901,6 +2918,7 @@ prow7:  lda #0
         sec
         sbc czs
         tay
+        sty xt1                    ; (di)
         lda R7L,y
         sta rl
         lda R7H,y
@@ -2924,14 +2942,30 @@ prow7:  lda #0
         clc
         adc #>SYT7
         sta syp+1
-        ldx tmp
+        ldx tmp                    ; the edges' heights: corners 1 to 2, and 10
+        lda PY+1,x                 ; to 11, by fx (LERPQ7: land.lerp)
+        sec
+        sbc PY,x
+        clc
+        adc #12
+        tay
+@lq0:   lda LERPQ7,y
+        clc
+        adc PY,x
+        sta PY,x
+        lda PY+NX-1,x
+        sec
+        sbc PY+NX-2,x
+        clc
+        adc #12
+        tay
+@lq1:   lda LERPQ7,y
+        clc
+        adc PY+NX-2,x
+        sta PY+NX-1,x
         .repeat NX, i
         PYS i
         .endrepeat
-        lda tmp+1
-        clc
-        adc #>CLP
-        sta lp+1
         lda tmp+1
         clc
         adc #>B0L
@@ -2941,17 +2975,20 @@ prow7:  lda #0
         adc #>B0H
         sta hp1+1
         ldy cxs
-        lda (lp),y                 ; clipped?
-        beq :+
-        jmp @clip
-:
         lda (hp0),y
         sta vx
         lda (hp1),y
-        clc
         .repeat NX, i
         PXS i
         .endrepeat
+        ldy xt1                    ; the edges' x: -XCLIP, +XCLIP
+        lda PINL7,y
+        sta PX,x
+        lda PINR7,y
+        sta PX+NX-1,x
+        lda CLP7,y                 ; past the screen's edges: clipr
+        beq @nx
+        jsr clipr
 @nx:    ldx tmp                    ; LJ: the leading corners at x <= XL
         ldy #0
 :       lda PX,x
@@ -2997,44 +3034,17 @@ prow7:  lda #0
         inx
         stx nr
         rts
-@clip:  jsr clipr
-        jmp @nx
 
 
-; A row the screen's edges clip (X: 16 j, Y: cxs; hp0, hp1: its B0L, B0H; its
-; B0X): each corner's x as 9 bits (PX, PXX), then those left of XL onto XL, those
+; A row the screen's edges clip (X: 16 j): its corners left of XL onto XL, those
 ; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +
 ; floor(((y1 - y0) n 2 + d) / 2d), n the distance to the edge, d the segment's
 ; width).
-clipr:  lda (hp0),y
-        sta vx
-        lda (hp1),y
-        sta vx+1
-        lda tmp+1
-        clc
-        adc #>B0X
-        sta hp1+1
-        lda (hp1),y
-        sta vx+2
-        ldy #0
-:       lda vx+1                   ; x's: B >> 8, 9 bits (B += r)
-        sta PX,x
-        lda vx+2
-        sta PXX,y
-        lda vx
-        clc
-        adc rl
-        sta vx
-        lda vx+1
-        adc rh
-        sta vx+1
-        lda vx+2
-        adc #0
-        sta vx+2
-        inx
-        iny
-        cpy #NX
-        bne :-
+clipr:  ldy #NX-1                   ; (all on: 8 bits)
+        lda #0
+:       sta PXX,y
+        dey
+        bpl :-
         ldx tmp
         ldy #0                     ; the left edge: the first corner on (x >= XL)
 @lf:    lda PXX,y

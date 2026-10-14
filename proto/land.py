@@ -43,6 +43,7 @@ NX, NZ = 13, 11           # corners across and deep
 ZBACK = 20                # the back row's depth, tiles (fz = 0)
 XSKIP = 1                 # the corner columns not drawn either side (their tiles: the
                           # left and right columns)
+XCLIP = 1152              # the clip planes in x, 8.8 tiles from the camera either side (4.5)
 ZSKIP = 4                 # the far corner rows not drawn (their tiles: the far four rows)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
@@ -137,17 +138,23 @@ def clip(row):
 
 def project(hm, cx, cz):
     """The rows, far to near, each (its tile z, [(sx, sy, height)] across); and the
-    columns' tile x.  Camera (cx, cz) in 8.8 tiles."""
-    xt, zt = cx >> 8, cz >> 8
-    xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]
+    columns' tile x (each point's: box i is tile xs[i]).  Camera (cx, cz) in 8.8
+    tiles.  Clipped in x at -XCLIP and +XCLIP tiles from the camera: a row's points
+    the edge there (its height between corners 1 and 2, or 10 and 11, by fx, as
+    lerp), corners 2..10 between (at fx 0, corner 10 is on the right edge: the edge
+    repeats it)."""
+    xt, zt, fx = cx >> 8, cz >> 8, cx & 255
+    xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]      # corners 1..11
     rows = []
     for j in range(ZSKIP, NZ):
         z = zt + ZBACK - j
         r = recip((z << 8) - cz)
+        hs = [int(hm[0][z % MAP, x % MAP]) for x in xs]
+        pts = [(-XCLIP, lerp(hs[0], hs[1], fx))]
+        pts += [((x << 8) - cx - 128, h) for x, h in zip(xs[1:-1], hs[1:-1])]
+        pts += [(XCLIP, lerp(hs[-2], hs[-1], fx))]
         row = []
-        for x in xs:
-            h = int(hm[0][z % MAP, x % MAP])
-            dx = (x << 8) - cx - 128
+        for dx, h in pts:
             sx = XC + ((dx * r + 32768) >> 16)
             sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))

@@ -10,10 +10,11 @@ Bank 7, by a row's depth index di = d/16 - DI0 (d its depth, 8.8 tiles: (20 - j)
 - 16*czs, so di 0..NDI-1) and r = land.recip(d) (pixels a tile, 8.8):
   R7L, R7H + di           r
   SYT7 + di*16 + h        screen y of a corner of height h (0..HMAX), YLIM at most
-  B0L, B0H, B0X + di*16 + cxs  the row's first corner's x * 256 (24 bits, signed),
-                          XC on: corner i's x is (B0 + i*r) >> 8
-  CLP + di*16 + cxs       1 if the row overhangs the screen (corner 0 left of 0, or
-                          12 right of XR): clipped
+  B0L, B0H + di*16 + cxs  the row's first drawn corner's x * 256 (16 bits), XC
+                          on: corner i's x is (B0 + i*r) >> 8
+  PINL7, PINR7 + di       the x clip planes' x (-XCLIP, +XCLIP: the rows' ends)
+  CLP7 + di               1 if they are past the screen's clip (XL, XR): clipped
+  LERPQ7 + q*32 + d + 12  land.lerp(0, d, 16 q): the ends' heights
 Bank 4:
   MAP + z*64 + x          a tile corner's height (bits 0-3) and its tile's colour pick
                           (bits 4-7: LANDT or SEAT gives the palette entry)
@@ -49,8 +50,8 @@ R2OFF = 255 - 3 * R2N
 TNB = 128
 DI0 = (L.ZBACK - L.NZ + 1) * 16 - 15        # the least depth / 16: the near row, fz 15
 NDI = L.ZBACK * 16 - DI0 + 1
-ADDR7 = dict(R7L=0x8000, R7H=0x8100, SYT7=0x8200, B0L=0x8D00, B0H=0x9800, B0X=0xA300,
-             CLP=0xAE00)
+ADDR7 = dict(R7L=0x8000, R7H=0x8100, SYT7=0x8200, B0L=0x8D00, B0H=0x9800,
+             CLP7=0xAE00, PINL7=0xAF00, PINR7=0xB000, LERPQ7=0xB100)
 assert YSKY % 2 == 0 and YGND % 2 == 1 and R2OFF > 0 and NDI <= 176
 
 
@@ -173,9 +174,14 @@ def build7():
             b0 = ((dx0 * r + 32768) >> 8) + L.XC * 256
             put('B0L', di * 16 + cxs, b0)
             put('B0H', di * 16 + cxs, b0 >> 8)
-            put('B0X', di * 16 + cxs, b0 >> 16)
-            x12 = (b0 + (L.NX - 2 * L.XSKIP - 1) * r) >> 8     # (the last)
-            put('CLP', di * 16 + cxs, 1 if (b0 >> 8) < L.XL or x12 > L.XR else 0)
+        pl = L.XC + ((-L.XCLIP * r + 32768) >> 16)      # the edges' x (clip planes)
+        pr = L.XC + ((L.XCLIP * r + 32768) >> 16)
+        put('PINL7', di, pl)
+        put('PINR7', di, pr)
+        put('CLP7', di, 1 if pl < L.XL or pr > L.XR else 0)
+    for q in range(16):                     # LERPQ7 + q*32 + d + 12: land.lerp(0, d, 16 q)
+        for d in range(-12, 13):
+            put('LERPQ7', q * 32 + d + 12, L.lerp(0, d, 16 * q))
     return img
 
 

@@ -1588,7 +1588,59 @@ tr_inc: inc tyv
 ; Each rung's pixels (LO..HI-1) and transitions: rung (xt, yt) - (xb, yb), D =
 ; yb - yt, a = |xb - xt|: its j'th pixel from xt (xt + j - 1 leaning right, xt
 ; - j left) changes box at line yt + ceil(D (2j - 1) / 2a) (ragged.transitions).
-; Kept at RTBUF on, (RTP),x for pixel x.  The margins: none.
+; Kept at RTBUF on, (RTP),x for pixel x.  The margins: none.  Each rung's a + 1
+; bytes from alloc (+ 1 each rung): pixel x at (alloc),x-LO, then $FF (the
+; sentinel after it leaning right, and the next's before it leaning left).
+; q, rem = D div 2a, mod; q2, r2 = 2D's (divt's, inline: a < 32, D < 64; else
+; divs); e: how far short of the next step (2a - rem, or 0); C: rem > 0.
+.macro RDIV slow
+        lda BY,x                   ; D
+        sec
+        sbc TY,x
+        sta dvd
+        ldy dva
+        cpy #32
+        bcs slow
+        cmp #64
+        bcs slow
+        lda DVH,y
+        sta :++ + 2
+        lda DVR,y
+        sta :+ + 2
+        lda DVL,y
+        ora dvd
+        tay
+:       lda DRT,y                  ; r = D mod a: r2 = 2r
+        asl a
+        sta rr2
+:       lda DQT,y                  ; q2 = D div a: q = q2 / 2
+        sta rq2
+        lsr a
+        sta rq
+        lda rr2                    ; rem = r + a (q2 odd)
+        bcc :+
+        adc ra2                    ; (C set: 2r + 2a + 1)
+:       lsr a                      ; (C clear if rem = 0)
+        beq :+
+        eor #$FF
+        sec
+        adc ra2
+:
+.endmacro
+; Then the steps: E = 255 - e, kept by ADC (C clear: C set after if a step's
+; e < 0); 255 - 2a in dvd, q2 + 1 in rq.
+.macro RSET
+        eor #$FF
+        sta rrem
+        lda ra2
+        eor #$FF
+        sta dvd
+        lda TY,x                   ; the first pixel's line: yt + q + (rem > 0)
+        adc rq
+        ldy rq2
+        iny
+        sty rq
+.endmacro
 rungs:  lda xl
         sta LO
         sta HI
@@ -1596,142 +1648,168 @@ rungs:  lda xl
         lda xr
         sta LO,x
         sta HI,x
-        lda #<(RTBUF+2)            ; (alloc + 2: each rung's a + 1 bytes from alloc
-        sta alloc                  ; + 1, its sentinel after leaning right, before
+        lda #$FF                   ; (the first's sentinel leaning left)
+        sta RTBUF
+        lda #<(RTBUF+1)
+        sta alloc
         lda #>RTBUF
         sta alloc+1
         ldx #1
 @r:     stx tj
-        lda BY,x
-        sec
-        sbc TY,x
-        sta dvd                    ; (D)
         lda BX,x
-        sta rend                   ; (the last pixel's end: xb either way)
         cmp TX,x
         bne :+
         sta LO,x                   ; upright: none (its sentinel only)
         sta HI,x
-        tay
-        lda alloc
-        clc
-        sbc LO,x
+        eor #$FF                   ; RTP = alloc - LO
+        sec
+        adc alloc
         sta RTPL,x
-        sta rtp
         lda alloc+1
-        sbc #0
+        adc #$FF
         sta RTPH,x
-        sta rtp+1
-        lda #$FF
-        sta (rtp),y
-        inc alloc
-        bne @upd
-        inc alloc+1
-@upd:   jmp @nx
-:       bcs @right
-        sta LO,x                   ; leaning left: pixels xb .. xt-1
-        lda TX,x
-        sta HI,x
-        sec
-        sbc BX,x
-        jmp @a
-@right: lda TX,x                   ; leaning right: xt .. xb-1
-        sta LO,x
-        lda BX,x
-        sta HI,x
-        sec
-        sbc TX,x
-@a:     sta dva                    ; (a)
-        asl a
-        sta ra2                    ; 2a (C clear: a < 128)
-        lda alloc                  ; RTP = alloc - LO - 1
-        sbc LO,x
-        sta RTPL,x
-        sta rtp
-        lda alloc+1
-        sbc #0
-        sta RTPH,x
-        sta rtp+1
-        lda alloc                  ; alloc += a + 1
-        sec
-        adc dva
-        sta alloc
-        bcc :+
-        inc alloc+1
-:       jsr divs                   ; q, rem = D div 2a, mod; q2, r2 = 2D's
-        lda rrem                   ; the first pixel's line: yt + q + (rem > 0),
-        beq :+                     ; and how far short of the next: e = 2a - rem
-        lda ra2                    ; (0 if rem = 0)
+        ldy #0
+        sty dva
+        jmp @nr
+@rsl:   jsr divs                   ; (a >= 32 or D >= 64)
+        lda rrem
+        beq @rz
+        lda ra2
         sec
         sbc rrem
-:       sta rrem
-        cmp #1                     ; (C: rem > 0)
-        lda TY,x
-        adc rq
-        ldy TX,x                   ; the pixels, from xt out
-        cpy rend
-        bcs @ll
-@rl:    sta (rtp),y                ; leaning right: xt .. xb-1
-        iny
-        cpy rend
-        beq @nr
-@rs:    tax                        ; the next pixel's: + 2D / 2a, by e
-        lda rrem
+@rz:    cmp #1
+        jmp @rst
+:       bcs :+
+        jmp @lft
+:       sta HI,x                   ; leaning right: xt .. xb-1
+        sbc TX,x                   ; (C set)
+        sta dva                    ; (a)
+        asl a
+        sta ra2                    ; 2a (C clear: a < 128)
+        lda TX,x
+        sta LO,x
+        eor #$FF                   ; RTP = alloc - LO
         sec
-        sbc rr2
-        bcs :+
-        adc ra2                    ; (C set after)
-        sta rrem
-        txa
-        adc rq2
-        sta (rtp),y
+        adc alloc
+        sta RTPL,x
+        lda alloc+1
+        adc #$FF
+        sta RTPH,x
+        RDIV @rsl
+@rst:   RSET                       ; (C clear after)
+        ldy #0                     ; the pixels, from xt (Y = x - LO) to Y = a
+        sta (alloc),y
         iny
-        cpy rend
-        bne @rs
+        cpy dva
         beq @nr
-:       sta rrem
-        txa
-        clc
-        adc rq2
-        sta (rtp),y
-        iny
-        cpy rend
-        bne @rs
-        beq @nr
-@ll:    dey                        ; leaning left: xt-1 .. xb
-        sta (rtp),y
-        cpy rend
-        beq @nl
-@ls:    tax                        ; (C set: Y > rend)
+@rs:    tax                        ; the next pixel's: + q2 (+ 1: a step)
         lda rrem
-        sbc rr2
+        adc rr2
         bcs :+
-        adc ra2                    ; (C set after)
         sta rrem
         txa
         adc rq2
-        dey
-        sta (rtp),y
-        cpy rend
-        bne @ls
-        beq @nl
-:       sta rrem
+        sta (alloc),y
+        iny
+        cpy dva
+        bne @rs                    ; (C clear: Y < a)
+        beq @nr
+:       adc dvd                    ; (C set: + 2a; C clear after)
+        sta rrem
         txa
-        clc
-        adc rq2
-        dey
-        sta (rtp),y
-        cpy rend
-        bne @ls
-@nl:    dey                        ; the sentinel: past the last pixel
-@nr:    lda #$FF
-        sta (rtp),y
+        adc rq
+        sta (alloc),y
+        iny
+        cpy dva
+        bne @rs
+@nr:    lda #$FF                   ; the sentinel (Y = a)
+        sta (alloc),y
+        tya                        ; alloc += a + 1
+        sec
+        adc alloc
+        sta alloc
+        bcc @nx
+        inc alloc+1
 @nx:    ldx tj
         inx
         cpx np1
         bcs :+
         jmp @r
 :       rts
+@lslj:  jmp @lsl                   ; (in reach)
+@lft:   sta LO,x                   ; leaning left: xb .. xt-1
+        eor #$FF                   ; RTP = alloc - LO
+        sec
+        adc alloc
+        sta RTPL,x
+        lda alloc+1
+        adc #$FF
+        sta RTPH,x
+        lda TX,x
+        sta HI,x
+        sec
+        sbc BX,x
+        sta dva                    ; (a)
+        asl a
+        sta ra2                    ; 2a (C clear: a < 128)
+        RDIV @lslj
+@lst:   RSET                       ; (C clear after)
+        ldy dva                    ; the pixels, from xt-1 (Y = x - LO) to 0
+        dey
+        sta (alloc),y
+        beq @ld
+@ls:    tax
+        lda rrem
+        adc rr2
+        bcs :+
+        sta rrem
+        txa
+        adc rq2
+        dey
+        sta (alloc),y
+        bne @ls                    ; (C clear)
+        beq @ld
+:       adc dvd
+        sta rrem
+        txa
+        adc rq
+        dey
+        sta (alloc),y
+        bne @ls
+@ld:    ldy dva
+        jmp @nr
+@lsl:   jsr divs                   ; (a >= 32 or D >= 64)
+        lda rrem
+        beq :+
+        lda ra2
+        sec
+        sbc rrem
+:       cmp #1
+        RSET
+        ldy dva                    ; (as below, but D may be "negative": the
+        dey                        ; lines wrap, so C cleared each pixel)
+        sta (alloc),y
+        beq @ld
+@lw:    tax
+        clc
+        lda rrem
+        adc rr2
+        bcs :+
+        sta rrem
+        txa
+        adc rq2
+        dey
+        sta (alloc),y
+        bne @lw
+        beq @ld
+:       adc dvd
+        sta rrem
+        txa
+        adc rq
+        dey
+        sta (alloc),y
+        bne @lw
+        beq @ld
 
 ; ---------------------------------------------------------------- columns
 cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)

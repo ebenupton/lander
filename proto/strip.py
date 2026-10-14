@@ -14,7 +14,8 @@ A strip: a top row and the row below it, its bottom row.  Constraints:
     and its last point no further left than the top row's (so the end rungs lean out);
   - (the grid's rows: each a pixel or more wider-spaced than the last)
   - the rows are shallow: every segment's |dy| < its width;
-  - every rung (top point i to bottom point i) is steep: its dy > its |dx|;
+  - every rung (top point i to bottom point i) is steep: its dy >= its |dx|, dy > 0
+    (45 degrees at most: still one x per line);
   - each byte column's top is no lower than its bottom (lowest bottom-row point).
 The fill, as ragged.py: each rung is a boundary B_i(y), stepped in y, one x per line
 (top or bottom point's x above or below it); pixel (x, y) is in box
@@ -68,7 +69,7 @@ def ok(top_pts, bot_pts):
     for row in (top_pts, bot_pts):
         if any(abs(y1 - y0) >= x1 - x0 for (x0, y0), (x1, y1) in zip(row, row[1:])):
             return False
-    if any(yb - yt <= abs(xb - xt) for (xt, yt), (xb, yb) in zip(top_pts, bot_pts)):
+    if any(yb - yt < abs(xb - xt) or yb <= yt for (xt, yt), (xb, yb) in zip(top_pts, bot_pts)):
         return False
     top, bot = P.trace(top_pts), P.trace(bot_pts)
     botc = R.bottoms(bot)

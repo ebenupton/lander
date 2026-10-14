@@ -19,7 +19,7 @@ COLS = range(P.W // 4)
 
 def boundary(xt, yt, xb, yb):
     """B(y) for y in yt..yb: x stepped per line, as bresenham_ys with x and y swapped."""
-    assert yb - yt > abs(xb - xt), 'a rung must be steep'
+    assert yb - yt >= abs(xb - xt) and yb > yt, 'a rung must be steep (45 degrees at most)'
     return {yt + k: x for k, x in enumerate(P.bresenham_ys(yt, xt, yb, xb))}
 
 

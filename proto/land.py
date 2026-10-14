@@ -27,13 +27,15 @@ import numpy as np
 import points as P
 import strip as S
 
-MAP = 128                 # tiles a side (the map wraps)
+MAP = 64                  # tiles a side (the map wraps)
 HSCALE = 16               # height units a tile
-HMAX = 16                 # heights 0..HMAX (a tile: Lander's softened)
-SEA = 4                   # sea level: lower corners are flattened to it
-W = 6                     # the grid's half-width, tiles (12 across, as Lander)
-ZNEAR, ZFAR = 5, 11       # the near and far rows, tiles in front of the camera
-CAMH = 9                  # camera height, tiles above height 0
+# Lander's view (12 tiles across, rows 5 to 11 tiles out, the camera 9 tiles up),
+# scaled by 7/12 so that 7 tiles show across
+HMAX = 12                 # heights 0..HMAX (softened: under a tile)
+SEA = 3                   # sea level: lower corners are flattened to it
+W = 896                   # the grid's half-width, 8.8 tiles (3.5)
+ZNEAR, ZFAR = 747, 1643   # the near and far rows, 8.8 tiles in front (2.92, 6.42)
+CAMH = 84                 # camera height, height units (HSCALE a tile: 5.25)
 F = 84                    # focal length, pixels
 HORIZON = 4               # screen y of the horizon
 # the palette (proto/swatch35.py's numbering): the user's picks
@@ -83,13 +85,17 @@ def recip(d):
     return (F * 65536 + d // 2) // d
 
 
+def lerp(a, b, f):
+    """a to b by f/256 (f a multiple of 256/STEPS), rounded as the BBC's table."""
+    return a + (((b - a) * f + 128) >> 8)
+
+
 def corner(hm, x, z):
-    """The height at (x, z), 8.8 tiles: bilinear between the four map corners."""
+    """The height at (x, z), 8.8 tiles: across then down between the map corners
+    (only the pinned edges have fractions)."""
     xi, xf, zi, zf = x >> 8, x & 255, z >> 8, z & 255
     g = lambda i, j: int(hm[0][j % MAP, i % MAP])
-    top = g(xi, zi) * (256 - xf) + g(xi + 1, zi) * xf
-    bot = g(xi, zi + 1) * (256 - xf) + g(xi + 1, zi + 1) * xf
-    return (top * (256 - zf) + bot * zf + 32768) >> 16
+    return lerp(lerp(g(xi, zi), g(xi + 1, zi), xf), lerp(g(xi, zi + 1), g(xi + 1, zi + 1), xf), zf)
 
 
 def grid_lines(lo, hi):
@@ -103,8 +109,8 @@ def grid_lines(lo, hi):
 
 def project(hm, cx, cz):
     """The rows, far to near, each (z, [(sx, sy, height)] across); and the columns' x."""
-    zs = grid_lines(cz + (ZNEAR << 8), cz + (ZFAR << 8))[::-1]
-    xs = grid_lines(cx - (W << 8), cx + (W << 8))
+    zs = grid_lines(cz + ZNEAR, cz + ZFAR)[::-1]
+    xs = grid_lines(cx - W, cx + W)
     rows = []
     for z in zs:
         r = recip(z - cz)
@@ -112,22 +118,21 @@ def project(hm, cx, cz):
         for x in xs:
             h = corner(hm, x, z)
             sx = 128 + (((x - cx) * r + 32768) >> 16)
-            sy = HORIZON + (((CAMH * HSCALE - h) * r + HSCALE * 128) // (HSCALE * 256))
+            sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))
         rows.append((z, row))
     return xs, rows
 
 
 def colour(hm, i, j, row, nrows):
-    """A tile's palette entry (swatch35 numbering): Lander's, from the corner at
-    (i, j) and the one to its left; row counts from 1 at the back."""
+    """A tile's palette entry (swatch35 numbering): for now random by tile, from the
+    sea picks if both its front corners are at sea level, else the land picks."""
     h, base = hm
     a, p = int(h[j % MAP, (i + 1) % MAP]), int(h[j % MAP, i % MAP])
+    rnd = ((i % MAP) * 73 + (j % MAP) * 151 + ((i % MAP) * (j % MAP)) * 29) % 251
     if a == SEA and p == SEA:
-        return SEAC[(i * 7 + j * 13 + (i * j) % 5) % len(SEAC)]       # random, by tile
-    slope = max(0, p - a)
-    bright = (row * 7) // nrows + (4 * slope) // HSCALE
-    return LANDTAB[base[j % MAP, (i + 1) % MAP]][min(bright, 15)]
+        return SEAC[rnd % len(SEAC)]
+    return LAND[rnd % len(LAND)]
 
 
 def frame(hm, cx, cz):

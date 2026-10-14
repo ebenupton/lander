@@ -791,9 +791,8 @@ project:
         adc #13
         sbc ha
         tay
-        lda (lqz),y
-        clc
-        adc ha
+        lda (lqz),y                ; (C set: heights 0..HMAX, HMAX <= 12)
+        adc ha                     ; (LERPQ: less 1)
         tay
         lda (syp),y
         ldy tj
@@ -901,23 +900,23 @@ project:
         sta ROMSEL
         rts
 
-; ha to A by the column's sixteenths (lerpx) or the row's (lerpz): land.lerp,
-; by LERPQ.  X kept.
-lerpx:  clc                        ; (A + 13, C clear: - ha - 1)
+; ha to A by the column's sixteenths (LERPX, inline) or the row's (lerpz):
+; land.lerp, by LERPQ.  X kept.
+.macro LERPX
+        clc                        ; (A + 13, C clear: - ha - 1)
         adc #13
         sbc ha
         tay
-        lda (lqx),y
-        clc
-        adc ha
-        rts
+        lda (lqx),y                ; (C set: heights 0..HMAX, HMAX <= 12)
+        adc ha                     ; (LERPQ: less 1)
+.endmacro
+        .assert HMAX <= 12, error, "LERPQ's users: A + 12 - ha must not borrow"
 lerpz:  clc                        ; (A + 13, C clear: - ha - 1)
         adc #13
         sbc ha
         tay
-        lda (lqz),y
-        clc
-        adc ha
+        lda (lqz),y                ; (C set: heights 0..HMAX, HMAX <= 12)
+        adc ha                     ; (LERPQ: less 1)
         rts
 
 ; Pinned column Y's height at the row (across by its sixteenths, and down by
@@ -934,7 +933,7 @@ pinc:   lda CT,y
         tay
         lda (hp0),y
         and #15
-        jsr lerpx
+        LERPX
         ldy zq
         beq @d
         sta hb
@@ -949,7 +948,7 @@ pinc:   lda CT,y
         ldy xt1
         lda (hp1),y
         and #15
-        jsr lerpx
+        LERPX
         pha
         lda hb
         sta ha

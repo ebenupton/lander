@@ -19,7 +19,8 @@ And:
                           sixteenths; NPT + cxs: how many
   ROWO, ROWQ, ROWD + czs*8 + r  its z step's row r (far to near): tile (from
                           czt), sixteenths, depth index; NRT + czs: how many
-  LERPQ + q*32 + d + 12   (b - a) * q / 16 (d = b - a), rounded as land.lerp
+  LERPQ + q*32 + d + 12   (b - a) * q / 16 (d = b - a), rounded as land.lerp, less 1
+                          (its users add with C set)
   ($9400-$A1FF: free, for land.s's STAB2)
   FPSL, FPSH + s          4000 / s: the readout's frames a second (tenths), s the
                           vertical syncs of the last 8 frames
@@ -107,7 +108,7 @@ def build():
         put('MRH', z, (ADDR['MAP'] + z * 64) >> 8)
     for q in range(16):
         for d in range(-12, 13):
-            put('LERPQ', q * 32 + d + 12, L.lerp(0, d, 16 * q))
+            put('LERPQ', q * 32 + d + 12, L.lerp(0, d, 16 * q) - 1)
     for s in range(256):
         f = (4000 + s // 2) // s if s else 0       # frames a second, tenths, over 8 frames
         put('FPSL', s, f)

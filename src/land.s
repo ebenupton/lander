@@ -457,6 +457,14 @@ init:   lda #0
         adc #0
         and #1
         sta ENTH,x
+        ora #>STAB                 ; and each STAB's
+        sta ENTHT-YSKY,x
+        adc #2                     ; (C clear)
+        sta ENTHT+80-YSKY,x
+        adc #2
+        sta ENTHT+160-YSKY,x
+        adc #2
+        sta ENTHT+240-YSKY,x
 :       inx
         bne @ent
         ldx #127                   ; nothing drawn yet
@@ -1513,6 +1521,27 @@ rungs:  lda xl
         rts
 
 ; ---------------------------------------------------------------- columns
+; (rare: out of cols' way) a column whose top or floor is not level
+c_zt:    lda (topa),y               ; (rare) each pixel's top, the highest and lowest
+        sta ys
+        sta mn
+        sta mx
+        ldx #1
+:       iny
+        lda (topa),y
+        sta ys,x
+        cmp mn
+        bcs :+
+        sta mn
+:       cmp mx
+        bcc :+
+        sta mx
+:       inx
+        cpx #4
+        bne :---
+        ldy x4
+        jmp c_ft
+
 cols:   lda topa+1                 ; this strip's rows' pages
         sta pt0+2
         sta pt1+2
@@ -1559,9 +1588,14 @@ c_fb:    sta flr
         tax
         inx
         stx flr1
-        bit rec
-        bpl :+
-        jsr record
+        lda ns                     ; a column new this frame (strip 1's, or
+        cmp #1                     ; beyond the last strip's): record it
+        beq :+
+        cpy xlp
+        bcc :+
+        cpy xrp
+        bcc :++
+:       jsr record
 :
         ldx ri                     ; the rungs: past those wholly left
         tya
@@ -1593,25 +1627,6 @@ c_next:  lda x4
         beq :+
         jmp c_col
 :       rts
-c_zt:    lda (topa),y               ; (rare) each pixel's top, the highest and lowest
-        sta ys
-        sta mn
-        sta mx
-        ldx #1
-:       iny
-        lda (topa),y
-        sta ys,x
-        cmp mn
-        bcs :+
-        sta mn
-:       cmp mx
-        bcc :+
-        sta mx
-:       inx
-        cpx #4
-        bne :---
-        ldy x4
-        jmp c_ft
 c_zb:    lda (bota),y               ; (rare) the lowest
         iny
         cmp (bota),y
@@ -1683,12 +1698,17 @@ record: tya
 ; or below their line; then to the land's lowest line last time.
 bottom: lda xl
         sta x4
+        lda #$FF
+        sta half
 @c:     lda x4
         asl a
         sta coff
         lda #0
         rol a
+        cmp half
+        beq :+
         jsr sethalf
+:
         ldy x4
         lda (topa),y               ; level across the column (mostly): one line
         iny
@@ -1818,7 +1838,19 @@ sethalf:
         asl a
         adc stb0
         sta stbh
+        sec                        ; run's entries: ENTHT + 80 t, t the STAB
+        sbc #>STAB
+        lsr a
+        tay
+        lda enthl,y
+        sta r_eh1+1
+        sta r_eh2+1
+        lda enthh,y
+        sta r_eh1+2
+        sta r_eh2+2
         rts
+enthl:  .byte <(ENTHT-YSKY), <(ENTHT+80-YSKY), <(ENTHT+160-YSKY), <(ENTHT+240-YSKY)
+enthh:  .byte >(ENTHT-YSKY), >(ENTHT+80-YSKY), >(ENTHT+160-YSKY), >(ENTHT+240-YSKY)
 
 ; A column a rung (X = ri) splits, its top level: from mx down to the floor,
 ; the boxes split at bpos (the rung's pixels left of it), bpos moving a pixel
@@ -2292,16 +2324,14 @@ plu:    sta dummy
         lda ENTL,y
         sta plu+1
         sta r_p+1
-        lda ENTH,y
-        ora stbh
+r_eh1:  lda ENTHT,y                ; (sethalf: the STAB's own)
         sta plu+2
         sta r_p+2
         lda #OP_RTS
 r_p:     sta $FFFF
 r_go:    lda ENTL,x
         sta r_j+1
-        lda ENTH,x
-        ora stbh
+r_eh2:  lda ENTHT,x
         sta r_j+2
         lda ve
         eor vo
@@ -2562,6 +2592,7 @@ putg:   asl a
         inc tcol
         rts
 
+ENTHT:  .res 320                   ; each STAB's ENTH (80 a STAB, lines YSKY on)
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8
 dvi:    .res 1

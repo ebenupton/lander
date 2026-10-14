@@ -2697,8 +2697,27 @@ split2: ldx ri
 @zd:    ldx mx                     ; the runs, from mx
         cpx flr1
         bcs @rd
-@rl:    stx yy
+        stx yy
         ldy kb                     ; the next transition, or the floor
+        jmp @rl3
+@tr:    ldy kk                     ; (catch2, inline: X = yy)
+:       txa
+        cmp TRL,y
+        bcc :+
+        lda TRB,y
+        sta bpos
+        iny
+        bne :-
+:       sty kk
+        ldy kb
+:       txa
+        cmp TRL,y
+        bcc :+
+        lda TRB,y
+        sta bpos2
+        iny
+        bne :-
+:       sty kb                     ; (Y = kb)
 @rl3:   lda TRL,y
         ldy kk
         cmp TRL,y
@@ -2732,26 +2751,7 @@ split2: ldx ri
         jsr run
         ldx yy
         cpx flr1
-        bcs @rd
-@tr:    ldy kk                     ; (catch2, inline: X = yy)
-:       txa
-        cmp TRL,y
-        bcc :+
-        lda TRB,y
-        sta bpos
-        iny
-        bne :-
-:       sty kk
-        ldy kb
-:       txa
-        cmp TRL,y
-        bcc :+
-        lda TRB,y
-        sta bpos2
-        iny
-        bne :-
-:       sty kb
-        jmp @rl3                   ; (Y = kb)
+        bcc @tr
 @rd:    rts
 
 ; bpos, bpos2 by their transitions at or above line X.

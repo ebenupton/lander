@@ -191,16 +191,74 @@ def project(hm, cx, cz):
 TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC's map: 4 bits a tile)
 
 
-def colour(hm, i, j, row, nrows):
-    """A tile's palette entry (swatch35 numbering): a random pick, fixed per tile (the
-    BBC's map holds it), from the sea set if both its front corners are at sea level,
-    else from the land set."""
+TILERND2 = np.random.default_rng(54321).integers(0, 16, (MAP, MAP))  # (a second pick)
+LIGHT = 0.5               # the lighting's weight against the random pick (gentle: half)
+SLOPE1 = 6                # a slope (sixteenths a tile) that takes the light from middling
+                          # to the dark or light end
+
+
+def _land_axes():
+    """Each land colour's place on two axes, as ranks 0..1 among them: yellow (its
+    average red over red and green: yellow 1, green 0) and light (its luminance)."""
+    import swatch35 as SW
+    def avg(e):
+        cl = SW.cell(*SW.ALL[e])
+        return [sum(SW.PHYS[v][ch] for v in cl.values()) / 4 for ch in range(3)]
+    ys = [avg(e)[0] / (avg(e)[0] + avg(e)[1] + 1e-9) for e in LAND]
+    ls = [0.3 * avg(e)[0] + 0.59 * avg(e)[1] + 0.11 * avg(e)[2] for e in LAND]
+    rank = lambda v: [sorted(v).index(x) / (len(v) - 1) for x in v]
+    return list(zip(rank(ys), rank(ls)))
+
+
+LANDAX = _land_axes()
+
+
+def _targets(hm):
+    """Each land tile's targets on the two axes (the docstring of colour), each
+    spread evenly over 0..1 by rank across the map's land tiles (so the palette is
+    all used); None for sea."""
     h, base = hm
-    a, p = int(h[j % MAP, (i + 1) % MAP]), int(h[j % MAP, i % MAP])
-    r = int(TILERND[j % MAP, i % MAP])
-    if a == SEA and p == SEA:
-        return SEAC[r % len(SEAC)]
-    return LAND[r % len(LAND)]
+    g = lambda x, z: int(h[z % MAP, x % MAP])
+    raw = {}
+    for j in range(MAP):
+        for i in range(MAP):
+            if g(i + 1, j) == SEA and g(i, j) == SEA:
+                continue
+            hs = (g(i, j), g(i + 1, j), g(i, j + 1), g(i + 1, j + 1))
+            alt = min(1.0, max(0.0, (sum(hs) / 4 - SEA) / (HMAX - SEA)))
+            slope = ((hs[0] + hs[2]) - (hs[1] + hs[3])) / 2
+            ty = (1 - LIGHT) * TILERND[j, i] / 15 + LIGHT * (1 - alt)
+            tl = (1 - LIGHT) * TILERND2[j, i] / 15 + LIGHT * min(1.0, max(0.0, 0.5 - slope / SLOPE1))
+            raw[(i, j)] = (ty + 1e-6 * (i + MAP * j), tl + 1e-6 * (j + MAP * i))
+    keys = list(raw)
+    out = {}
+    for ax in (0, 1):
+        order = sorted(keys, key=lambda t: raw[t][ax])
+        for n, t in enumerate(order):
+            out.setdefault(t, [0, 0])[ax] = n / (len(order) - 1)
+    return out
+
+
+_TGT = {}
+
+
+def colour(hm, i, j, row, nrows):
+    """A tile's palette entry (swatch35 numbering), fixed per tile (the BBC's map
+    holds it).  Sea (both its front corners at sea level): a random pick from the
+    sea set.  Land: lit, gently -- the land colour nearest a target on two axes,
+    each half a random pick (TILERND, TILERND2) and half the lighting: yellow low
+    down, green high up (its corners' mean height); darker where it slopes down to
+    the right, lighter down to the left (its left corners' heights less its right's);
+    each axis spread evenly by rank over the map's land tiles."""
+    key = id(hm[0])
+    if key not in _TGT:
+        _TGT.clear()
+        _TGT[key] = _targets(hm)
+    t = _TGT[key].get((i % MAP, j % MAP))
+    if t is None:
+        return SEAC[int(TILERND[j % MAP, i % MAP]) % len(SEAC)]
+    k = min(range(len(LAND)), key=lambda n: (LANDAX[n][0] - t[0]) ** 2 + (LANDAX[n][1] - t[1]) ** 2)
+    return LAND[k]
 
 
 def frame(hm, cx, cz):

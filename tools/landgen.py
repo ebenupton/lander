@@ -38,7 +38,9 @@ ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, SYPL=0xBC80, SYPH=0xBCC0, SYT=0x
             LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00,
             COLO=0xB600, COLQ=0xB700, ROWO=0xB800, ROWQ=0xB880, ROWD=0xB900,
             NPT=0xB980, NRT=0xB990, LERPQ=0xBA00,
-            DVH=0xBD00, DVR=0xBD20, DVL=0xBD40, CLMP1=0xBE00)
+            DVH=0xBD00, DVR=0xBD20, DVL=0xBD40, CLMP1=0xBE00,
+            TBLK4=0x9B00, TBLK5=0x9D00, TENL=0x9F00, TENH4=0xA000, TENH5=0xA100)
+TNB = 128
 NDI = (L.ZFAR - L.ZNEAR) // 16 + 1
 
 
@@ -116,6 +118,20 @@ def build():
     for d in range(256):                    # fsplit's: d + 1 (signed) clamped to 0..4
         v = (d + 1) & 255
         put('CLMP1', d, 0 if v >= 128 else min(v, 4))
+    for blk, pg, enh in (('TBLK4', 4, 'TENH4'), ('TBLK5', 5, 'TENH5')):
+        # traceb's fills: STA page*256-k,X for k = TNB..1, then JMP (init: t_back);
+        # entered at L stores before the JMP: X - L .. X - 1
+        for k in range(TNB, 0, -1):
+            a = pg * 256 - k
+            o = 3 * (TNB - k)
+            put(blk, o, 0x9D)
+            put(blk, o + 1, a & 255)
+            put(blk, o + 2, a >> 8)
+        put(blk, 3 * TNB, 0x4C)
+        for n in range(TNB + 1):
+            e = ADDR[blk] + 3 * (TNB - n)
+            put('TENL', n, e & 255)
+            put(enh, n, e >> 8)
     return img
 
 
@@ -150,7 +166,7 @@ def main():
         f.write('; tools/landgen.py\n')
         for k, v in list(ADDR.items()) + list(ADDR2.items()):
             f.write(f'{k:8s}= ${v:04X}\n')
-        consts = dict(MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34)
+        consts = dict(TNB=TNB, MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34)
         for k, v in consts.items():
             f.write(f'{k:8s}= {v}\n')
 

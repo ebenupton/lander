@@ -523,6 +523,12 @@ init:   lda #0
         sta BOTS,x
         dex
         bpl :-
+        lda #<t_back               ; traceb's fills' way back
+        sta TBLK4+3*TNB+1
+        sta TBLK5+3*TNB+1
+        lda #>t_back
+        sta TBLK4+3*TNB+2
+        sta TBLK5+3*TNB+2
         lda #<dummy                ; no RTS planted
         sta pp
         lda #>dummy
@@ -1177,48 +1183,6 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         ldx np
         sta CE,x
         sta CO,x
-        ; the top row's line
-        lda ns
-        bne @widen
-        jmp @bot
-@widen: ldy xl                     ; the last strip's bottom row, widened:
-        cpy xlp                    ; xl up to (not including) xlp at TY (all
-        bcs @w2                    ; byte boundaries: 4 at a time)
-        lda xlp
-        sta @e1+1
-        lda TY
-:       sta (topa),y
-        iny
-        sta (topa),y
-        iny
-        sta (topa),y
-        iny
-        sta (topa),y
-        iny
-@e1:    cpy #0
-        bne :-
-@w2:    ldy xrp                    ; xrp up to xr (including) at TY+np+1
-        cpy xr                     ; (xrp, xr byte boundaries)
-        beq @w3
-        bcs @bot
-        lda xr
-        sta @e2+1
-        ldx np1
-        lda TY,x
-:       sta (topa),y
-        iny
-        sta (topa),y
-        iny
-        sta (topa),y
-        iny
-        sta (topa),y
-        iny
-@e2:    cpy #0
-        bne :-
-        beq @w4
-@w3:    ldx np1
-        lda TY,x
-@w4:    sta (topa),y
 @bot:   lda ns                     ; the bottom row's line
         cmp nr
         beq :+
@@ -1259,31 +1223,77 @@ traceb: lda bota+1
         sta fl_1+2
         sta fl_2+2
         sta fl_3+2
+        clc                        ; the fills' entries: TENH4 or TENH5
+        adc #>TENH4-4
+        sta tf_h+2
+        sta t1_h+2
+        sta tx_h+2
+        sta tv_h0+2
+        sta tv_h1+2
+        ldx np1                    ; the row: xl .. xr, and widened to the next
+        ldy BX,x                   ; strip's margins (its top row: the margin
+        iny                        ; segments' ys run on to them)
+        sty t_end+1
+        lda BX
+        sta tcnt
+        ldy ns
+        iny
+        cpy nr
+        bcs @t0
+        tya
+        asl a
+        asl a
+        asl a
+        asl a
+        tay
+        lda PX,y                   ; (setup's xl, xr for row ns + 1)
+        and #$FC
+        cmp tcnt
+        bcs :+
+        sta tcnt
+:       tya
+        adc np                     ; (C clear)
+        tay
+        lda PX-1,y
+        adc #3
+        and #$FC
+        cmp t_end+1
+        bcc @t0
+        adc #0                     ; (C set: + 1)
+        sta t_end+1
+@t0:    lda BY
+        sta tyv
         ldx #0
         beq t_seg
-t_o:    jmp t_old                  ; (in reach)
-t_seg:   stx tj
+t_end:  ldx #0                     ; the row's end: the run pending, to the end
+        jmp t_fl                   ; (back by t_fr's RTS)
+t_o:    jsr t_fl0                  ; (in reach) the run pending, to x0
+        jmp t_old
+t_dx0:  lda BY+1,x                 ; (none: a margin on the row's end) the run
+        cmp tyv                    ; pending ends at x0 if the next y differs
+        beq t_next
+        jsr t_fl0
+        ldx tj
+        lda BX,x
+        sta tcnt
+t_next: ldx tj
+        inx
+        cpx np1
+        bcs t_end
+t_seg:  stx tj
         lda BX+1,x
         sta tx1
         sec
         sbc BX,x
-        bne :+
-        jmp t_next                 ; (a margin on the row's end: none)
-:       sta terr                   ; dx
+        beq t_dx0
+        sta terr                   ; dx
         lda BY,x
         sta tyv
         lda BY+1,x
         sec
         sbc BY,x
-        bne :+
-        lda tx1                    ; level: one fill (C set: + 1)
-        adc #0
-        sta fe                     ; (C clear: tx1 < 255)
-        lda BX,x
-        tax
-        ldy #0                     ; (the last run)
-        jmp t_run
-:       ldy #$E6                   ; INC zp
+        beq t_next                 ; (level: the run pending goes on)
+        ldy #$E6                   ; INC zp
         bcs :+
         eor #$FF                   ; rising: |dy|, DEC
         adc #1
@@ -1301,6 +1311,8 @@ t_seg:   stx tj
         lda terr
         cmp #64
         bcs t_o
+        cpy #1
+        beq t_one
         lda DVH,y                  ; divt's, inline: q, rem = dx div 2|dy|, mod;
         sta t_dq+2                 ; q2, r2 = 2dx's
         lda DVR,y
@@ -1324,11 +1336,78 @@ t_dq:   lda DQT,y                  ; q2 = dx div |dy|: q = q2 / 2
         sec
         adc ra2
 :       sta rrem
-        lda BX,x
-        tax                        ; (C kept)
-        adc rq
-        sta fe                     ; the first step
+        lda rq                     ; the first run: the pending one, to x0 + q +
+        adc #0                     ; (rem > 0)
+        adc BX,x                   ; (C clear)
+        tax
+        ldy dva                    ; the runs between: q2 or q2 + 1
+        cpy #2
+        bcc :+
+        ldy rq2
+        lda TENL,y
+        sta jv0+1
+tv_h0:  lda TENH4,y
+        sta jv0+2
+        lda TENL+1,y
+        sta jv1+1
+tv_h1:  lda TENH4+1,y
+        sta jv1+2
+:       txa
+        sec
+        sbc tcnt
+        tay
+        cpy #TNB+1
+        bcs t_fl1
+        lda TENL,y
+        sta tf_j+1
+tf_h:   lda TENH4,y
+        sta tf_j+2
         ldy dva                    ; (Y: the runs left after this one)
+        lda tyv
+tf_j:   jmp t_back
+t_one:  lsr a                      ; |dy| 1: the first run to x0 + ceil(dx / 2)
+        adc BX,x
+        tax
+        sec
+        sbc tcnt
+        tay
+        cpy #TNB+1
+        bcs t_fl1
+        lda TENL,y
+        sta tf_j+1
+t1_h:   lda TENH4,y
+        sta tf_j+2
+        ldy #1
+        lda tyv
+        jmp tf_j
+t_fl1:  ldy dva                    ; (longer)
+        jmp t_flo
+t_fl0:  lda tyv                    ; the run pending to x0 (not including), and
+        pha                        ; back (tyv kept, X = tj)
+        ldx tj
+        lda BX,x
+        tax
+        jsr t_fl
+        pla
+        sta tyv
+        ldx tj
+        rts
+t_fl:   txa                        ; the run pending to X (not including): back
+        sec                        ; by t_fr
+        sbc tcnt
+        tay
+        cpy #TNB+1
+        bcs t_flf
+        lda TENL,y
+        sta tx_j+1
+tx_h:   lda TENH4,y
+        sta tx_j+2
+        ldy #0
+        lda tyv
+tx_j:   jmp t_back
+t_flf:  ldy #0                     ; (longer)
+t_flo:  stx fe                     ; (longer: 4 at a time, from tcnt to fe)
+        ldx tcnt
 t_run:  lda tyv                    ; (bota) from X to (not including) fe (> X):
 fl_0:   sta ROWB,x                 ; A, 4 at a time (up to 3 more: the next run's,
 fl_1:   sta ROWB+1,x               ; or the next segment's, put right after)
@@ -1340,30 +1419,33 @@ fl_3:   sta ROWB+3,x
         inx
         cpx fe
         bcc fl_0
-fl_d:   ldx fe                     ; (C set)
+        ldx fe
+t_back:                            ; (the fills' way back: X the run's end)
 t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         dey
-        bmi t_next
+        bmi t_fr
         beq t_last
         lda rrem                   ; the next step: + 2dx / 2|dy|, by e
+        sec
         sbc rr2
         bcs :+
         adc ra2                    ; (C set after: + 1)
         sta rrem
-        txa                        ; (X = fe)
+        txa
         adc rq2
-        sta fe
-        jmp t_run
+        tax
+        lda tyv
+jv1:    jmp t_back
 :       sta rrem
         txa
         clc
         adc rq2
-        sta fe
-        jmp t_run
-t_last: lda tx1                    ; the last run, to x1 (C set: + 1)
-        adc #0
-        sta fe
-        jmp t_run
+        tax
+        lda tyv
+jv0:    jmp t_back
+t_fr:   rts
+t_last: stx tcnt                   ; the last run: pending (at y1)
+        jmp t_next
 t_old:  lda t_inc                  ; (dx >= 64 or |dy| >= 32) a pixel at a time
         sta tr_inc
         lda terr
@@ -1390,15 +1472,16 @@ t_old:  lda t_inc                  ; (dx >= 64 or |dy| >= 32) a pixel at a time
         tax
         clc
         jsr tr_l
-t_next: ldx tj
-        inx
-        cpx np1
-        bcs :+
-        jmp t_seg
-:       rts
+t_ox:   ldx tj                     ; the run pending: x1 on, at y1
+        lda BY+1,x
+        sta tyv
+        lda tx1
+        sta tcnt
+        jmp t_next
 t_steep: sty tr_inc                 ; (rare) the general loop
         asl a
         sta tdy2
+        jsr t_fl0                  ; (the run pending, to x0)
         lda terr
         asl a
         sta tdx2
@@ -1422,7 +1505,7 @@ t_gl:    inx
 tg_st:  sta ROWB,x
         cpx tx1
         bne t_gl
-        beq t_next
+        beq t_ox
 tg_inc: lda tr_inc                 ; tyy +- 1, as tr_inc
         cmp #$E6
         bne :+

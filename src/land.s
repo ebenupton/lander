@@ -1244,12 +1244,10 @@ t_seg:  stx tj
 :       sty t_inc                  ; ($E6 or $C6: +1 or -1 below)
         sta dva                    ; a run a y: the steps at x0 + ceil(dx (2k-1) / 2|dy|)
         tay                        ; (k = 1 .. |dy|; ragged.transitions' sum)
-        cmp #32
-        bcs t_o
         asl a
-        sta ra2
-        lda terr
-        cmp #64
+        sta ra2                    ; (t_old: none of ra2)
+        ora terr                   ; |dy| < 32 and dx < 64 (|dy| < dx: 2|dy| < 256
+        cmp #64                    ; or dx >= 128)
         bcs t_o
         cpy #1
         beq t_one
@@ -1302,7 +1300,8 @@ tf_h:   lda TENH4,y
         lda tyv
 tf_j:   jmp t_back
         .res 5
-t_one:  lsr a                      ; |dy| 1: the first run to x0 + ceil(dx / 2)
+t_one:  lda terr
+        lsr a                      ; |dy| 1: the first run to x0 + ceil(dx / 2)
         adc BX,x
         tax
         sec
@@ -1319,6 +1318,7 @@ t1_h:   lda TENH4,y
         jmp tf_j
 t_fl1:  ldy dva                    ; (longer)
         jmp t_flo
+        .res 2                     ; (the layout kept)
 t_fl0:  lda tyv                    ; the run pending to x0 (not including), and
         pha                        ; back (tyv kept, X = tj)
         ldx tj

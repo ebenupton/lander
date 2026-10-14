@@ -6,7 +6,8 @@ against proto/frame.py's (the frame alone on black), byte for byte.
                                      in sixteenths of a tile; default 2.  ship: each frame
                                      also draws the ship (bank 6's B6_SHIP), at a random
                                      orientation and place, and the screen must be the
-                                     land with tools/shipgen.py's ship over it)
+                                     land with tools/shipgen.py's ship over it; shipc:
+                                     the same, the ship near where LAND keeps it)
 
 build/land/LAND at $1900 and TABLES at $8000 (bank 4, as LAND pages it); init once,
 then each frame: the camera set, project, strips, flip (both screens in turn, so
@@ -100,7 +101,8 @@ def main():
     frames = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     rng = np.random.default_rng(int(sys.argv[2]) if len(sys.argv) > 2 else 1)
     step = int(sys.argv[3]) if len(sys.argv) > 3 else 2
-    ship = 'ship' in sys.argv[4:]
+    ship = 'ship' in sys.argv[4:] or 'shipc' in sys.argv[4:]
+    near = 'shipc' in sys.argv[4:]
     mpu, lab = machine()
     lab6 = labels('shipb_labels.txt')
     hm = L.heightmap()
@@ -124,7 +126,10 @@ def main():
             cyc[r].append(call(mpu, lab[r]))
         if ship:
             k, p = int(rng.integers(SG.NDIR)), int(rng.integers(SG.NPITCH))
-            sx, sy = int(rng.integers(18, 238)), int(rng.integers(F.YSKY + 18, F.YGND - 18))
+            if near:                                 # (about where LAND keeps it)
+                sx, sy = 128 + int(rng.integers(-24, 25)), 98 + int(rng.integers(-10, 11))
+            else:
+                sx, sy = int(rng.integers(18, 238)), int(rng.integers(F.YSKY + 18, F.YGND - 18))
             m[0xFE30] = 6
             for n, v in (('shk', k), ('shp', p), ('shx', sx), ('shy', sy)):
                 m[lab6[n]] = v

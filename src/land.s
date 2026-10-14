@@ -1838,7 +1838,15 @@ c_zt:    sta ys                     ; (rare) each pixel's top (A: the first's), 
 .endmacro
 zt1:    ZTP 1
 zt2:    ZTP 2
-zt3:    ZTP 3
+zt3:    lda ROWA+3,y               ; (ZTP 3, to c_ft directly)
+        sta ys+3
+        cmp mn
+        bcs :+
+        sta mn
+        bcc c_ft
+:       cmp mx
+        bcc c_ft
+        sta mx
         jmp c_ft
 
 c_nd:                               ; the next column (c_np's, nearpost's)

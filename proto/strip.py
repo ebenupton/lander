@@ -95,7 +95,7 @@ def mask(top_pts, bot_pts):
     for y in range(P.H):
         edges = [b[min(max(y, r[1]), r[3])] for b, r in zip(bs, rungs)]
         n = np.searchsorted(edges, xs, side='right') - 1
-        inside = (y <= floor) & (y >= ceil) & (n >= 0) & (n < N - 1)
+        inside = (y <= floor) & (y >= ceil) & (n >= 0) & (n < len(rungs) - 1)
         out[y] = np.where(inside, n, -1)
     return out
 

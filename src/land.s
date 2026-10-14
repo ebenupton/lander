@@ -36,7 +36,8 @@
 ; filing system's workspace:
 ;   $0400, $0500  ROWA, ROWB: a row's line by pixel (a strip's top and bottom)
 ;   $0600         RTBUF: the rungs' transition lines
-;   $0900         the frame's rows and columns, $0A40 the strip's, $0B00 the
+;   $0700         the frame's rows' points; $0900 its strips' boxes and
+;                 columns, $0A40 the strip's, $0B00 the
 ;                 slow way's
 ;   $1700 ENTL, ENTH: each line's entry in STAB (low, high); $0C00 TOPS,
 ;                 BOTS, $0B60 CURT, CURB: each column's highest and lowest
@@ -73,10 +74,10 @@ ZFARDI  = NDI - 1
 ROWA    = $0400
 ROWB    = $0500
 RTBUF   = $0600
-PX      = $0900                    ; the rows', far to near: 16 a row
-PY      = $0950
-CLE     = $09A0                    ; the land strips' box bytes: 16 a strip
-CLO     = $09E0
+PX      = $0700                    ; the rows', far to near: 16 a row (6 at most)
+PY      = $0760
+CLE     = $0900                    ; the land strips' box bytes: 16 a strip (5)
+CLO     = $0950
 CT      = $0A20                    ; the columns': tile, sixteenths
 CQ      = $0A30
 TX      = $0A40                    ; the strip's: top row (margins at 0, np+1)
@@ -143,7 +144,7 @@ back:   .res 1                     ; the screen being drawn: 0 ($3000), 1 ($5800
 scrb:   .res 1                     ; its high byte
 stb0:   .res 1                     ; its STAB's (left half)
 np:     .res 1                     ; points a row (8 or 9)
-nr:     .res 1                     ; rows (4 or 5)
+nr:     .res 1                     ; rows (4 to 6)
 vcount: .res 1                     ; vertical syncs (the event handler's)
 vflip:  .res 1                     ; at the last flip
 ptr:    .res 2

@@ -143,7 +143,7 @@ def main():
             perr.append(f'np {np_} nr {nr}, want {len(xs)} {len(rows)}')
         else:
             for r, (_, row) in enumerate(rows):
-                got = [(m[0x0900 + 16 * r + i], m[0x0950 + 16 * r + i]) for i in range(np_)]
+                got = [(m[0x0700 + 16 * r + i], m[0x0760 + 16 * r + i]) for i in range(np_)]
                 want = [(sx, sy) for sx, sy, _ in row]
                 if got != want:
                     perr.append(f'row {r}: {got} want {want}')

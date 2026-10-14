@@ -99,9 +99,11 @@ def corner(hm, x, z):
 
 
 XGAP = 1                  # a column line this close to a pinned edge (8.8 tiles) is
-ZGAP = 128                # dropped, and a row line: columns only on the edge itself (a
-                          # sliver strip is fine across), rows within half a tile (a thin
-                          # strip's rungs would not be steep)
+ZGAP = 32                 # dropped, and a row line: columns only on the edge itself,
+                          # rows within an eighth of a tile (a thinner strip can have a
+                          # rung of no height; an eighth makes 6 rows at most).  Thin
+                          # strips' rungs can be shallow: the fill takes them
+
 
 
 def grid_lines(lo, hi, gap):

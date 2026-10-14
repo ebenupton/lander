@@ -1674,14 +1674,17 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         sta zb2+7
         sta zb3+2
         sta zb3+7
-        ldx #$E8                   ; INX: the floor's line after (BIT: no nearpost)
-        ldy #$2C
+        ldx #$E8                   ; INX: the floor's line after (JMP c_nd: no nearpost)
+        lda #<c_nd
+        ldy #>c_nd
         bit last
         bpl :+
         ldx #$EA                   ; (the near strip: NOP, the floor itself if level;
-        ldy #$4C                   ; JMP nearpost)
+        lda #<nearpost             ; JMP nearpost)
+        ldy #>nearpost
 :       stx c_inx
-        sty c_np
+        sta c_np+1
+        sty c_np+2
         lda xlp                    ; record below c_ra or from c_rb on (strip 1: all)
         ldx ns
         dex
@@ -1699,8 +1702,15 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         lda #0
         rol a
         jsr sethalf
-        jmp c_col
+        ldy x4
+        jmp c_coly
 ; (rare: out of cols' way) a column whose top or floor is not level
+c_nh:   lda #0                     ; (a new half)
+        rol a
+        jsr sethalf
+        ldy x4
+        jmp c_coly
+c_end:  rts
 c_zt:    sta ys                     ; (rare) each pixel's top (A: the first's), the
         sta mn                     ; highest and lowest (cols: zt1-3 this strip's)
         sta mx
@@ -1723,25 +1733,19 @@ zt2:    ZTP 2
 zt3:    ZTP 3
         jmp c_ft
 
-c_zb:                               ; (rare) the lowest (A: the first's; cols:
-zb1:    cmp ROWB+1,y               ; zb1-3 this strip's)
-        bcs :+
-        lda ROWB+1,y
-:
-zb2:    cmp ROWB+2,y
-        bcs :+
-        lda ROWB+2,y
-:
-zb3:    cmp ROWB+3,y
-        bcs :+
-        lda ROWB+3,y
-:       sta flr                    ; (not level)
-        tax
-        inx
-        stx flr1
-        jmp c_rec
-c_col:   ldy x4                     ; the top: level across the column? (V clear:
-c_coly:                            ; the adc #4 below, or sethalf's last sbc)
+c_nd:                               ; the next column (c_np's, nearpost's)
+        lda x4
+        clc
+        adc #4
+        sta x4
+        cmp xr
+        beq c_end
+        tay
+        asl a                      ; 8 * column
+        sta coff
+        beq c_nh
+c_coly:                            ; the top: level across the column? (V clear:
+                                   ; the adc #4 above, or sethalf's last sbc)
 pt0:    lda ROWA,y
 pt1:    cmp ROWA+1,y
         bne c_zt
@@ -1787,24 +1791,24 @@ c_r1:    ldx mx
         ldy flr1
         jsr run
 c_next:
-c_np:   jmp nearpost               ; (cols: BIT but in the near strip; back to c_nd)
-c_nd:
-        lda x4
-        clc
-        adc #4
-        sta x4
-        cmp xr
-        beq :++
-        tay
-        asl a                      ; 8 * column
-        sta coff
-        beq :+
-        jmp c_coly
-:       lda #0                     ; (a new half)
-        rol a
-        jsr sethalf
-        jmp c_col
-:       rts
+c_np:   jmp nearpost               ; (cols: c_nd but in the near strip; back to c_nd)
+c_zb:                               ; (rare) the lowest (A: the first's; cols:
+zb1:    cmp ROWB+1,y               ; zb1-3 this strip's)
+        bcs :+
+        lda ROWB+1,y
+:
+zb2:    cmp ROWB+2,y
+        bcs :+
+        lda ROWB+2,y
+:
+zb3:    cmp ROWB+3,y
+        bcs :+
+        lda ROWB+3,y
+:       sta flr                    ; (not level)
+        tax
+        inx
+        stx flr1
+        jmp c_rec
 c_ri:   inx                        ; (the next rung)
         cmp HI,x
         bcs c_ri

@@ -790,9 +790,8 @@ project:
         and #15
         sta ha
         lda (hp1),y
-        and #15
-        clc                        ; (lerpz)
-        adc #13
+        and #15                    ; (lerpz; C clear: the adc #<PY, or the
+        adc #13                    ; bcc)
         sbc ha
         tay
         lda (lqz),y                ; (C set: heights 0..HMAX, HMAX <= 12)
@@ -889,7 +888,7 @@ project:
         sta ROMSEL
         rts
 
-; ha to A by the column's sixteenths (LERPX, inline) or the row's (lerpz):
+; ha to A by the column's sixteenths (LERPX, inline) or the row's (lerpz, pinc's):
 ; land.lerp, by LERPQ.  X kept.
 .macro LERPX
         clc                        ; (A + 13, C clear: - ha - 1)
@@ -900,14 +899,6 @@ project:
         adc ha                     ; (LERPQ: less 1)
 .endmacro
         .assert HMAX <= 12, error, "LERPQ's users: A + 12 - ha must not borrow"
-lerpz:  clc                        ; (A + 13, C clear: - ha - 1)
-        adc #13
-        sbc ha
-        tay
-        lda (lqz),y                ; (C set: heights 0..HMAX, HMAX <= 12)
-        adc ha                     ; (LERPQ: less 1)
-        rts
-
 ; Pinned column Y's height at the row (across by its sixteenths, and down by
 ; the row's if it is pinned too): A.  X kept.
 pinc:   lda CT,y
@@ -938,11 +929,12 @@ pinc:   lda CT,y
         lda (hp1),y
         and #15
         LERPX
-        pha
-        lda hb
-        sta ha
-        pla
-        jmp lerpz
+        clc                        ; (lerpz, inline: hb to A)
+        adc #13
+        sbc hb
+        tay
+        lda (lqz),y                ; (C set)
+        adc hb
 @d:     rts
 
 ; The map's row A (mod 64): its address in (X, Y).

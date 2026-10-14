@@ -64,6 +64,9 @@ BANK    = 4                        ; sideways RAM: the tables
 BANK3   = 6                        ; and the ship's (shipb.s: the keys too)
 B6_KEYS = $8000
 B6_SHIP = $8003
+G_INIT  = $A100                    ; bank 5: the game (game.s)
+G_STEP  = $A103
+G_POST  = $A106
 BANK7   = 7                        ; and the projection (project's)
 BANK2   = 5                        ; and the tiles' colours (project's, a moment)
 
@@ -110,6 +113,11 @@ ZB      = $07D1                    ; project's: ZBACK less the first row's j, th
 RN      = $07D2                    ; near clip's row (j ZBACK - ZCLIP, less it), the
 DIB     = $07D3                    ; first row's di (less 16 j, czs), and the far
 FACT    = $07D4                    ; clip's row (1: row 0, from the rows either side)
+CAME    = $07D6                    ; the camera above CAMH (0..EMAX: the game's), and
+HGV     = $07D7                    ; the ground under the ship (hgnd's, for the game)
+EYV     = $07D8                    ; prow7's: a row's y's for CAME, and its multiply's
+MT0     = $07D9
+MT1     = $07DA
 
 SWT     = $9400                    ; init's line tables, in bank 4's free space: two a
                                    ; page, by line (YSKY..YGND+1, 97 lines): one at
@@ -271,10 +279,20 @@ go:     jsr init
         sta vflip
         sta vlast
 
-loop:   lda #<B6_KEYS              ; (bank 6: the keys, the ship's controls)
+        lda #<G_INIT               ; (bank 5: the game's screen top, the ship)
+        jsr call5
+loop:   lda #<G_STEP               ; the game: keys, flight, the camera
+        jsr call5
+        lda #<B6_KEYS              ; (bank 6: the ship's attitude and place)
         jsr call6
         jsr project
         jsr strips                 ; (waiting for the flip before drawing)
+        lda GSHV                   ; the ship (not while crashed)
+        beq :+
+        lda #<B6_SHIP
+        jsr call6
+:       lda #<G_POST               ; the dots, the map, the status
+        jsr call5
         jsr readout
         jsr flip
         jmp loop
@@ -290,6 +308,17 @@ call6:  sta @j+1
         sta ROMCOPY
         sta ROMSEL
 @j:     jsr $8000
+        lda #BANK
+        sta ROMCOPY
+        sta ROMSEL
+        rts
+
+; Bank 5's routine at $A100 + A (G_INIT, G_STEP, G_POST: game.s), bank 4 after.
+call5:  sta @j+1
+        lda #BANK2
+        sta ROMCOPY
+        sta ROMSEL
+@j:     jsr G_INIT
         lda #BANK
         sta ROMCOPY
         sta ROMSEL
@@ -534,6 +563,12 @@ cph     = lqx+1
 .macro PYS i                        ; (bank 7) corner i's y: SYT7 by its height
         ldy PY+i,x
         lda (syp),y
+        sta PY+i,x
+.endmacro
+.macro PYSE i                       ; (bank 7) the same, the camera CAME higher
+        ldy PY+i,x
+        lda (syp),y
+        adc EYV                     ; (C clear: y's within a byte)
         sta PY+i,x
 .endmacro
 .macro PXS i                        ; (bank 7) corner i's x (B's high byte, in A),
@@ -2871,6 +2906,13 @@ start:  ldx #<cmd_load7             ; TABLES7 to bank 7, SHIPB to bank 6,
         cpx #vdu_end-vdu_init
         bne :-
         jsr glyphs
+        lda #BANK2                 ; the game's letters, in bank 5
+        sta ROMCOPY
+        sta ROMSEL
+        jsr glyphs5
+        lda #BANK
+        sta ROMCOPY
+        sta ROMSEL
         ldx #0                     ; narrow the screen: 64 bytes by 20 rows
 :       lda crtc_regs,x
         sta CRTC_IDX
@@ -2974,6 +3016,51 @@ glyphs: ldx #0                     ; each character's 8 lines, as MODE 1
         rts
 gchars: .byte "0123456789. FPS"
 gchars_end:
+glyphs5:                           ; (as glyphs: the game's letters to GLY5)
+        ldx #0
+@c:     stx tcol
+        lda lchars,x
+        sta oswblk
+        lda #10
+        ldx #<oswblk
+        ldy #>oswblk
+        jsr OSWORD
+        lda tcol
+        asl a
+        asl a
+        asl a
+        asl a
+        tax
+        ldy #0
+@l:     lda oswblk+1,y
+        and #$F0
+        sta tmp
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora tmp
+        sta GLY5,x
+        lda oswblk+1,y
+        and #$0F
+        sta tmp
+        asl a
+        asl a
+        asl a
+        asl a
+        ora tmp
+        sta GLY5+8,x
+        inx
+        iny
+        cpy #8
+        bne @l
+        ldx tcol
+        inx
+        cpx #lchars_end-lchars
+        bne @c
+        rts
+lchars: .byte "FUELANDCRSH"
+lchars_end:
 oswblk: .res 9
 
 ; ---------------------------------------------------------------- bank 7
@@ -3084,10 +3171,14 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         clc
         adc PY+NX-2,x
         sta PY+NX-1,x
-        .repeat NX, i
+        lda CAME                   ; (the camera higher: eyrow's)
+        beq :+
+        jsr eyrow
+        jmp @pyd
+:       .repeat NX, i
         PYS i
         .endrepeat
-        lda tmp+1
+@pyd:   lda tmp+1
         clc
         adc #>B0L
         sta hp0+1
@@ -3142,6 +3233,44 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
 @nr:    inc pr
         jmp @r
 
+
+; The row's y's (SYT7 by height, X: 16 j) with the camera CAME higher: each
+; (CAME (r >> 5) + 64) >> 7 more (land.project's ey, EYV; r < 8192).
+eyrow:  lda rh
+        sta MT1
+        lda rl
+        .repeat 5
+        lsr MT1
+        ror a
+        .endrepeat
+        sta MT0                    ; (r >> 5)
+        lda CAME
+        sta MT1
+        lda #0
+        ldy #8
+        lsr MT1
+@m:     bcc :+
+        clc
+        adc MT0
+:       ror a
+        ror MT1
+        dey
+        bne @m
+        tay                        ; (A, MT1: the product) + 64, >> 7
+        lda MT1
+        clc
+        adc #64
+        sta MT1
+        tya
+        adc #0
+        asl MT1
+        rol a
+        sta EYV
+        clc
+        .repeat NX, i
+        PYSE i
+        .endrepeat
+        rts
 
 ; The ground under the ship (land.ground: ZSHIP ahead at the camera's x, corner
 ; rows j ZBACK - ZSHIP and the next farther, columns CX 4 + (cxs >= 8) and the
@@ -3200,6 +3329,7 @@ hgnd:   lda #ZBACK-ZSHIP           ; its row: ZBACK - ZSHIP less the first's j
         lda (lp),y
         clc
         adc tmp+1                  ; hg
+        sta HGV
         eor #$FF                   ; HMAX - hg
         sec
         adc #HMAX
@@ -3543,3 +3673,5 @@ pcol5:  lda #1
         beq :+
         jmp @cs
 :       rts
+
+        .include "game.s"

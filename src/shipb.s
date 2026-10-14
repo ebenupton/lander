@@ -3,10 +3,8 @@
 ; ship.  LAND calls B6_KEYS ($8000) before projecting and B6_SHIP ($8003)
 ; after the strips (call6 pages this bank in, and bank 4 back after).
 ;
-; The keys (moved here from land.s): the arrows pan the camera a step, and
-; steer the ship: it turns (a step a frame, the shortest way) to face the way
-; the camera moves and tilts to SHIP_TILT while moving, back to level when not
-; (a pitch step a frame).
+; B6_KEYS (once the keys; now the game's, game.s, in bank 5): the ship's
+; direction, pitch and centre copied in from low RAM (GSHK..GSHY).
 ;
 ; The ship: drawn at (shx, shy) on the screen just drawn (scrb), over the land
 ; (shiprast.s); then that screen's TOPS, BOTS (the set the strips recorded in:
@@ -65,92 +63,13 @@ SVIA_ORA_NH = $FE4F
         jsr routine
 no:
 .endmacro
-keys:   lda #0
-        sta kmv
-        sei
-        lda #$7F                   ; bits 0-6 out: the key to test
-        sta SVIA_DDRA
-        lda #3                     ; keyboard auto-scan off
-        sta SVIA_ORB
-        KEY $19, left
-        KEY $79, right
-        KEY $39, away
-        KEY $29, towards
-        lda #$0B                   ; and on
-        sta SVIA_ORB
-        cli
-        ldx kmv                    ; the ship: the way it moves, if one
-        ldy KDIR,x
-        bmi @lv
-        tya                        ; turn a step towards it
-        sec
-        sbc shk
-        and #SHIP_NDIR-1
-        beq @tl
-        cmp #SHIP_NDIR/2
-        lda shk
-        bcs :+
-        adc #1                     ; (C clear) less than half round: + 1
-        bcc :++
-:       sbc #1                     ; (C set) else - 1
-:       and #SHIP_NDIR-1
-        sta shk
-@tl:    lda #SHIP_TILT             ; and tilt
-        .byte $2C                  ; (BIT abs: skip the lda #0)
-@lv:    lda #0                     ; or level
-        cmp shp
-        beq @d
-        bcs :+
-        dec shp
+keys:   ldx #3                     ; (B6_KEYS) the ship as the game left it (game.s:
+:       lda $07DB,x                ; GSHK, GSHP, GSHX, GSHY)
+        sta shk,x
+        dex
+        bpl :-
         rts
-:       inc shp
-@d:     rts
-left:   lda #1
-        jsr mv
-        dec L_cxs
-        bpl :+
-        lda #15
-        sta L_cxs
-        dec L_cxt
-:       rts
-right:  lda #2
-        jsr mv
-        inc L_cxs
-        lda L_cxs
-        cmp #16
-        bne :+
-        lda #0
-        sta L_cxs
-        inc L_cxt
-:       rts
-towards:
-        lda #8
-        jsr mv
-        dec L_czs
-        bpl :+
-        lda #15
-        sta L_czs
-        dec L_czt
-:       rts
-away:   lda #4
-        jsr mv
-        inc L_czs
-        lda L_czs
-        cmp #16
-        bne :+
-        lda #0
-        sta L_czs
-        inc L_czt
-:       rts
-mv:     ora kmv
-        sta kmv
-        rts
-
-; The ship's direction (k) for the keys held (left 1, right 2, away 4,
-; towards 8), $FF for none or a contradiction.  k 0 faces right (+x), 8
-; towards, 16 left, 24 away: Lander's direction, the way its thrust pushes.
-KDIR:   .byte $FF, 16, 0, $FF, 24, 20, 28, $FF
-        .byte 8, 12, 4, $FF, $FF, $FF, $FF, $FF
+        .res $E0-(*-keys)             ; (keeps the ship's layout: its chains' pages)
 
 ; ---------------------------------------------------------------- ship
 ship:   jsr shipdraw               ; (and its box: bxl, bxr, byt, byb)
@@ -185,7 +104,7 @@ ship:   jsr shipdraw               ; (and its box: bxl, bxr, byt, byb)
         bcc @c
         rts
 
-kmv:    .byte 0                    ; the keys held (as KDIR)
+kmv:    .byte 0                    ; (unused: keeps the layout)
 shk:    .byte 0                    ; the ship: direction, pitch, centre
 shp:    .byte 0
 shx:    .byte 128

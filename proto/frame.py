@@ -24,13 +24,13 @@ YSKY, YGND = 64, 159      # the sky's and the ground's flat rows (YGND: the scre
 BLACK = 34                # swatch35's K4
 
 
-def strips_of(hm, cx, cz, m=M):
+def strips_of(hm, cx, cz, m=M, e=0):
     """The frame's strips, top to bottom, each (top points, bottom points, box colours):
     the sky, land.py's, the ground.  Each strip gets its own margin points: a vertical
     rung either side, on a byte boundary (so no column has its pixels split by one), m
     or more pixels beyond the strip's bottom row (the wider), each row extended flat to
     them; the margin boxes black."""
-    xs, rows = L.project(hm, cx, cz)
+    xs, rows = L.project(hm, cx, cz, e)
     pts = [[(sx, sy) for sx, sy, _ in row] for _, row in rows]
     n = len(xs) - 1
     cols = [[L.colour(hm, x, rows[k + 1][0], 0, 0) for x in xs[:-1]]
@@ -49,10 +49,10 @@ def strips_of(hm, cx, cz, m=M):
     return out
 
 
-def draw(img, hm, cx, cz, m=M):
+def draw(img, hm, cx, cz, m=M, e=0):
     """Draw the frame over img (palette entry + 1 by pixel, black 0); returns the strips failing the guarantees."""
     bad = 0
-    for t, b, c in strips_of(hm, cx, cz, m):
+    for t, b, c in strips_of(hm, cx, cz, m, e):
         if not S.ok(t, b):
             bad += 1
         msk = S.mask(t, b)

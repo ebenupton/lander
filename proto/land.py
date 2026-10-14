@@ -54,7 +54,11 @@ ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far 
 CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height above the
                           # ground at the ship (ZSHIP ahead, at the camera's x), height
                           # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
+EMAX = 46                 # the camera's most above CAMH (the near row's y's within a byte)
 ZSHIP = 15                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID)
+PADN = 8                  # the landing pad: tiles 0..PADN-1 in x and z (Lander's LAUNCHPAD_SIZE)
+PADH = 4                  # its height
+PADC = 19                 # its colour (swatch35: one of each ink, a grey)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
 HORIZON = 0               # screen y of the horizon
 XC = 128                  # screen x of the centre (Lander's 160 of 320)
@@ -83,6 +87,7 @@ def heightmap():
             base[z, x] = (raw >> 2) & 3
     land = s >= SEAS
     h = np.where(land, 1 + np.round((s - SEAS) / (s.max() - SEAS) * (HMAX - 1)), 0).astype(int)
+    h[:PADN + 1, :PADN + 1] = PADH        # the landing pad: flat (Lander's: 0 <= x, z < 8)
     return h, base
 
 
@@ -156,7 +161,7 @@ def ground(hm, cx, cz):
     return lerp(lerp(g(xi, zi), g(xi + 1, zi), xf), lerp(g(xi, zi + 1), g(xi + 1, zi + 1), xf), zf)
 
 
-def project(hm, cx, cz):
+def project(hm, cx, cz, e=0):
     """The rows, far to near, each (its tile z, [(sx, sy, height)] across); and the
     columns' tile x (each point's: box i is tile xs[i]).  Camera (cx, cz) in 8.8
     tiles.  Clipped in x at -XCLIP and +XCLIP tiles from the camera: a row's points
@@ -165,7 +170,8 @@ def project(hm, cx, cz):
     repeats it).  Clipped in z at ZCLIP (near: its row between the corner rows
     either side, by 1 - fz, a line or more below the row before) and, if FON, at
     ZFCLIP (far: likewise, a line or more above the row after; at fz 0 a corner row
-    is on it)."""
+    is on it).  e: the camera that much higher (height units, 0..EMAX: the ship's
+    camera), each row's y's lower by (e (r >> 5) + 64) >> 7."""
     xt, zt, fx, fz = cx >> 8, cz >> 8, cx & 255, cz & 255
     xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]      # corners 1..11
     hg = ground(hm, cx, cz)               # (the camera: CAMH above it)
@@ -190,9 +196,10 @@ def project(hm, cx, cz):
         pts += [((x << 8) - cx - 128, h) for x, h in zip(xs[1:-1], hs[1:-1])]
         pts += [(XCLIP, lerp(hs[-2], hs[-1], fx))]
         row = []
+        ey = (e * (r >> 5) + 64) >> 7
         for dx, h in pts:
             sx = XC + ((dx * r + 32768) >> 16)
-            sy = HORIZON + (((CAMH + hg - h) * r + HSCALE * 128) // (HSCALE * 256))
+            sy = HORIZON + (((CAMH + hg - h) * r + HSCALE * 128) // (HSCALE * 256)) + ey
             row.append((sx, sy, h))
         row = clip(row)
         if j == jc:                       # (at least a line below the row before: the
@@ -271,6 +278,8 @@ def colour(hm, i, j, row, nrows):
     if key not in _TGT:
         _TGT.clear()
         _TGT[key] = _targets(hm)
+    if i % MAP < PADN and j % MAP < PADN:
+        return PADC
     t = _TGT[key].get((i % MAP, j % MAP))
     if t is None:
         return SEAC[int(TILERND[j % MAP, i % MAP]) % len(SEAC)]

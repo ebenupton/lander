@@ -104,6 +104,7 @@ def main():
     step = int(sys.argv[3]) if len(sys.argv) > 3 else 2
     ship = 'ship' in sys.argv[4:] or 'shipc' in sys.argv[4:]
     near = 'shipc' in sys.argv[4:]
+    cam = 'cam' in sys.argv[4:]                      # (the camera raised: a random CAME)
 
     mpu, lab = machine()
     lab6 = labels('shipb_labels.txt')
@@ -123,6 +124,8 @@ def main():
         m[lab['cxt']], m[lab['cxs']] = (cx >> 8) & 63, (cx >> 4) & 15
         m[lab['czt']], m[lab['czs']] = (cz >> 8) & 63, (cz >> 4) & 15
         scr = 0x3000 if m[lab['back']] == 0 else 0x5800
+        e = int(rng.integers(0, L.EMAX + 1)) if cam and rng.integers(2) else 0
+        m[0x07D6] = e                                # (CAME)
         m[lab['vcount']] = (m[lab['vflip']] + 1) & 255     # (a vertical sync since the flip)
         for r in ('project', 'strips'):
             cyc[r].append(call(mpu, lab[r]))
@@ -138,7 +141,7 @@ def main():
             cyc['ship'].append(call(mpu, 0x8003))
             m[0xFE30] = 4
         # the projection
-        xs, rows = L.project(hm, (cx >> 8 & 63) << 8 | cx & 255, (cz >> 8 & 63) << 8 | cz & 255)
+        xs, rows = L.project(hm, (cx >> 8 & 63) << 8 | cx & 255, (cz >> 8 & 63) << 8 | cz & 255, e)
         np_, nr = m[lab['np']], m[lab['nr']]
         perr = []
         if np_ != len(xs) or nr != len(rows):
@@ -150,7 +153,7 @@ def main():
                 if got != want:
                     perr.append(f'row {r}: {got} want {want}')
         img = np.zeros((P.H, P.W), np.uint8)
-        F.draw(img, hm, cx, cz)
+        F.draw(img, hm, cx, cz, e=e)
         if ship:
             SG.draw(img, k, p, sx, sy)
         want = screen_bytes(img)

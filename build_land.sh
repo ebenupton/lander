@@ -6,11 +6,12 @@ cd "$(dirname "$0")"
 B=build/land
 mkdir -p $B
 python3 tools/landgen.py $B
+python3 tools/gamegen.py $B
 ca65 -g --cpu 6502 -I src -I $B -o $B/land.o src/land.s -l $B/land.lst
 ld65 -C src/land.cfg -o $B/LAND $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/land.dbg
 python3 - $B <<'PY'                 # bank 5's and bank 7's code into their tables
 import sys
-for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES7', 'B7CODE', 0x3900)):
+for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES2', 'B5GAME', 0x2100), ('TABLES7', 'B7CODE', 0x3900)):
     img = bytearray(open(f'{sys.argv[1]}/{t}', 'rb').read())
     code = open(f'{sys.argv[1]}/{c}', 'rb').read()
     assert not any(img[off:off + len(code)]), t + ': code over the tables'

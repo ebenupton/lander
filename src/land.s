@@ -977,25 +977,43 @@ maprow: and #63
 ; The sky (ns = 0), the land's (ns = 1 .. nr-1: rows ns-1 and ns), the ground
 ; (ns = nr).  A strip's points: 0 its left margin, 1..np the rows', np+1 its
 ; right margin.
-strips: lda back                   ; this screen's TOPS, BOTS
-        lsr a
-        ror a
-        lsr a                      ; 64 * back
+strips: ldx back                   ; this screen's TOPS, BOTS (a set of three)
+        ldy sidx,x
+        lda setTl,y
         sta tsp
-        ora #<BOTS
-        sta bsp
-        lda #>TOPS
+        sta pT5+1
+        sta pT6+1
+        sta pT6b+1
+        lda setTh,y
         sta tsp+1
+        sta pT5+2
+        sta pT6+2
+        sta pT6b+2
+        lda setBl,y
+        sta bsp
+        sta pB5+1
+        sta pB6+1
+        lda setBh,y
         sta bsp+1
-        ldx #31
-:       lda #$FF
-        sta CURT,x
-        sta CURT+32,x
-        lda #0
-        sta CURB,x
-        sta CURB+32,x
-        dex
-        bpl :-
+        sta pB5+2
+        sta pB6+2
+        ldy cidx                   ; and this frame's: CURT, CURB's operands
+        lda setTl,y                ; (each column's set by the strip it is first
+        sta pT3+1                  ; in, CURB by the near strip; the rest by gone:
+        sta pT4+1                  ; each strip's columns are within the next's)
+        sta pT4b+1
+        lda setTh,y
+        sta pT3+2
+        sta pT4+2
+        sta pT4b+2
+        lda setBl,y
+        sta pB4+1
+        sta pB7+1
+        sta pB7b+1
+        lda setBh,y
+        sta pB4+2
+        sta pB7+2
+        sta pB7b+2
         lda #>ROWA
         sta topa+1
         lda #>ROWB
@@ -1031,14 +1049,19 @@ strips: lda back                   ; this screen's TOPS, BOTS
         cmp nr
         bcc @strip
         jsr gone
-        ldy #63                    ; this frame's for the screen's next
-:       lda CURT,y
-        sta (tsp),y
-        lda CURB,y
-        sta (bsp),y
-        dey
-        bpl :-
+        ldx back                   ; this frame's set the screen's next, its
+        ldy cidx                   ; last the next frame's
+        lda sidx,x
+        sta cidx
+        tya
+        sta sidx,x
         rts
+sidx:   .byte 0, 1                 ; each screen's set (TOPS, BOTS: init's)
+cidx:   .byte 2                    ; this frame's
+setTl:  .byte <TOPS, <(TOPS+64), <CURT
+setTh:  .byte >TOPS, >(TOPS+64), >CURT
+setBl:  .byte <BOTS, <(BOTS+64), <CURB
+setBh:  .byte >BOTS, >(BOTS+64), >CURB
 
 ; The strip's points (TX..BY) and boxes (CE, CO), its top row's line (the
 ; last strip's bottom row's, widened, or the sky's) and its bottom row's.
@@ -1775,27 +1798,25 @@ c_split: cmp LO+1,x
         jmp c_next
 ; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
 ; inline: back to c_rd, Y = x4).
-record: tya
-        lsr a
+record: tya                        ; (always the column's first strip this
+        lsr a                      ; frame: PINL, PINR widen to the near row)
         lsr a
         tax
-        lda CURT,x
-        cmp #$FF
-        bne @d
         lda mn                     ; the column's first strip this frame: its
-        sta CURT,x                 ; highest line, and black from the land's
-        txa                        ; highest last time down to its top's lowest
-        tay                        ; (the pixels above their top in its top zone
-        lda (tsp),y                ; kept)
+pT3:    sta CURT,x                 ; highest line, and black from the land's
+pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
+                                   ; (the pixels above their top in its top zone
+                                   ; kept)
         cmp mx
-        bcs @d
-        tax
+        bcc :+
+        jmp c_rd                   ; (Y = x4)
+:       tax
         ldy mx
         lda #0
         sta ve
         sta vo
         jsr run
-@d:     ldy x4
+        ldy x4
         jmp c_rd
 
 c_dbl:   bvs :+                     ; (the slow ways read ys)
@@ -1822,7 +1843,7 @@ np_h    = nearpost+8               ; (nearpost's LAHS)
 nearpost:
         lda flr                    ; (its bottom level: flr1 = flr)
         cmp flr1
-        bne @z
+        bne np_z
         ldx flr
         lda LAHSB0,x               ; (np_h: sethalf's, the screen and half's)
         sta zp_+1
@@ -1832,8 +1853,8 @@ nearpost:
         ldy coff
         lda #0
         sta (zp_),y
-        beq @b
-@z:     ldy x4
+        beq np_b
+np_z:     ldy x4
         lda (bota),y
         sta ys
         sta mn
@@ -1856,21 +1877,21 @@ nearpost:
         bcs :+
         sta mn
 :       ldx mn
-@l:     jsr pmask
+np_l:     jsr pmask
         lda #0
         jsr zline
         inx
         cpx flr1
-        bcc @l
-@b:     lda x4                     ; the land's lowest line now, and last time's
+        bcc np_l
+np_b:     lda x4                     ; the land's lowest line now, and last time's
         lsr a
         lsr a
         tay
         lda flr
-        sta CURB,y
-        cmp (bsp),y
-        bcs @n
-        lda (bsp),y
+pB4:    sta CURB,y
+pB5:    cmp BOTS,y
+        bcs np_n
+pB6:    lda BOTS,y
         tay
         iny
         ldx flr
@@ -1879,20 +1900,47 @@ nearpost:
         sta ve
         sta vo
         jsr run
-@n:     jmp c_nd
+np_n:     jmp c_nd
 
 ; Columns the land has left since last time: black from its highest line to
-; its lowest.
-gone:   ldx #63                    ; (right to left: the columns are independent)
-@c:     lda CURT,x
+; its lowest.  Each column outside this frame's land: none this frame (CURT
+; $FF, CURB 0).
+.macro GONE1 lt, lc, lb
+        .local nd
+lt      = *
+        lda TOPS,x
         cmp #$FF
-        bne @n
-        txa
-        tay
-        lda (tsp),y
-        cmp #$FF
-        beq @n
-        stx tj
+        beq nd
+        jsr gn_d
+nd:     lda #$FF
+lc      = *
+        sta CURT,x
+        lda #0
+lb      = *
+        sta CURB,x
+.endmacro
+gone:   lda xr                     ; (right to left: the columns are independent)
+        lsr a                      ; the columns right of the near strip's (all
+        lsr a                      ; the strips' columns: within the near strip's)
+        sta tsy
+        ldx #63
+        cpx tsy
+        bcc gn_l
+gn_c:   GONE1 pT6, pT4, pB7
+        dex
+        cpx tsy
+        bcs gn_c
+gn_l:   lda xl                     ; and left of them
+        lsr a
+        lsr a
+        tax
+        dex
+        bmi gn_x
+gn_c2:  GONE1 pT6b, pT4b, pB7b
+        dex
+        bpl gn_c2
+gn_x:   rts
+gn_d:   stx tj
         txa
         asl a
         asl a
@@ -1917,8 +1965,6 @@ gone:   ldx #63                    ; (right to left: the columns are independent
         sta vo
         jsr run
         ldx tj
-@n:     dex
-        bpl @c
         rts
 
 ; The column's half of the screen: A (0 left, 1 right).

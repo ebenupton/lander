@@ -11,12 +11,16 @@ from PIL import Image, ImageDraw
 K, C, M, Y = 0, 1, 2, 3
 PHYS = {K: (0, 0, 0), C: (0, 255, 255), M: (255, 0, 255), Y: (255, 255, 0)}
 ORDER = [(0, 0), (1, 1), (1, 0), (0, 1)]       # the diagonals first: pairs are checkered
+KPHASE = [(0, 0), (1, 1), (1, 0), (0, 1)]      # where the black goes, in every colour
 
 
 def cell(k, c, m, y):
     """The 2x2 cell: cyan from the front of ORDER, yellow then magenta from the back,
     black in between; SHEARED cells with their odd line's two pixels swapped (a shear
-    by a pixel: their one ink filling a column becomes a diagonal, no vertical strips)."""
+    by a pixel: their one ink filling a column becomes a diagonal, no vertical strips);
+    then scrolled (shifted by a pixel across, down or both) so the black is in phase
+    in every colour: one in four at (0, 0), two the checkerboard (0, 0), (1, 1),
+    three those and (1, 0)."""
     out, back = {}, ORDER[::-1]
     for pos in ORDER[:c]:
         out[pos] = C
@@ -28,6 +32,13 @@ def cell(k, c, m, y):
         out.setdefault(pos, K)
     if (k, c, m, y) in SHEARED:
         out[(0, 1)], out[(1, 1)] = out[(1, 1)], out[(0, 1)]
+    if 0 < k < 4:                            # scrolled so the black is in phase: one in
+        want = set(KPHASE[:k])               # four at KPHASE[0], two the checkerboard
+        for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):   # KPHASE[:2], three KPHASE[:3]
+            moved = {((x + dx) & 1, (y + dy) & 1): v for (x, y), v in out.items()}
+            if {p for p, v in moved.items() if v == K} == want:
+                return moved
+        raise ValueError(f'no scroll puts K{k}C{c}M{m}Y{y}\'s black in phase')
     return out
 
 

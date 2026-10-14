@@ -44,7 +44,7 @@ ZBACK = 20                # the back row's depth, tiles (fz = 0)
 XSKIP = 1                 # the corner columns not drawn either side (their tiles: the
                           # left and right columns)
 XCLIP = 1152              # the clip planes in x, 8.8 tiles from the camera either side (4.5)
-ZSKIP = 4                 # the far corner rows not drawn (their tiles: the far four rows)
+ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
 HORIZON = 20              # screen y of the horizon

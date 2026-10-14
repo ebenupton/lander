@@ -632,18 +632,7 @@ project:
         asl a
         asl a
         tay
-        ldx #0
-:       lda COLO,y                 ; (C clear: cxs < 16, then X < np)
-        adc cxt
-        and #63
-        sta CT,x
-        lda COLQ,y
-        sta CQ,x
-        iny
-        inx
-        cpx np
-        bne :-
-        lda CQ                     ; (both pinned columns' sixteenths)
+        lda COLQ,y                 ; (both pinned columns' sixteenths)
         asl a
         asl a
         asl a
@@ -652,7 +641,16 @@ project:
         sta lqx
         lda #>LERPQ
         adc #0
-        sta lqx+1
+        sta lqx+1                  ; (C clear: LERPQ's page + 1 < $100)
+        ldx #0
+:       lda COLO,y                 ; (C clear, then X < np)
+        adc cxt
+        and #63
+        sta CT,x
+        iny
+        inx
+        cpx np
+        bne :-
         ldy czs                    ; the rows, far to near (ROWO, ROWQ, ROWD, NRT)
         lda NRT,y
         sta nr
@@ -851,6 +849,7 @@ project:
         sta ROMCOPY
         sta ROMSEL
         rts
+        .res 6                     ; (spare: keeps the strips' code in place)
 
 ; ha to A by the column's sixteenths (LERPX, inline) or the row's (lerpz, pinc's):
 ; land.lerp, by LERPQ.  X kept.

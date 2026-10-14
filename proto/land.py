@@ -30,7 +30,7 @@ import strip as S
 MAP = 64                  # tiles a side (the map wraps)
 HSCALE = 16               # height units a tile
 HMAX = 12                 # heights 0..HMAX (softened: under a tile)
-SEA = 3                   # sea level: lower corners are flattened to it
+SEA = 5                   # sea level: lower corners are flattened to it
 # Lander's camera (Lander.arm): TILES_X = 13, TILES_Z = 11 corners (12 x 10 tiles),
 # the block's corners at z = 20 - fz - j (j 0..10, far to near) and x = -5.5 - fx + i
 # (i 0..12: landscapeOffset's -LANDSCAPE_X, less xCamera's fraction) tiles from the

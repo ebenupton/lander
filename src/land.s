@@ -2024,26 +2024,25 @@ np_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
 np_z:     ldy x4
         lda (bota),y
         sta ys
-        sta mn
         iny
         lda (bota),y
         sta ys+1
-        cmp mn
-        bcs :+
-        sta mn
-:       iny
+        iny
         lda (bota),y
         sta ys+2
-        cmp mn
-        bcs :+
-        sta mn
-:       iny
+        iny
         lda (bota),y
         sta ys+3
-        cmp mn
-        bcs :+
-        sta mn
-:       ldx mn
+        cmp ys+2                   ; the highest
+        bcc :+
+        lda ys+2
+:       cmp ys+1
+        bcc :+
+        lda ys+1
+:       cmp ys
+        bcc :+
+        lda ys
+:       tax
 np_l:
 np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; sethalf's)
         sta zp_+1

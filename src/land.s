@@ -1000,10 +1000,12 @@ strips: ldx back                   ; this screen's TOPS, BOTS (a set of three)
         sta bsp
         sta pB5+1
         sta pB6+1
+        sta pB8+1
         lda setBh,y
         sta bsp+1
         sta pB5+2
         sta pB6+2
+        sta pB8+2
         ldy cidx                   ; and this frame's: CURT, CURB's operands
         lda setTl,y                ; (each column's set by the strip it is first
         sta pT3+1                  ; in, CURB by the near strip; the rest by gone:
@@ -2095,11 +2097,25 @@ np_b:     lda x4                     ; the land's lowest line now, and last time
 pB4:    sta CURB,y
 pB5:    cmp BOTS,y
         bcs np_n
-pB6:    lda BOTS,y
+        adc #1                     ; (C clear) flr + 1
+        tax
+pB6:    cmp BOTS,y
+        bne np_r
+        lda LAH,x                  ; one line (flr + 1 = BOTS): black, here
+        clc
+        adc scrh
+        sta zp_+1
+        txa
+        and #7
+        sta zp_
+        ldy coff
+        lda #0
+        sta (zp_),y
+        jmp c_nd
+np_r:
+pB8:    lda BOTS,y
         tay
         iny
-        ldx flr
-        inx
         lda #0
         sta ve
         sta vo

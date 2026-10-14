@@ -2064,9 +2064,26 @@ np_z:     ldy x4
         bcs :+
         sta mn
 :       ldx mn
-np_l:     jsr pmask
+np_l:
+np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; sethalf's)
+        sta zp_+1
+        txa
+        and #7
+        sta zp_
         lda #0
-        jsr zline
+        cpx ys+3
+        rol a
+        cpx ys+2
+        rol a
+        cpx ys+1
+        rol a
+        cpx ys
+        rol a
+        tay
+        lda MASKN,y
+        ldy coff
+        and (zp_),y
+        sta (zp_),y
         inx
         cpx flr1
         bcc np_l
@@ -2180,10 +2197,12 @@ sethalf:
         sta fs_h+1
         sta fr_h+1
         sta np_h+1
+        sta np_h2+1
         lda lahsh,y
         sta fs_h+2
         sta fr_h+2
         sta np_h+2
+        sta np_h2+2
         rts
 exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3)
 exhh:   .byte >(EXHB0), >(EXHB1), >(EXHB2), >(EXHB3)
@@ -2487,6 +2506,8 @@ pmask:  lda #0
         rts
 MASKB:  .byte $00, $88, $44, $CC, $22, $AA, $66, $EE
         .byte $11, $99, $55, $DD, $33, $BB, $77, $FF
+MASKN:  .byte $FF, $77, $BB, $33, $DD, $55, $99, $11
+        .byte $EE, $66, $AA, $22, $CC, $44, $88, $00
 
 ; Line X of the column: A in msk's pixels (read-modify-write).  X kept.
 zline:  sta zv

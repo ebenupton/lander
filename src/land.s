@@ -1846,10 +1846,9 @@ nearpost:
         tay
         lda flr
         sta CURB,y
+        cmp (bsp),y
+        bcs @n
         lda (bsp),y
-        cmp flr
-        beq @n
-        bcc @n
         tay
         iny
         ldx flr

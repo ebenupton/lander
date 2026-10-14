@@ -13,7 +13,8 @@ And:
   MAP + z*64 + x          a tile corner's height (bits 0-3) and its tile's colour pick
                           (bits 4-7: LANDT or SEAT gives the palette entry)
   DE, DO + palette entry  a dither's bytes on even and odd lines (swatch35 numbering)
-  DQT, DRT + a*64 + D    D div 2a, D mod 2a (a 1..31, D 0..63)
+  DQT, DRT + a*64 + D    D div a, D mod a (a 1..31, D 0..63); DVH, DVR, DVL + a:
+                          its row's pages and offset
   COLO, COLQ + cxs*16 + i the camera's x step's column i: tile (from cxt) and
                           sixteenths; NPT + cxs: how many
   ROWO, ROWQ, ROWD + czs*8 + r  its z step's row r (far to near): tile (from
@@ -35,7 +36,8 @@ ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, SYPL=0xBC80, SYPH=0xBCC0, SYT=0x
             PINL=0xA200, PINR=0xA240, DE=0xA300, DO=0xA340,
             LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00,
             COLO=0xB600, COLQ=0xB700, ROWO=0xB800, ROWQ=0xB880, ROWD=0xB900,
-            NPT=0xB980, NRT=0xB990, LERPQ=0xBA00)
+            NPT=0xB980, NRT=0xB990, LERPQ=0xBA00,
+            DVH=0xBD00, DVR=0xBD20, DVL=0xBD40)
 NDI = (L.ZFAR - L.ZNEAR) // 16 + 1
 
 
@@ -79,8 +81,11 @@ def build():
         put('SEAT', r, L.SEAC[r % len(L.SEAC)])
     for a in range(1, 32):
         for d in range(64):
-            put('DQT', a * 64 + d, d // (2 * a))
-            put('DRT', a * 64 + d, d % (2 * a))
+            put('DQT', a * 64 + d, d // a)
+            put('DRT', a * 64 + d, d % a)
+        put('DVH', a, (ADDR['DQT'] + a * 64) >> 8)
+        put('DVR', a, (ADDR['DRT'] + a * 64) >> 8)
+        put('DVL', a, (a * 64) & 255)
     for cxs in range(16):                   # the columns for the camera's x step
         xs = L.grid_lines(16 * cxs - L.W, 16 * cxs + L.W)
         put('NPT', cxs, len(xs))

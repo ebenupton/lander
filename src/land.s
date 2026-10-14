@@ -1392,28 +1392,27 @@ divs:   lda dva
 :       sty rq
         sta rrem
         jmp dv2
-divt:   lda dva
-        lsr a
-        lsr a
-        clc
-        adc #>DQT
-        sta dvp+1
-        adc #>(DRT-DQT)
-        sta dvq+1
-        lda dva
-        and #3
-        lsr a
-        ror a
-        ror a
+divt:   ldy dva                    ; (D div a, D mod a: q2, and q, rem, r2 from them)
+        lda DVH,y
+        sta @q+2
+        lda DVR,y
+        sta @r+2
+        lda DVL,y
         ora dvd
         tay
-        lda #0
-        sta dvp
-        sta dvq
-        lda (dvp),y
+@r:     lda DRT,y                  ; r = D mod a: r2 = 2r
+        asl a
+        sta rr2
+@q:     lda DQT,y                  ; q2 = D div a: q = q2 / 2
+        sta rq2
+        lsr a
         sta rq
-        lda (dvq),y
+        lda rr2                    ; rem = r + a (q2 odd)
+        bcc :+
+        adc ra2                    ; (C set: 2r + 2a + 1)
+:       lsr a
         sta rrem
+        rts
 dv2:    asl a                      ; 2D = 2q (2a) + 2 rem
         sta rr2
         lda rq

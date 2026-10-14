@@ -2691,24 +2691,27 @@ split2: ldx ri
         ldy kb                     ; the next transition, or the floor
         jmp @rl3
 @tr:    ldy kk                     ; (catch2, inline: X = yy)
-:       txa
+        txa
         cmp TRL,y
-        bcc :+
-        lda TRB,y
+        bcc @k2
+:       lda TRB,y
         sta bpos
         iny
-        bne :-
-:       sty kk
-        ldy kb
-:       txa
+        txa
         cmp TRL,y
-        bcc :+
-        lda TRB,y
+        bcs :-
+        sty kk
+@k2:    ldy kb                     ; (A = X)
+        cmp TRL,y
+        bcc @rl3
+:       lda TRB,y
         sta bpos2
         iny
-        bne :-
-:       sty kb                     ; (Y = kb)
-@rl3:   lda TRL,y
+        txa
+        cmp TRL,y
+        bcs :-
+        sty kb
+@rl3:   lda TRL,y                  ; (Y = kb)
         ldy kk
         cmp TRL,y
         bcc :+

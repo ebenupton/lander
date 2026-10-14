@@ -171,6 +171,8 @@ dvq:    .res 2
 fe:     .res 1
 tcnt:   .res 1
 tsy:    .res 1
+bflat:  .res 1                     ; the column's bottom row level
+last:   .res 1                     ; the near strip ($80)
 sx_:    .res 1
 ; columns
 x4:     .res 1                     ; the column's first pixel
@@ -990,7 +992,6 @@ strips: lda back                   ; this screen's TOPS, BOTS
         lda ns
         cmp nr
         bcc @strip
-        jsr bottom
         jsr gone
         ldy #63                    ; this frame's for the screen's next
 :       lda CURT,y
@@ -1003,7 +1004,15 @@ strips: lda back                   ; this screen's TOPS, BOTS
 
 ; The strip's points (TX..BY) and boxes (CE, CO), its top row's line (the
 ; last strip's bottom row's, widened, or the sky's) and its bottom row's.
-setup:  ldx #0                     ; a land strip: record its lines
+setup:  ldx #0                     ; the near strip: the ground below it too
+        lda ns
+        clc
+        adc #1
+        cmp nr
+        bne :+
+        dex
+:       stx last
+        ldx #0                     ; a land strip: record its lines
         lda ns
         beq :+
         cmp nr
@@ -1610,10 +1619,18 @@ pb2:    cmp ROWB+2,y
         bne c_zb
 pb3:    cmp ROWB+3,y
         bne c_zb
+        ldx #1                     ; (level)
+        stx bflat
 c_fb:    sta flr
         tax
         inx
         stx flr1
+        bit last                   ; (the near strip, its bottom level: the
+        bpl :+                     ; ground's from the floor's line on)
+        ldx bflat
+        beq :+
+        dec flr1
+:
         lda ns                     ; a column new this frame (strip 1's, or
         cmp #1                     ; beyond the last strip's): record it
         beq :+
@@ -1645,7 +1662,10 @@ c_r1:    ldx mx
         bcs c_next
         ldy flr1
         jsr run
-c_next:  lda x4
+c_next:  bit last
+        bpl :+
+        jsr nearpost
+:       lda x4
         clc
         adc #4
         sta x4
@@ -1667,6 +1687,8 @@ c_zb:    lda (bota),y               ; (rare) the lowest
         bcs :+
         lda (bota),y
 :       ldy x4
+        ldx #0                     ; (not level)
+        stx bflat
         jmp c_fb
 c_z1:    jsr zone1
         jmp c_r1
@@ -1719,35 +1741,14 @@ record: tya
 @d:     ldy x4
         rts
 
-; Below the near row: black (the near strip's columns, its bottom row in
-; topa): the lines between its pixels' highest and lowest, each the pixels at
-; or below their line; then to the land's lowest line last time.
-bottom: lda xl
-        sta x4
-        lda #$FF
-        sta half
-@c:     lda x4
-        asl a
-        sta coff
-        lda #0
-        rol a
-        cmp half
-        beq :+
-        jsr sethalf
-:
-        ldy x4
-        lda (topa),y               ; level across the column (mostly): one line
-        iny
-        cmp (topa),y
-        bne @z
-        iny
-        cmp (topa),y
-        bne @z
-        iny
-        cmp (topa),y
-        bne @z
-        sta mx
-        tax
+; The near strip's column, drawn (to the line before its floor if its bottom
+; row is level there, else to the floor): below the near row black (the line
+; at the floor, or the pixels at or below their bottom-row line, read-modify-
+; write); then black to the land's lowest line last time (BOTS); CURB.
+nearpost:
+        lda bflat
+        beq @z
+        ldx flr
         lda LAH,x
         clc
         adc scrh
@@ -1758,60 +1759,47 @@ bottom: lda xl
         ldy coff
         lda #0
         sta (zp_),y
-        jmp @b
+        beq @b
 @z:     ldy x4
-        lda (topa),y
+        lda (bota),y
         sta ys
         sta mn
-        sta mx
         ldx #1
 :       iny
-        lda (topa),y
+        lda (bota),y
         sta ys,x
         cmp mn
         bcs :+
         sta mn
-:       cmp mx
-        bcc :+
-        sta mx
 :       inx
         cpx #4
-        bne :---
+        bne :--
         ldx mn
 @l:     jsr pmask
         lda #0
         jsr zline
         inx
-        cpx mx
-        beq @l
+        cpx flr1
         bcc @l
-@b:
-        lda x4                     ; the land's lowest line now, and last time's
+@b:     lda x4                     ; the land's lowest line now, and last time's
         lsr a
         lsr a
         tay
-        lda mx
+        lda flr
         sta CURB,y
         lda (bsp),y
-        cmp mx
+        cmp flr
         beq @n
         bcc @n
         tay
         iny
-        ldx mx
+        ldx flr
         inx
         lda #0
         sta ve
         sta vo
         jsr run
-@n:     lda x4
-        clc
-        adc #4
-        sta x4
-        cmp xr
-        beq :+
-        jmp @c
-:       rts
+@n:     rts
 
 ; Columns the land has left since last time: black from its highest line to
 ; its lowest.

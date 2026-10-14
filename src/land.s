@@ -1846,6 +1846,8 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
 :       sta c_ra+1
         lda xrp
         sta c_rb+1
+        lda xr
+        sta c_xe+1
         lda #0
         sta ri
         lda xl
@@ -1891,7 +1893,7 @@ c_nd:                               ; the next column (c_np's, nearpost's)
         clc
         adc #4
         sta x4
-        cmp xr
+c_xe:   cmp #0                     ; (cols: xr)
         beq c_end
         tay
         asl a                      ; 8 * column

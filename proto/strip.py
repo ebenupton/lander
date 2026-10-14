@@ -13,9 +13,10 @@ A strip: a top row and the row below it, its bottom row.  Constraints:
   - the bottom row is wider: its spacing is larger, its first point no further right
     and its last point no further left than the top row's (so the end rungs lean out);
   - (the grid's rows: each a pixel or more wider-spaced than the last)
-  - the rows are shallow: every segment's |dy| < its width;
-  - every rung (top point i to bottom point i) is steep: its dy >= its |dx|, dy > 0
-    (45 degrees at most: still one x per line);
+  - the rows are shallow: every segment's |dy| < its width (or the segment has no
+    length: points clipped onto a screen edge together);
+  - every rung (top point i to bottom point i) goes down: dy > 0 (one x per line, a
+    shallow rung's x stepping several pixels a line);
   - each byte column's top is no lower than its bottom (lowest bottom-row point).
 The fill, as ragged.py: each rung is a boundary B_i(y), stepped in y, one x per line
 (top or bottom point's x above or below it); pixel (x, y) is in box
@@ -66,10 +67,11 @@ def ok(top_pts, bot_pts):
     """A strip's constraints (the docstring's)."""
     if not (bot_pts[0][0] <= top_pts[0][0] and bot_pts[-1][0] >= top_pts[-1][0]):
         return False
-    for row in (top_pts, bot_pts):
-        if any(abs(y1 - y0) >= x1 - x0 for (x0, y0), (x1, y1) in zip(row, row[1:])):
+    for row in (top_pts, bot_pts):            # (a segment of no length: points clipped
+        if any(abs(y1 - y0) >= x1 - x0 and (x0, y0) != (x1, y1)    # onto a screen edge)
+               for (x0, y0), (x1, y1) in zip(row, row[1:])):
             return False
-    if any(yb - yt < abs(xb - xt) or yb <= yt for (xt, yt), (xb, yb) in zip(top_pts, bot_pts)):
+    if any(yb <= yt for (xt, yt), (xb, yb) in zip(top_pts, bot_pts)):
         return False
     top, bot = P.trace(top_pts), P.trace(bot_pts)
     botc = R.bottoms(bot)

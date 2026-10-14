@@ -20,7 +20,7 @@ import strip as S
 
 STEP = 1                  # the most steps a frame the pan moves
 M = 8                    # the margin boxes' width, pixels
-YSKY, YGND = 68, 143      # the sky's and the ground's flat rows
+YSKY, YGND = 64, 158      # the sky's and the ground's flat rows
 BLACK = 34                # swatch35's K4
 
 
@@ -33,15 +33,15 @@ def strips_of(hm, cx, cz, m=M):
     xs, rows = L.project(hm, cx, cz)
     pts = [[(sx, sy) for sx, sy, _ in row] for _, row in rows]
     n = len(xs) - 1
-    cols = [[L.colour(hm, L.mid(x, x1), L.mid(rows[k][0], rows[k + 1][0]), 0, 0) for x, x1 in zip(xs, xs[1:])]
+    cols = [[L.colour(hm, x, rows[k + 1][0], 0, 0) for x in xs[:-1]]
             for k in range(len(rows) - 1)]
     sky = [(x, YSKY) for x, _ in pts[0]]
     gnd = [(x, YGND) for x, _ in pts[-1]]
     pairs = [(sky, pts[0], [BLACK] * n)] + list(zip(pts, pts[1:], cols)) + [(pts[-1], gnd, [BLACK] * n)]
     out = []
     for t, b, c in pairs:
-        xl = (b[0][0] - m) & ~3
-        xr = (b[-1][0] + m + 3) & ~3
+        xl = max(0, (b[0][0] - m) & ~3)          # (on the screen)
+        xr = min(255, (b[-1][0] + m + 3) & ~3)
         out.append(([(xl, t[0][1])] + t + [(xr, t[-1][1])],
                     [(xl, b[0][1])] + b + [(xr, b[-1][1])],
                     [BLACK] + c + [BLACK]))

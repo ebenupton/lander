@@ -29,15 +29,21 @@ import strip as S
 
 MAP = 64                  # tiles a side (the map wraps)
 HSCALE = 16               # height units a tile
-# Lander's elevated view, 7 tiles across; a tile's height on screen over its width is
-# about CAMH / depth, so the rows sit around the camera's height out (near-square)
 HMAX = 12                 # heights 0..HMAX (softened: under a tile)
 SEA = 3                   # sea level: lower corners are flattened to it
-W = 896                   # the grid's half-width, 8.8 tiles (3.5)
-ZNEAR, ZFAR = 1024, 1920  # the near and far rows, 8.8 tiles in front (4, 7.5)
+# Lander's camera (Lander.arm): TILES_X = 13, TILES_Z = 11 corners (12 x 10 tiles),
+# the block's corners at x = -5.5 - fx + i (i 0..12) and z = 20 - fz - j (j 0..10,
+# far to near) tiles from the camera, fx, fz the camera's fractions of a tile (the
+# block of whole tiles slides, a tile at a time: no pinned edges, no slivers); its
+# projection on 320 x 256 (MODE 13): 160 + 256 x / z, 64 + 256 y / z.  Here: the
+# same, scaled to 256 wide (focal 204.8), the horizon moved up to fit 160 lines;
+# rows clipped at the screen's edges (the nearest overhang them, as in Lander)
+NX, NZ = 13, 11           # corners across and deep
+ZBACK = 20                # the back row's depth, tiles (fz = 0)
+XLEFT = 1408              # the left corner's x, 8.8 tiles (5.5), less fx
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
-F = 115                   # focal length, pixels
-HORIZON = 4               # screen y of the horizon
+F256 = 52429              # focal length, 8.8 pixels (204.8 = 256 * 256 / 320)
+HORIZON = 40              # screen y of the horizon
 # the palette (proto/swatch35.py's numbering): the user's picks
 LAND = [1, 3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
 SEAC = [0, 2, 15, 17]
@@ -82,7 +88,7 @@ LANDTAB = [[nearest(lander_rgb(bs, br), LAND) for br in range(16)] for bs in ran
 
 def recip(d):
     """F / d, d in 8.8 tiles: pixels a tile, 8.8 (as a table lookup would give it)."""
-    return (F * 65536 + d // 2) // d
+    return (F256 * 256 + d // 2) // d
 
 
 def lerp(a, b, f):
@@ -98,47 +104,51 @@ def corner(hm, x, z):
     return lerp(lerp(g(xi, zi), g(xi + 1, zi), xf), lerp(g(xi, zi + 1), g(xi + 1, zi + 1), xf), zf)
 
 
-XGAP = 1                  # a column line this close to a pinned edge (8.8 tiles) is
-ZGAP = 32                 # dropped, and a row line: columns only on the edge itself,
-                          # rows within an eighth of a tile (a thinner strip can have a
-                          # rung of no height; an eighth makes 6 rows at most).  Thin
-                          # strips' rungs can be shallow: the fill takes them
-
-
-
-def grid_lines(lo, hi, gap):
-    """Whole-tile positions between lo and hi (8.8), at least gap from both, with the
-    two pinned ends: the grid's lines along one axis (virus drops a line that lands on
-    the edge)."""
-    first = (lo + gap + 255) >> 8
-    last = (hi - gap) >> 8
-    return [lo] + [k << 8 for k in range(first, last + 1)] + [hi]
+def clip(row):
+    """The row's points clipped to the screen (x 0..255): the points beyond an edge
+    moved onto it, at the row's y where it crosses it (rounded), so the strips' end
+    rungs there are vertical, along the edge."""
+    pts = [list(p) for p in row]
+    k = 0
+    while pts[k][0] < 0:
+        k += 1
+    if k:
+        (x0, y0, _), (x1, y1, _) = pts[k - 1], pts[k]
+        yc = y0 + ((y1 - y0) * -x0 * 2 + (x1 - x0)) // (2 * (x1 - x0))
+        for i in range(k):
+            pts[i][0], pts[i][1] = 0, yc
+    k = len(pts) - 1
+    while pts[k][0] > 255:
+        k -= 1
+    if k < len(pts) - 1:
+        (x0, y0, _), (x1, y1, _) = pts[k], pts[k + 1]
+        yc = y0 + ((y1 - y0) * (255 - x0) * 2 + (x1 - x0)) // (2 * (x1 - x0))
+        for i in range(k + 1, len(pts)):
+            pts[i][0], pts[i][1] = 255, yc
+    return [tuple(p) for p in pts]
 
 
 def project(hm, cx, cz):
-    """The rows, far to near, each (z, [(sx, sy, height)] across); and the columns' x."""
-    zs = grid_lines(cz + ZNEAR, cz + ZFAR, ZGAP)[::-1]
-    xs = grid_lines(cx - W, cx + W, XGAP)
+    """The rows, far to near, each (its tile z, [(sx, sy, height)] across); and the
+    columns' tile x.  Camera (cx, cz) in 8.8 tiles."""
+    xt, zt = cx >> 8, cz >> 8
+    xs = [xt - 5 + i for i in range(NX)]
     rows = []
-    for z in zs:
-        r = recip(z - cz)
+    for j in range(NZ):
+        z = zt + ZBACK - j
+        r = recip((z << 8) - cz)
         row = []
         for x in xs:
-            h = corner(hm, x, z)
-            sx = 128 + (((x - cx) * r + 32768) >> 16)
+            h = int(hm[0][z % MAP, x % MAP])
+            dx = (x << 8) - cx - 128
+            sx = 128 + ((dx * r + 32768) >> 16)
             sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))
-        rows.append((z, row))
+        rows.append((z, clip(row)))
     return xs, rows
 
 
 TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC's map: 4 bits a tile)
-
-
-def mid(a, b):
-    """The tile at the middle of a to b (8.8): a cell's tile, the one covering most of
-    it (a cell merged with a sliver next to a pinned edge takes the larger tile's)."""
-    return ((a + b) >> 1) >> 8
 
 
 def colour(hm, i, j, row, nrows):
@@ -164,7 +174,7 @@ def frame(hm, cx, cz):
         if not S.ok(t, b):
             bad += 1
             continue
-        cols = [colour(hm, mid(x, x1), mid(z0, z1), k + 1, len(rows) - 1) for x, x1 in zip(xs, xs[1:])]
+        cols = [colour(hm, x, z1, k + 1, len(rows) - 1) for x in xs[:-1]]
         m = S.mask(t, b)
         img[m >= 0] = np.array(cols)[m[m >= 0]] + 1
     return img, bad, len(rows) - 1

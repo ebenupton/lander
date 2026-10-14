@@ -7,8 +7,9 @@
 ; shipdraw: direction shk (0..SHIP_NDIR-1), pitch shp (0..SHIP_NPITCH-1),
 ; centre (shx, shy) on the screen whose high byte is scrb ($30 or $58).  The
 ; ship must lie wholly on the screen (|dx| <= 17, |dy| <= 18 of its centre).
-; Its entry e = shp * SHIP_ND2 + KMAP[shk], drawn mirrored (x negated, the
-; normals' x signs inverted) if KMIR[shk]; its vertices to VX, VY; then each
+; Its entry e = shp * SHIP_ND2 + KMAP[shk], drawn mirrored (each span's pixels
+; mirrored about shx, the normals' x signs inverted) if KMIR[shk]; its
+; vertices to VX, VY; then each
 ; face that shows, in order (the exhaust, 8, with 7), by `tri` in its dither
 ; (SHD by pitch, face and the normal's x sign; SDE, SDO its bytes).
 ;
@@ -32,18 +33,14 @@ shipdraw:
         tax                        ; the entry
         lda KMIR,y
         sta mir
-        bne @mir
+        lda shx                    ; (2 shx + 1: a mirrored span's)
+        sec
+        rol a
+        sta s2
         .repeat 9, i
         lda shx
         clc
         adc .ident(.sprintf("SVX%d", i)),x
-        sta VX+i
-        .endrepeat
-        jmp @y
-@mir:   .repeat 9, i
-        lda shx
-        sec
-        sbc .ident(.sprintf("SVX%d", i)),x
         sta VX+i
         .endrepeat
 @y:     .repeat 9, i
@@ -300,7 +297,19 @@ lines:
         bcs @sp
 :       tax
         ldy sx
-@sp:    lda lbl                    ; the first byte
+@sp:    bit mir                    ; mirrored: pixels xl..xr-1 to
+        bpl @sp2                   ; 2 shx - xr + 1 .. 2 shx - xl
+        stx tmp
+        sty xr
+        lda s2
+        sec
+        sbc xr
+        tax
+        lda s2
+        sec
+        sbc tmp
+        tay
+@sp2:   lda lbl                    ; the first byte
         ora XC8L,x
         sta ptr
         lda lbh

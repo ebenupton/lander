@@ -23,6 +23,7 @@ shx:    .res 1
 shy:    .res 1
 scrb:   .res 1
 mir:    .res 1                     ; mirrored ($FF) or not
+s2:     .res 1                     ; (2 shx + 1)
 vis:    .res 1
 neg:    .res 1
 shd0:   .res 1                     ; shp * 18: the pitch's SHD

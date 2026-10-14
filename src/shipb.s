@@ -21,40 +21,27 @@
         .include "landsyms.inc"    ; (LAND's symbols, L_ before each)
 
 scrb    = L_scrb
-ve      = $8E                      ; (LAND's spare: $8E-$9F)
-vo      = $8F
-ax      = $90
-ay      = $91
-bx      = $92
-by      = $93
-cx      = $94
-cy      = $95
-lx      = $96
-le      = $97
-lq      = $98
-lr      = $99
-ldy_    = $9A
-sx      = $9B
-se      = $9C
-sq      = $9D
-sr      = $9E
-sdy     = $9F
-nn      = L_TRL                    ; (TRL, TRB: 24 bytes)
-xr      = L_TRL+1
-msk0    = L_TRL+2
-lbl     = L_TRL+3
-lbh     = L_TRL+4
-colx    = L_TRL+5
-col     = L_TRL+6
-msk     = L_TRL+7
-dvd     = L_TRL+8
-dv      = L_TRL+9
-tmp     = L_TRL+10
-ptr     = L_TRL+11
-dq      = L_TRL+13
-dr      = L_TRL+15
-        .assert dr+2 <= L_TRL+24, error, "TRL, TRB: 24 bytes"
-        .assert L_TRB = L_TRL+12, error, "TRL, TRB together"
+c0      = $8D                      ; (LAND's spare: $8E-$9F; c0, x0 + 1..6)
+x0      = $93
+ptr     = $9A
+dp      = $9C
+lim     = $9E
+bl      = $9F
+t       = L_TRL                    ; (TRL, TRB: 24 bytes)
+al      = L_TRL+1
+alx     = L_TRL+2
+k       = L_TRL+3
+nn      = L_TRL+4
+ee      = L_TRL+5
+tmp     = L_TRL+6
+dq      = L_TRL+7
+pm      = L_TRL+9
+mk      = L_TRL+10
+np1     = L_TRL+11
+nb      = L_TRL+12
+dpb     = L_TRL+13
+ptb     = L_TRL+14
+        .assert ptb+2 <= L_TRL+24, error, "TRL, TRB: 24 bytes"
 
 SHIP_TILT = 3                      ; the pitch while moving
 SVIA_ORB = $FE40
@@ -166,31 +153,7 @@ KDIR:   .byte $FF, 16, 0, $FF, 24, 20, 28, $FF
         .byte 8, 12, 4, $FF, $FF, $FF, $FF, $FF
 
 ; ---------------------------------------------------------------- ship
-ship:   jsr shipdraw
-        ldx #8                     ; its box: VX, VY's least and most
-        lda VX+8
-        sta bxl
-        sta bxr
-        lda VY+8
-        sta byt
-        sta byb
-@b:     dex
-        bmi @w
-        lda VX,x
-        cmp bxl
-        bcs :+
-        sta bxl
-:       cmp bxr
-        bcc :+
-        sta bxr
-:       lda VY,x
-        cmp byt
-        bcs :+
-        sta byt
-:       cmp byb
-        bcc @b
-        sta byb
-        bcs @b
+ship:   jsr shipdraw               ; (and its box: bxl, bxr, byt, byb)
 @w:     ldx L_back                 ; this screen's TOPS, BOTS: its set
         ldy L_sidx,x
         lda L_setTl,y
@@ -222,45 +185,16 @@ ship:   jsr shipdraw
         bcc @c
         rts
 
-; ---------------------------------------------------------------- the rest
-; DQT, DRT + a*64 + D: D div a, D mod a (a 1..31, D 0..63); DVH, DVR, DVL + a
-; their row's pages and offset (tools/landgen.py's layout).
-        .align 256
-DQT:    .repeat 32, q
-        .repeat 64, d
-        .byte d / (q + (q = 0))
-        .endrepeat
-        .endrepeat
-DRT:    .repeat 32, q
-        .repeat 64, d
-        .byte d .mod (q + (q = 0))
-        .endrepeat
-        .endrepeat
-DVH:    .repeat 32, q
-        .byte >(DQT + q * 64)
-        .endrepeat
-DVR:    .repeat 32, q
-        .byte >(DRT + q * 64)
-        .endrepeat
-DVL:    .repeat 32, q
-        .byte <(q * 64)
-        .endrepeat
-
 kmv:    .byte 0                    ; the keys held (as KDIR)
 shk:    .byte 0                    ; the ship: direction, pitch, centre
 shp:    .byte 0
 shx:    .byte 128
 shy:    .byte 98
 mir:    .byte 0                    ; (shipdraw's)
-vis:    .byte 0
-neg:    .byte 0
-shd0:   .byte 0
-ff:     .byte 0
-VX:     .res 9
-VY:     .res 9
 bxl:    .byte 0                    ; the box
 bxr:    .byte 0
 byt:    .byte 0
 byb:    .byte 0
 
-        .include "shiprast.s"
+        .include "shipspan.s"
+        .include "shipspan.inc"

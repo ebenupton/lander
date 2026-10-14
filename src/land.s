@@ -2239,9 +2239,8 @@ rbh     = *-1
         sta rtp+1                  ; (C clear)
         lda TX,x                   ; bpos: TX - x4, clamped to 0..4
         sbc x4
-        tay
-        lda CLMP1,y
-        tay
+        tax                        ; (X reloaded below)
+        ldy CLMP1,x
 fs_w:   lda coff                   ; the walker's stores: the column's, X's row
         sta f_wse+1
         sta f_wso+1
@@ -2548,9 +2547,8 @@ sp_c:   lda rbl                    ; (C set) as fs_c
         sta rtp+1
         lda TX,x
         sbc x4
-        tay
-        lda CLMP1,y
-        tay
+        tax                        ; (X reloaded below)
+        ldy CLMP1,x
         ldx mn
         lda fst_e
         cmp #OP_INY

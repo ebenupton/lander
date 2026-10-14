@@ -1963,38 +1963,8 @@ fsplit: lda RTPL,x
         sta yy
         ldx bpos
         cpx p1
-        bne :+
-        jmp fs_e
-:       bcc fs_r
-        jmp fs_l
-fs_r:   txa                        ; leaning right: pixel x4 + bpos changes at
-        clc                        ; its line, bpos + 1 after
-        adc x4
-        tay
-        lda (rtp),y
-        cmp flr1
-        bcs fs_e
-        sta tj
-        sec
-        sbc yy
-        beq fs_rn
-        bcc fs_rn
-        cmp #1
-        bne :+
-        jsr line1
-        jmp fs_rn
-:       jsr seg2
-fs_rn:  inx
-        cpx p1
+        beq fs_e
         bcc fs_r
-fs_e:   lda flr1                   ; the rest at bpos
-        sta tj
-        sec
-        sbc yy
-        beq :+
-        bcc :+
-        jmp seg2
-:       rts
 fs_l:   txa                        ; leaning left: pixel x4 + bpos - 1 changes,
         clc                        ; bpos - 1 after
         adc x4
@@ -2004,19 +1974,50 @@ fs_l:   txa                        ; leaning left: pixel x4 + bpos - 1 changes,
         cmp flr1
         bcs fs_e
         sta tj
-        sec
+        clc
         sbc yy
-        beq fs_ln
         bcc fs_ln
-        cmp #1
         bne :+
         jsr line1
-        jmp fs_ln
-:       jsr seg2
-fs_ln:  dex
+        dex
         cpx p1
         bne fs_l
         beq fs_e
+:       adc #0
+        jsr seg2
+fs_ln:  dex
+        cpx p1
+        bne fs_l
+fs_e:   lda flr1                   ; the rest at bpos
+        sta tj
+        sec
+        sbc yy
+        beq :+
+        bcc :+
+        jmp seg2
+:       rts
+fs_r:   txa                        ; leaning right: pixel x4 + bpos changes at
+        adc x4                     ; its line, bpos + 1 after (C clear here)
+        tay
+        lda (rtp),y
+        cmp flr1
+        bcs fs_e
+        sta tj
+        clc                        ; (tj - yy - 1)
+        sbc yy
+        bcc fs_rn
+        bne :+
+        jsr line1
+        inx
+        cpx p1
+        bcc fs_r
+        bcs fs_e
+:       adc #0                     ; (C set: tj - yy)
+        jsr seg2
+fs_rn:  inx
+        cpx p1
+        bcc fs_r
+        bcs fs_e
 
 ; Line yy at bpos X; yy + 1 after.  X kept.
 line1:  ldy yy

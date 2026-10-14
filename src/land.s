@@ -1819,16 +1819,24 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         sta zb2+7
         sta zb3+2
         sta zb3+7
-        ldx #$E8                   ; INX: the floor's line after (JMP c_nd: no nearpost)
+        ldx #$AA                   ; TAX / INX / STX flr1: the floor's line after
+        ldy #$E8                   ; (JMP c_nd: no nearpost)
+        lda #$86
+        bit last
+        bpl :+
+        ldx #$85                   ; (the near strip: STA flr / STA flr1, the floor
+        ldy #flr                   ; itself if level; JMP nearpost)
+        txa
+:       stx c_lv
+        sty c_lv+1
+        sta c_lv+2
         lda #<c_nd
         ldy #>c_nd
         bit last
         bpl :+
-        ldx #$EA                   ; (the near strip: NOP, the floor itself if level;
-        lda #<nearpost             ; JMP nearpost)
+        lda #<nearpost
         ldy #>nearpost
-:       stx c_inx
-        sta c_np+1
+:       sta c_np+1
         sty c_np+2
         lda xlp                    ; record below c_ra or from c_rb on (strip 1: all)
         ldx ns
@@ -1908,10 +1916,9 @@ pb2:    cmp ROWB+2,y
         bne c_zb
 pb3:    cmp ROWB+3,y
         bne c_zb
-        sta flr                    ; (level)
-        tax
-c_inx:  inx                        ; (cols: NOP in the near strip, its ground's
-        stx flr1                   ; from the floor's line on)
+c_lv:   tax                        ; (level; cols: STA flr / STA flr1 in the near
+        inx                        ; strip, its ground's from the floor's line on;
+        stx flr1                   ; flr only nearpost's)
 c_rec:                             ; a column new this frame (strip 1's, or
 c_ra:   cpy #0                     ; beyond the last strip's): record it
         bcc record

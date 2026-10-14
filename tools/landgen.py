@@ -8,22 +8,18 @@
 A depth index di = (d - ZNEAR) / 16 (0..56: every row's depth is a multiple of 16) and
 r = recip(d) give a row everything it needs:
   SYT    + di*16 + h      screen y of a corner of height h (0..HMAX)
-  VX0/1/2 + di*16 + cxs   the first inner column's x, 8.16 with 128 << 16 added, for
-                          the camera's step cxs in its tile (the column at tile
-                          cxt - 3 + (cxs > 0)); each next column adds r << 8
-  RLO, RHI + di           r
   PINL, PINR + di         the pinned columns' x
 And:
   MAP + z*64 + x          a tile corner's height (bits 0-3) and its tile's colour pick
                           (bits 4-7: LANDT or SEAT gives the palette entry)
-  LERP + (b-a+12)*16 + q  (b - a) * q / 16, rounded as land.lerp (q: 16ths of a tile)
   DE, DO + palette entry  a dither's bytes on even and odd lines (swatch35 numbering)
   DQT, DRT + a*64 + D    D div 2a, D mod 2a (a 1..31, D 0..63)
   COLO, COLQ + cxs*16 + i the camera's x step's column i: tile (from cxt) and
                           sixteenths; NPT + cxs: how many
   ROWO, ROWQ, ROWD + czs*8 + r  its z step's row r (far to near): tile (from
                           czt), sixteenths, depth index; NRT + czs: how many
-  LERPQ + q*32 + d + 12   LERP by q first
+  LERPQ + q*32 + d + 12   (b - a) * q / 16 (d = b - a), rounded as land.lerp
+  ($9400-$A1FF: free, for land.s's STAB2)
   FPSL, FPSH + s          4000 / s: the readout's frames a second (tenths), s the
                           vertical syncs of the last 8 frames
 """
@@ -35,8 +31,8 @@ import land as L      # noqa: E402
 import swatch35 as SW  # noqa: E402
 
 BASE = 0x8000
-ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, SYPL=0xBC80, SYPH=0xBCC0, SYT=0x9000, VX0=0x9400, VX1=0x9800, VX2=0x9C00, LERP=0xA000,
-            PINL=0xA200, PINR=0xA240, RLO=0xA280, RHI=0xA2C0, DE=0xA300, DO=0xA340,
+ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, SYPL=0xBC80, SYPH=0xBCC0, SYT=0x9000,
+            PINL=0xA200, PINR=0xA240, DE=0xA300, DO=0xA340,
             LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00,
             COLO=0xB600, COLQ=0xB700, ROWO=0xB800, ROWQ=0xB880, ROWD=0xB900,
             NPT=0xB980, NRT=0xB990, LERPQ=0xBA00)
@@ -72,19 +68,8 @@ def build():
         r = L.recip(d)
         for h in range(L.HMAX + 1):
             put('SYT', di * 16 + h, L.HORIZON + (((L.CAMH - h) * r + L.HSCALE * 128) // (L.HSCALE * 256)))
-        for cxs in range(16):
-            xoff = (-3 + (cxs > 0)) * 256 - 16 * cxs
-            v = xoff * r + 32768 + (128 << 16)
-            assert 0 <= v < 1 << 24
-            for k, nm in enumerate(('VX0', 'VX1', 'VX2')):
-                put(nm, di * 16 + cxs, v >> (8 * k))
-        put('RLO', di, r)
-        put('RHI', di, r >> 8)
         put('PINL', di, 128 + ((-L.W * r + 32768) >> 16))
         put('PINR', di, 128 + ((L.W * r + 32768) >> 16))
-    for d in range(-12, 13):
-        for q in range(16):
-            put('LERP', (d + 12) * 16 + q, L.lerp(0, d, 16 * q))
     for e in range(35):
         de, do = dither_bytes(e)
         put('DE', e, de)

@@ -72,9 +72,13 @@ def machine():
              5: open(os.path.join(B, 'TABLES2'), 'rb').read()}
     mem = ObservableMemory()
 
-    def romsel(addr, value):
-        if value in banks:
+    cur = [4]
+
+    def romsel(addr, value):                         # (writes to the bank kept)
+        if value in banks and value != cur[0]:
+            banks[cur[0]] = bytes(mem._subject[0x8000:0xC000])
             mem._subject[0x8000:0xC000] = banks[value]
+            cur[0] = value
         return value
     mem.subscribe_to_write([0xFE30], romsel)
     mpu = MPU(memory=mem)

@@ -2224,10 +2224,12 @@ fs_nt:  jmp fs_new
 ; jumps here, back to c_next.)
 fsplit: cpx lastri
         bne fs_nt
-fs_c:   lda rbl                    ; (C set) rtp = RTP + x4 (- 1 leaning left)
-        adc x4
+fs_c:   lda #0                     ; (C set) rtp = RTP + x4 (- 1 leaning left)
+rbl     = *-1                      ; (fs_new's: the rung's transitions, less 1
+        adc x4                     ; (2 leaning left), as operands)
         sta rtp
-        lda rbh
+        lda #0
+rbh     = *-1
         adc #0
         sta rtp+1                  ; (C clear)
         lda TX,x                   ; bpos: TX - x4, clamped to 0..4
@@ -3064,8 +3066,6 @@ putg:   asl a
 BE:     .res 5                     ; fsplit's rung's bytes by bpos
 BO:     .res 5
         .assert >BE = >(BO+4), error, "BE, BO: a page crossed"
-rbl:    .res 1                     ; and its transitions, less 1 (2 leaning left)
-rbh:    .res 1
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8
 dvi:    .res 1

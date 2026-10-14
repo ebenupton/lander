@@ -214,7 +214,10 @@ p0:     .res 1
 p1:     .res 1
 yy:     .res 1
 kk:     .res 1
-cnt     = kk                       ; (fsplit's: kk is split2's)
+fwe     = kk                       ; (fsplit's: kk is split2's): the walk's end, in the row
+rsm     = yy                       ; fsplit: the walker's row's first line - 1
+fwu     = tj                       ; fsplit: a transition beyond the row
+FSRJ    = 7                        ; fsplit: t walked to if within 8 + FSRJ of the row
 msk:     .res 1
 zv:     .res 1
 zp_:    .res 2
@@ -1978,10 +1981,8 @@ c_z1:    jmp zone1                  ; (back to c_r1)
 c_split: cmp LO+1,x
         bcs c_dbl
         bvs :+
-        jsr fsplit
-        jmp c_next
-:       jsr split
-        jmp c_next
+        jmp fsplit                 ; (back to c_next)
+:       jmp split
 ; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
 ; inline: back to c_rd, Y = x4).
 record: tya                        ; (always the column's first strip this
@@ -2198,9 +2199,13 @@ fs_nt:  jmp fs_new
 ; Y: its transition (pixel x4 + Y changes, bpos + 1 after, leaning right; x4 +
 ; Y - 1, bpos - 1, leaning left), ended by the rung's sentinel ($FF: rungs) or
 ; the column's edge (fend); BE, BO + Y: its bytes (the rung's, made at its
-; first column, fs_new: lastri).  Between transitions 8 lines or more a run,
-; fewer the walker: X = the line & 7, each line's byte stored at f_wse or
-; f_wso (by its parity; operand: the line's character row, coff).
+; first column, fs_new: lastri).  The walker: X = the line in its character
+; row (rsm: the row's first line - 1), each line's byte stored at f_wse or
+; f_wso (by its parity; operand: the row, coff), to fwe (the transition in
+; the row: crossing into the next at X = 8); a run instead to a transition
+; 8 + FSRJ lines or more past the row, or to a floor past it (fe_r); a floor
+; in the row walked by its copy (ff_se, ff_so).  (cols' inline: c_split
+; jumps here, back to c_next.)
 fsplit: cpx lastri
         bne fs_nt
 fs_c:   lda rbl                    ; (C set) rtp = RTP + x4 (- 1 leaning left)
@@ -2214,117 +2219,141 @@ fs_c:   lda rbl                    ; (C set) rtp = RTP + x4 (- 1 leaning left)
         tay
         lda CLMP1,y
         tay
-fs_w:   lda #OP_JMP
-        sta f_fxe
-        sta f_fxo
-        lda coff
+fs_w:   lda coff                   ; the walker's stores: the column's, X's row
         sta f_wse+1
         sta f_wso+1
         ldx mx
-        stx yy
 fs_h:   lda LAHSB0,x               ; (sethalf: the screen and half's)
         sta f_wse+2
         sta f_wso+2
+        lda RSMT,x
+        sta rsm                    ; (the row's first line - 1)
         txa
         and #7
-        tax
-        lsr a                      ; (by yy's parity: fl_e, fl_o)
+        tax                        ; X: the line in its row
+        lsr a                      ; (by its parity: fl_e, fl_o)
         bcc fl_e
         bcs fl_o
-fn_e:                              ; yy even
-fst_e:  iny                        ; (or DEY: fs_new)
-fen_e:  cpy #4                     ; (or 0)
-        beq f_fe
-fl_e:   lda (rtp),y                ; the transition's line
-        cmp flr1
-        bcs f_fe
-        sbc yy                     ; (C clear) - yy - 1
-        bcc fn_e                   ; (at or above yy: bpos only)
-        cmp #7
-        bcs f_frun
-        sta cnt                    ; lines yy .. t-1, walked (cnt: their number - 1)
-f_we:   lda BE,y                   ; an even line
-f_wse:  sta $FF00,x
-        inx                        ; (no new character row after an even line)
-        dec cnt
-        bpl f_wo
-        lda (rtp),y
-        sta yy
-f_fxe:  jmp fn_o                   ; (f_fe's: RTS)
-f_fwr:  lda f_wse+2                ; the next character row: + 2 (C set)
+fw_c:   lda f_wse+2                ; the next row (C set): + 2
         adc #1
         sta f_wse+2
         sta f_wso+2
+        lda rsm                    ; (C clear)
+        adc #8
+        sta rsm
         ldx #0
-        beq f_fwn
-fn_o:                              ; yy odd
-fst_o:  iny                        ; (or DEY: fs_new)
-fen_o:  cpy #4                     ; (or 0)
-        beq f_fe
-fl_o:   lda (rtp),y
-        cmp flr1
-        bcs f_fe
-        sbc yy
-        bcc fn_o
-        cmp #7
-        bcs f_frun
-        sta cnt
-f_wo:   lda BO,y                   ; an odd line
+        lda fwe
+        sbc #7                     ; (C clear) - 8
+        sta fwe
+        beq fn_e
+fw_e:   lda BE,y                   ; an even line
+f_wse:  sta $FF00,x                ; (the row's line X: operand the row, coff)
+        inx
+        cpx fwe
+        beq fn_o
+fw_o:   lda BO,y                   ; an odd line
 f_wso:  sta $FF00,x
         inx
         cpx #8
-        beq f_fwr
-f_fwn:  dec cnt
-        bpl f_we
-        lda (rtp),y
-        sta yy
-f_fxo:  jmp fn_e                   ; (f_fe's: RTS)
-f_fe:   lda flr1                   ; (C set) the rest at bpos
-        sbc yy
-        beq :+
-        bcc :+
-        cmp #4
-        bcs :++
-        sbc #0                     ; (C clear) - 1
-        sta cnt
-        lda #OP_RTS
-        sta f_fxe
-        sta f_fxo
-        txa
-        lsr a
-        bcs f_wo
-        bcc f_we
-:       rts
-:       lda BE,y
-        sta ve
-        lda BO,y
-        sta vo
-        ldx yy
-        ldy flr1
-        jmp run
-f_frun: sty bpos                   ; lines yy .. t-1, a run
+        beq fw_c                   ; (the row's end)
+        cpx fwe
+        bne fw_e
+fn_e:                              ; X even
+fst_e:  iny                        ; (or DEY: fs_new)
+fen_e:  cpy #4                     ; (or 0)
+        beq fe_x
+fl_e:   lda (rtp),y                ; the transition's line, t
+        cmp flr1
+        bcs fe_x
+        sbc rsm                    ; (C clear) t, in the row (fwe)
+        sta fwe
+        cpx fwe
+        bcs fn_e                   ; (at or above X: bpos only)
+        cmp #8+FSRJ
+        bcc fw_e                   ; (walked, crossing a row at most)
+        bcs fr
+fn_o:                              ; X odd
+fst_o:  iny                        ; (or DEY: fs_new)
+fen_o:  cpy #4                     ; (or 0)
+        beq fe_x
+fl_o:   lda (rtp),y
+        cmp flr1
+        bcs fe_x
+        sbc rsm
+        sta fwe
+        cpx fwe
+        bcs fn_o
+        cmp #8+FSRJ
+        bcc fw_o
+fr:     sty bpos                   ; (C set) lines X .. t-1, a run
+        adc rsm
+        sta fwu                    ; t
         lda BE,y
         sta ve
         lda BO,y
         sta vo
-        lda (rtp),y
-        sta tj
-        ldx yy
-        tay
+        txa
+        sec
+        adc rsm                    ; the line
+        tax
+        ldy fwu
         jsr run
-        ldx tj
-        stx yy
+        ldx fwu
 fr_h:   lda LAHSB0,x               ; (sethalf) the walker from t
         sta f_wse+2
         sta f_wso+2
+        lda RSMT,x
+        sta rsm
         txa
         and #7
         tax
         ldy bpos
         lsr a
-        bcs :+
-        jmp fn_e
-:       jmp fn_o
+        bcc fn_e
+        bcs fn_o
+fe_x:   lda flr1                   ; the floor: the rest at bpos
+        clc
+        sbc rsm
+        sta fwe                    ; (the floor in the row)
+        cpx fwe
+        bcs ff_d
+        cmp #8
+        bcs fe_r                   ; (beyond the row: a run)
+        txa                        ; (in it: walked, by the walker's copy)
+        lsr a
+        lda f_wse+2
+        sta ff_se+2
+        sta ff_so+2
+        lda coff
+        sta ff_se+1
+        sta ff_so+1
+        bcs ff_o
+ff_e:   lda BE,y
+ff_se:  sta $FF00,x
+        inx
+        cpx fwe
+        beq ff_d
+ff_o:   lda BO,y
+ff_so:  sta $FF00,x
+        inx
+        cpx fwe
+        bne ff_e
+ff_d:   jmp c_next
+fe_r:   lda BE,y                   ; the floor's run
+        sta ve
+        lda BO,y
+        sta vo
+        txa
+        sec
+        adc rsm
+        tax
+        ldy flr1
+        jsr run
+        jmp c_next
+RSMT    = * - YSKY                 ; each line's row's first line - 1
+        .repeat YGND+2-YSKY, i
+        .byte ((YSKY+i) & $F8) - 1
+        .endrepeat
 fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         lda CE-1,x                 ; 4 the left (Y: the two EORed)
         sta BE+4
@@ -3016,6 +3045,7 @@ putg:   asl a
 
 BE:     .res 5                     ; fsplit's rung's bytes by bpos
 BO:     .res 5
+        .assert >BE = >(BO+4), error, "BE, BO: a page crossed"
 rbl:    .res 1                     ; and its transitions, less 1 (2 leaning left)
 rbh:    .res 1
 fps10:  .res 2                     ; (the readout's)

@@ -199,6 +199,8 @@ tcnt:   .res 1
 tsy:    .res 1
 last:   .res 1                     ; the near strip ($80)
 lastri: .res 1                     ; fsplit: the rung BE, BO, rbl, rbh are for
+BE      = $8E                      ; fsplit's rung's bytes by bpos (the ship's
+BO      = BE+5                     ; zero page: strips' scratch, $8E-$97)
 ; columns
 x4:     .res 1                     ; the column's first pixel
 x4p4:   .res 1
@@ -2443,6 +2445,7 @@ fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
         sta fen_o+1
         sec
 fs_nj:  jmp fs_c                   ; (split's: sp_r)
+        .res 18                    ; (spare: keeps the code after in place)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).
@@ -3093,9 +3096,6 @@ putg:   asl a
         inc tcol
         rts
 
-BE:     .res 5                     ; fsplit's rung's bytes by bpos
-BO:     .res 5
-        .assert >BE = >(BO+4), error, "BE, BO: a page crossed"
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8
 dvi:    .res 1

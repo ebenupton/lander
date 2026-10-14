@@ -46,7 +46,7 @@ XSKIP = 1                 # the corner columns not drawn either side (their tile
 XCLIP = 1152              # the clip planes in x, 8.8 tiles from the camera either side (4.5)
 ZCLIP = 10                # the near clip plane's depth, tiles (the ship's 15, less 5)
                           # (always on)
-ZFCLIP = 17               # the far clip plane's depth, tiles (the near's, and 7)
+ZFCLIP = 16               # the far clip plane's depth, tiles (the near's, and 6)
 FON = False               # the far clip on (the BBC: SPACE toggles it)
 ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
@@ -154,7 +154,9 @@ def project(hm, cx, cz):
     xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]      # corners 1..11
     rows = []
     jc = ZBACK - ZCLIP                    # (the corner row the near clip replaces)
-    jf = ZSKIP - 1 if FON and fz else ZSKIP   # (the far clip's, from it and the next)
+    jp = ZBACK - ZFCLIP                   # (the corner row on the far clip plane at fz 0)
+    jf = (jp - 1 if fz else jp) if FON else ZSKIP   # (the first: the far clip's, from it
+                                                    # and the next, at fz not 0)
     for j in range(jf, jc + 1):
         z = zt + ZBACK - j
         r = recip((z << 8) - cz)
@@ -163,7 +165,7 @@ def project(hm, cx, cz):
             r = recip(ZCLIP << 8)         # before by 1 - fz
             hp = [int(hm[0][(z + 1) % MAP, x % MAP]) for x in xs]
             hs = [lerp(a, b, 256 - fz) for a, b in zip(hp, hs)]
-        elif j < ZSKIP:                   # on the far clip plane: to the row after by
+        elif FON and fz and j == jf:      # on the far clip plane: to the row after by
             r = recip(ZFCLIP << 8)        # 1 - fz
             hn = [int(hm[0][(z - 1) % MAP, x % MAP]) for x in xs]
             hs = [lerp(a, b, 256 - fz) for a, b in zip(hs, hn)]
@@ -179,7 +181,7 @@ def project(hm, cx, cz):
         if j == jc:                       # (at least a line below the row before: the
             row = [(x, max(y, py + 1), h) # strip between can be thin)
                    for (x, y, h), (_, py, _) in zip(row, rows[-1][1])]
-        if j == jf + 1 and jf < ZSKIP:    # (the far clip's: a line or more above this)
+        if FON and fz and j == jf + 1:    # (the far clip's: a line or more above this)
             rows[0] = (rows[0][0], [(x, min(y, ny - 1), h)
                                     for (x, y, h), (_, ny, _) in zip(rows[0][1], row)])
         rows.append((z, row))

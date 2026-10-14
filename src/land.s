@@ -105,10 +105,10 @@ LAH1    = $1660-YSKY               ; screen 1
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
 ZCF     = $07D0                    ; the far clip on (1; SPACE toggles it)
-ZB      = $07D1                    ; project's: ZBACK less the first row's j (ZSKIP,
-RN      = $07D2                    ; less 1 with the far clip's row), the near clip's
-DIB     = $07D3                    ; row (j ZBACK - ZCLIP, less it), the first row's
-FACT    = $07D4                    ; di (less 16 j, czs) and the far clip's row (1)
+ZB      = $07D1                    ; project's: ZBACK less the first row's j, the
+RN      = $07D2                    ; near clip's row (j ZBACK - ZCLIP, less it), the
+DIB     = $07D3                    ; first row's di (less 16 j, czs), and the far
+FACT    = $07D4                    ; clip's row (1: row 0, from the rows either side)
 
 SWT     = $9400                    ; init's line tables, in bank 4's free space: two a
                                    ; page, by line (YSKY..YGND+1: no page crossed)
@@ -575,31 +575,33 @@ cph     = lqx+1
 project:
         lda #NX                    ; (always: the strips' np)
         sta np
-        ldx #0                     ; the far clip's row: on, and fz not 0 (a
-        lda ZCF                    ; corner row is on it then)
+        lda #ZBACK-ZSKIP           ; the first row (ZB: ZBACK less its j): ZSKIP's,
+        ldx #0                     ; or the far clip's: on its plane (fz 0), or
+        ldy ZCF                    ; from the rows either side (FACT)
         beq :+
-        lda czs
+        lda #ZFCLIP
+        ldy czs
         beq :+
+        lda #ZFCLIP+1
         inx
-:       stx FACT
-        txa
-        clc
-        adc #ZBACK-ZSKIP
-        sta ZB
-        txa
-        clc
-        adc #ZBACK-ZCLIP-ZSKIP
+:       sta ZB
+        stx FACT
+        sec                        ; the near clip's row: ZB - ZCLIP (the last)
+        sbc #ZCLIP
         sta RN
         tay
         iny
-        sty nr                     ; (the near clip's row the last)
-        txa
+        sty nr
+        lda ZB                     ; the first row's di: 16 ZB - DI0
+        sec
+        sbc #9
         asl a
         asl a
         asl a
         asl a
-        adc #(ZBACK-ZSKIP)*16-DI0  ; (C clear)
+        sbc #DI0-9*16-1            ; (C clear: - (DI0 - 144))
         sta DIB
+        .assert DI0 > 9*16 && ZFCLIP >= 9 && ZBACK-ZSKIP >= 9, error, "DIB's arithmetic"
         lda cxt                    ; the drawn columns' map x
         sec
         sbc #5-XSKIP

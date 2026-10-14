@@ -36,7 +36,9 @@
 ;   $0600         RTBUF: the rungs' transition lines
 ;   $0900         the frame's rows and columns, $0A40 the strip's, $0B00 the
 ;                 slow way's
-;   $0C00 ENTH, $1700 ENTL: each line's entry in STAB (high, low); $1600
+;   $1700 ENTL, ENTH: each line's entry in STAB (low, high); $0C00 TOPS,
+;                 BOTS, $0B60 CURT, CURB: each column's highest and lowest
+;                 land line, by screen (the last frame drawn there) and this; $1600
 ;                 LAH: each line's address (high, less the screen's); $1800
 ;                 GLY: the readout's characters
 ;   $0E00, $1000, $1200, $1400  STAB for screen 0 left half, right half,
@@ -85,9 +87,15 @@ SPB     = $0B00                    ; the slow way: each pixel's box at the top
 STL     = $0B10                    ; and transitions (4 a pixel: line, step)
 STD     = $0B20
 GLY     = $1800                    ; the readout's characters: 16 bytes each
-ENTH    = $0C00
+ENTH    = $1700+160-YSKY           ; (lines YSKY..YGND+1 only, after ENTL's)
+TOPS    = $0C00                    ; by screen, column: the land's highest line last time
+BOTS    = $0C80                    ; and lowest
+CURT    = $0B60                    ; this frame's
+CURB    = $0BA0
 STAB    = $0E00
-LAH     = $1600
+LAH     = $1600+160-YSKY           ; each line's 2 * (y >> 3) (lines YSKY..YGND+1)
+LAH0    = $1600-YSKY               ; and its address's high byte, screen 0 (left half)
+LAH1    = $1600+80-YSKY            ; screen 1
 ENTL    = $1700
 RZT     = $0B30                    ; the rows': tile, sixteenths, depth index
 RZQ     = $0B38
@@ -150,6 +158,8 @@ rq2:    .res 1
 rr2:    .res 1
 alloc:  .res 2
 rtp:    .res 2
+rend:   .res 1
+sx_:    .res 1
 ; columns
 x4:     .res 1                     ; the column's first pixel
 x4p4:   .res 1
@@ -183,12 +193,17 @@ rp:     .res 2
 TRL:    .res 12                    ; a split column's transitions: line, bpos after
 TRB:    .res 12                    ; (a second rung's from 6)
 kb:     .res 1
+plY:    .res 1                     ; run's planted RTS: its line and STAB page
+plT:    .res 1
+tsp:    .res 2                     ; TOPS, BOTS for the screen being drawn
+bsp:    .res 2
+rec:    .res 1                     ; a land strip: record CURT, CURB
 bpos2:  .res 1
 le:     .res 1                     ; split2: the boxes' bytes
 lo2:    .res 1
 me:     .res 1
 mo:     .res 1
-; readout
+        .code                      ; (the readout's: not zero page)
 fps10:  .res 2
 dvs:    .res 8
 dvi:    .res 1
@@ -325,6 +340,14 @@ setback:
         asl a
         adc #>STAB
         sta stb0
+        lda #<LAH0                 ; fsplit's lines
+        ldx #>LAH0
+        ldy back
+        beq :+
+        lda #<LAH1
+        ldx #>LAH1
+:       sta em_l+1
+        stx em_l+2
         rts
 
 ; ---------------------------------------------------------------- init
@@ -399,11 +422,6 @@ init:   lda #0
         bne @tab
         ldx #0                     ; ENTL, ENTH: 5 * (y - YSKY); LAH
 @ent:   txa
-        lsr a
-        lsr a
-        and #$FE
-        sta LAH,x
-        txa
         sec
         sbc #YSKY
         sta tmp
@@ -414,6 +432,22 @@ init:   lda #0
         rol tmp+1
         asl a
         rol tmp+1
+        cpx #YSKY                  ; (in range only: ENTH follows ENTL)
+        bcc :+
+        cpx #YGND+2
+        bcs :+
+        pha
+        txa
+        lsr a
+        lsr a
+        and #$FE
+        sta LAH,x
+        clc
+        adc #$30
+        sta LAH0,x
+        adc #$28
+        sta LAH1,x
+        pla
         clc
         adc tmp
         sta ENTL,x
@@ -421,8 +455,17 @@ init:   lda #0
         adc #0
         and #1
         sta ENTH,x
-        inx
+:       inx
         bne @ent
+        ldx #127                   ; nothing drawn yet
+:       lda #$FF
+        sta TOPS,x
+        lda #0
+        sta BOTS,x
+        dex
+        bpl :-
+        lda #$FF                   ; no RTS planted
+        sta plY
         lda #40                    ; the camera
         sta cxt
         lda #30
@@ -856,7 +899,24 @@ lerp:   sec
 ; The sky (ns = 0), the land's (ns = 1 .. nr-1: rows ns-1 and ns), the ground
 ; (ns = nr).  A strip's points: 0 its left margin, 1..np the rows', np+1 its
 ; right margin.
-strips: lda #>ROWA
+strips: lda back                   ; this screen's TOPS, BOTS
+        lsr a
+        ror a
+        lsr a                      ; 64 * back
+        sta tsp
+        ora #<BOTS
+        sta bsp
+        lda #>TOPS
+        sta tsp+1
+        sta bsp+1
+        ldx #63
+:       lda #$FF
+        sta CURT,x
+        lda #0
+        sta CURB,x
+        dex
+        bpl :-
+        lda #>ROWA
         sta topa+1
         lda #>ROWB
         sta bota+1
@@ -883,11 +943,25 @@ strips: lda #>ROWA
         cmp nr
         beq @strip
         bcc @strip
+        ldy #63                    ; this frame's for the screen's next
+:       lda CURT,y
+        sta (tsp),y
+        lda CURB,y
+        sta (bsp),y
+        dey
+        bpl :-
         rts
 
 ; The strip's points (TX..BY) and boxes (CE, CO), its top row's line (the
 ; last strip's bottom row's, widened, or the sky's) and its bottom row's.
-setup:  lda ns                     ; the top row: row ns-1 (the sky: row 0)
+setup:  ldx #0                     ; a land strip: record its lines
+        lda ns
+        beq :+
+        cmp nr
+        beq :+
+        dex
+:       stx rec
+        lda ns                     ; the top row: row ns-1 (the sky: row 0)
         beq :+
         sec
         sbc #1
@@ -991,12 +1065,24 @@ setup:  lda ns                     ; the top row: row ns-1 (the sky: row 0)
         ; the top row's line
         lda ns
         bne @widen
-        ldx xl                     ; the sky's: flat
-        ldy #YSKY
-        lda xr
-        clc
-        adc #1
-        jsr flatt
+        ldy xl                     ; the sky's: from each column's highest land
+:       tya                        ; line last time (TOPS)
+        lsr a
+        lsr a
+        sty tmp
+        tay
+        lda (tsp),y
+        ldy tmp
+        sta (topa),y
+        iny
+        sta (topa),y
+        iny
+        sta (topa),y
+        iny
+        sta (topa),y
+        iny
+        cpy xr
+        bne :-
         jmp @bot
 @widen: ldx xl                     ; the last strip's bottom row, widened
         ldy TY
@@ -1011,14 +1097,32 @@ setup:  lda ns                     ; the top row: row ns-1 (the sky: row 0)
         jsr flatt
 @bot:   lda ns                     ; the bottom row's line
         cmp nr
-        bne :+
-        ldx xl                     ; the ground's: flat
-        ldy #YGND
-        lda xr
-        clc
-        adc #1
-        jmp flatb
-:       jmp traceb
+        beq :+
+        jmp traceb
+:
+        ldy xl                     ; the ground's: to each column's lowest land
+:       tya                        ; line last time or this (BOTS, CURB)
+        lsr a
+        lsr a
+        tax
+        sty tmp
+        tay
+        lda (bsp),y
+        cmp CURB,x
+        bcs :+
+        lda CURB,x
+:       ldy tmp
+        sta (bota),y
+        iny
+        sta (bota),y
+        iny
+        sta (bota),y
+        iny
+        sta (bota),y
+        iny
+        cpy xr
+        bne :--
+        rts
 
 ; (topa) from X up to (not including) A: Y.  flatb: (bota).
 flatt:  sta tj
@@ -1045,65 +1149,101 @@ flatb:  sta tj
 @d:     rts
 
 ; The bottom row (BX, BY 0..np+1) into (bota): each segment as points.py's
-; bresenham_ys, one y a pixel.
-traceb: ldx #0
-@seg:   stx tj
+; bresenham_ys, one y a pixel.  A shallow segment (|dy| < dx): the error kept
+; in Y biased by 256 - 2dx, so the carry is the step; y in tr_y's LDA #.
+traceb: lda bota+1
+        sta tr_st+2
+        sta tg_st+2
+        ldx #0
+t_seg:   stx tj
         lda BX+1,x
         sta tx1
         sec
         sbc BX,x
-        asl a
-        sta tdx2                   ; 2 dx
-        lsr a
         sta terr                   ; dx
+        asl a
+        sta tdx2
         lda BY,x
-        sta tyy
+        sta tr_y+1
         ldy BX,x
         sta (bota),y
         lda BY+1,x
         sec
         sbc BY,x
-        bcs @down
-        eor #$FF                   ; rising: |dy|
+        ldy #$EE                   ; INC abs
+        bcs :+
+        eor #$FF                   ; rising: |dy|, DEC
         adc #1
+        ldy #$CE
+:       sty tr_inc
+        cmp terr
+        bcs t_steep
         asl a
         sta tdy2
-@ul:    iny
-        lda terr
-        clc
-        adc tdy2
-:       cmp tdx2
-        bcc :+
+        lda #0                     ; k: 256 - 2dx, less the carry
+        sec
         sbc tdx2
-        dec tyy
-        jmp :-
-:       sta terr
-        lda tyy
-        sta (bota),y
-        cpy tx1
-        bne @ul
-        jmp @next
-@down:  asl a
-        sta tdy2
-@dl:    iny
-        lda terr
+        sec
+        sbc #1
+        sta tr_k+1
+        lda terr                   ; err dx, biased
         clc
-        adc tdy2
-:       cmp tdx2
-        bcc :+
-        sbc tdx2
-        inc tyy
-        jmp :-
-:       sta terr
-        lda tyy
-        sta (bota),y
-        cpy tx1
-        bne @dl
-@next:  ldx tj
+        adc tr_k+1
+        adc #1
+        tay
+        lda BX,x
+        tax
+        clc
+        jsr tr_l
+t_next:  ldx tj
         inx
         cpx np1
-        bcc @seg
+        bcc t_seg
         rts
+t_steep: asl a                      ; (rare) the general loop
+        sta tdy2
+        lda tr_y+1
+        sta tyy
+        lda BX,x
+        tax
+t_gl:    inx
+        lda terr
+        clc
+        adc tdy2
+:       cmp tdx2
+        bcc :+
+        sbc tdx2
+        jsr tg_inc
+        jmp :-
+:       sta terr
+        lda tyy
+tg_st:  sta ROWB,x
+        cpx tx1
+        bne t_gl
+        beq t_next
+tg_inc: lda tr_inc                 ; tyy +- 1, as tr_inc
+        cmp #$EE
+        bne :+
+        inc tyy
+        rts
+:       dec tyy
+        rts
+
+tr_l:   inx                        ; X: the pixel, Y: the biased error, C clear
+        tya
+        adc tdy2
+        tay
+        bcs tr_s
+tr_y:   lda #0
+tr_st:  sta ROWB,x
+        cpx tx1
+        bne tr_l
+        rts
+tr_s:   tya                        ; a step: unbias, y +- 1
+tr_k:   adc #0
+        tay
+tr_inc: inc tr_y+1
+        jmp tr_y
 
 ; ---------------------------------------------------------------- rungs
 ; Each rung's pixels (LO..HI-1) and transitions: rung (xt, yt) - (xb, yb), D =
@@ -1183,77 +1323,145 @@ rungs:  lda xl
         bne :-
 :       sty rq2
         sta rr2
+        lda rrem                   ; the first pixel's line: yt + q + (rem > 0),
+        beq :+                     ; and how far short of the next: e = 2a - rem
+        lda ra2                    ; (0 if rem = 0)
+        sec
+        sbc rrem
+:       sta rrem
+        cmp #1
+        lda #0
+        rol a                      ; (rem > 0)
+        clc
+        adc TY,x
+        adc rq
         ldy TX,x                   ; the pixels, from xt out
+        pha
         lda BX,x
         cmp TX,x
         bcc @left
-@rl:    lda rrem                   ; line yt + q + (rem > 0)
-        cmp #1
-        lda TY,x
-        adc rq
-        sta (rtp),y
-        jsr @step
+        lda HI,x
+        sta rend
+        pla
+@rl:    sta (rtp),y                ; leaning right: xt .. xb-1
         iny
-        tya
-        cmp HI,x
-        bne @rl
+        cpy rend
         beq @nx
-@left:  dey
-        lda rrem
-        cmp #1
-        lda TY,x
-        adc rq
-        sta (rtp),y
         jsr @step
-        tya
-        cmp LO,x
-        bne @left
+        jmp @rl
+@left:  lda LO,x
+        sta rend
+        pla
+@ll:    dey                        ; leaning left: xt-1 .. xb
+        sta (rtp),y
+        cpy rend
+        beq @nx
+        jsr @step
+        jmp @ll
 @nx:    ldx tj
         inx
         cpx np1
         bcs :+
         jmp @r
 :       rts
-@step:  lda rrem                   ; + 2D
-        clc
-        adc rr2
-        sta rrem
-        lda rq
-        adc rq2                    ; (C clear: rem < 4a < 256)
-        sta rq
+@step:  tax                        ; the next pixel's: + 2D / 2a, by e
         lda rrem
-        cmp ra2
-        bcc :+
-        sbc ra2
+        sec
+        sbc rr2
+        bcs :+
+        adc ra2                    ; (C set after)
         sta rrem
-        inc rq
-:       rts
+        txa
+        adc rq2
+        rts
+:       sta rrem
+        txa
+        clc
+        adc rq2
+        rts
 
 ; ---------------------------------------------------------------- columns
-cols:   lda xl
+cols:   lda topa+1                 ; this strip's rows' pages
+        sta pt0+2
+        sta pt1+2
+        sta pt2+2
+        sta pt3+2
+        lda bota+1
+        sta pb0+2
+        sta pb1+2
+        sta pb2+2
+        sta pb3+2
+        lda #$FF
+        sta half
+        lda xl
         sta x4
         lda #0
         sta ri
-@col:   lda x4
-        clc
-        adc #4
-        sta x4p4
-        lda x4
+c_col:   lda x4
         asl a                      ; 8 * column (C: the right half)
         sta coff
         lda #0
         rol a
-        sta half
+        cmp half
+        beq :+
+        jsr sethalf
+:       ldy x4                     ; the top: level across the column?
+pt0:    lda ROWA,y
+pt1:    cmp ROWA+1,y
+        bne c_zt
+pt2:    cmp ROWA+2,y
+        bne c_zt
+pt3:    cmp ROWA+3,y
+        bne c_zt
+        sta mn
+        sta mx
+c_ft:                               ; the floor: level?
+pb0:    lda ROWB,y
+pb1:    cmp ROWB+1,y
+        bne c_zb
+pb2:    cmp ROWB+2,y
+        bne c_zb
+pb3:    cmp ROWB+3,y
+        bne c_zb
+c_fb:    sta flr
+        tax
+        inx
+        stx flr1
+        bit rec
+        bpl :+
+        jsr record
+:
+        ldx ri                     ; the rungs: past those wholly left
+        tya
+:       cmp HI,x
+        bcc :+
+        inx
+        bne :-
+:       stx ri
+        ora #3
+        cmp LO,x
+        bcs c_split                 ; (LO <= x4 + 3)
+        lda CE-1,x                 ; one box: ri - 1
+        sta ve
+        lda CO-1,x
+        sta vo
+        lda mn
+        cmp mx
+        bne c_z1
+c_r1:    ldx mx
+        cpx flr1
+        bcs c_next
+        ldy flr1
+        jsr run
+c_next:  lda x4
         clc
-        adc scrb
-        sta scrh
-        lda half
-        asl a
-        adc stb0
-        sta stbh
-        ; each pixel's top, the highest and lowest
-        ldy x4
-        lda (topa),y
+        adc #4
+        sta x4
+        cmp xr
+        beq :+
+        jmp c_col
+:       rts
+c_zt:    lda (topa),y               ; (rare) each pixel's top, the highest and lowest
         sta ys
         sta mn
         sta mx
@@ -1270,9 +1478,9 @@ cols:   lda xl
 :       inx
         cpx #4
         bne :---
-        ; the floor
         ldy x4
-        lda (bota),y
+        jmp c_ft
+c_zb:    lda (bota),y               ; (rare) the lowest
         iny
         cmp (bota),y
         bcs :+
@@ -1285,52 +1493,195 @@ cols:   lda xl
         cmp (bota),y
         bcs :+
         lda (bota),y
-:       sta flr
-        clc
-        adc #1
-        sta flr1
-        ; the rungs: past those wholly left
-        ldx ri
-        lda x4
-:       cmp HI,x
-        bcc :+
-        inx
-        bne :-
-:       stx ri
-        lda LO,x
-        cmp x4p4
-        bcc @split
-        ; one box: ri - 1
-        lda CE-1,x
-        sta ve
-        lda CO-1,x
-        sta vo
-        jsr zone1
-        ldx mx
-        cpx flr1
-        bcs @next
-        ldy flr1
-        jsr run
-@next:  lda x4
-        clc
-        adc #4
-        sta x4
-        cmp xr
-        beq :+
-        jmp @col
-:       rts
-@split: lda LO+1,x
-        cmp x4p4
-        bcs :++
-        lda LO+2,x
-        cmp x4p4
-        bcs :+
-        jsr slow                   ; (three: never seen)
-        jmp @next
-:       jsr split2
-        jmp @next
+:       ldy x4
+        jmp c_fb
+c_z1:    jsr zone1
+        jmp c_r1
+c_split: cmp LO+1,x
+        bcs c_dbl
+        lda mn
+        cmp mx
+        bne :+
+        jsr fsplit
+        jmp c_next
 :       jsr split
-        jmp @next
+        jmp c_next
+c_dbl:   lda mn                     ; (the slow ways read ys)
+        cmp mx
+        bne :+
+        sta ys
+        sta ys+1
+        sta ys+2
+        sta ys+3
+:       lda x4
+        ora #3
+        cmp LO+2,x
+        bcs :+
+        jsr split2
+        jmp c_next
+:       jsr slow                   ; (three: never seen)
+        jmp c_next
+
+; A land strip's column: its highest and lowest lines into CURT, CURB.
+record: tya
+        lsr a
+        lsr a
+        tax
+        lda mn
+        cmp CURT,x
+        bcs :+
+        sta CURT,x
+:       lda flr
+        cmp CURB,x
+        bcc :+
+        sta CURB,x
+:       rts
+
+; The column's half of the screen: A (0 left, 1 right).
+sethalf:
+        sta half
+        clc
+        adc scrb
+        sta scrh
+        lda half
+        asl a
+        adc stb0
+        sta stbh
+        rts
+
+; A column a rung (X = ri) splits, its top level: from mx down to the floor,
+; the boxes split at bpos (the rung's pixels left of it), bpos moving a pixel
+; at each of the rung's transitions in the column; between transitions a run
+; (4 lines or more) or a line at a time.
+fsplit: lda RTPL,x
+        sta rtp
+        lda RTPH,x
+        sta rtp+1
+        lda CE,x
+        sta re
+        eor CE-1,x
+        sta xe
+        lda CO,x
+        sta ro
+        eor CO-1,x
+        sta xo
+        lda BX,x                   ; p1: the rung's bottom in the column
+        sec
+        sbc x4
+        bcs :+
+        lda #0
+:       cmp #4
+        bcc :+
+        lda #4
+:       sta p1
+        lda TX,x                   ; bpos: its top
+        sec
+        sbc x4
+        bcs :+
+        lda #0
+:       cmp #4
+        bcc :+
+        lda #4
+:       tax
+        lda mx
+        sta yy
+        cpx p1
+        beq fs_e
+        bcs fs_l
+fs_r:   txa                        ; leaning right: pixel x4 + bpos changes at
+        adc x4                     ; its line, bpos + 1 after (C clear)
+        tay
+        lda (rtp),y
+        cmp flr1
+        bcs fs_e
+        sta tj
+        sbc yy                     ; (C clear: - 1)
+        bcc :+
+        adc #0                     ; (C set: + 1) n
+        jsr emit
+:       inx
+        cpx p1
+        bcc fs_r
+fs_e:   lda flr1                   ; the rest at bpos
+        sta tj
+        sec
+        sbc yy
+        beq :+
+        bcc :+
+        jsr emit
+:       rts
+fs_l:   txa                        ; leaning left: pixel x4 + bpos - 1 changes,
+        clc                        ; bpos - 1 after
+        adc x4
+        tay
+        dey
+        lda (rtp),y
+        cmp flr1
+        bcs fs_e
+        sta tj
+        sec
+        sbc yy
+        beq :+
+        bcc :+
+        jsr emit
+:       dex
+        cpx p1
+        bne fs_l
+        beq fs_e
+
+; Lines yy .. tj-1 (A of them) at bpos X: a run if 4 or more, else a line at
+; a time; yy = tj after.  X kept.
+emit:   cmp #4
+        bcs em_run
+        stx sx_
+        txa
+        tay
+        ldx yy
+        lda LM,y
+        sta msk
+        ldy coff
+em_l:   lda LAH0,x                 ; (LAH0 or LAH1: the screen's)
+        ora half
+        sta zp_+1
+        txa
+        and #7
+        sta zp_
+        lsr a
+        bcs :+
+        lda xe                     ; (the line's parity only)
+        and msk
+        eor re
+        sta (zp_),y
+        inx
+        cpx tj
+        bne em_l
+        beq em_d
+:       lda xo
+        and msk
+        eor ro
+        sta (zp_),y
+        inx
+        cpx tj
+        bne em_l
+em_d:   stx yy
+        ldx sx_
+        rts
+em_run: lda xe
+        and LM,x
+        eor re
+        sta ve
+        lda xo
+        and LM,x
+        eor ro
+        sta vo
+        stx sx_
+        ldx yy
+        ldy tj
+        jsr run
+        lda tj
+        sta yy
+        ldx sx_
+        rts
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top.
@@ -1654,34 +2005,44 @@ clamp4: sec
         lda #4
 :       rts
 
-; Lines X .. Y-1 (X < Y) of the column: ve on even lines, vo odd, through STAB.
-run:    lda ve
-        eor vo
-        sta tgl
+; Lines X .. Y-1 (X < Y) of the column: ve on even lines, vo odd, through STAB
+; (A: STA line,Y / EOR tgl), from line X's entry to the RTS at line Y's.  The
+; RTS stays planted until a run ends elsewhere (one at a time: plY, plT).
+run:    cpy plY
+        bne r_re
+        lda stbh
+        cmp plT
+        beq r_go
+r_re:    sty plY
+        lda stbh
+        sta plT
+        lda #OP_STAY               ; the last back
+plu:    sta dummy
         lda ENTL,y
-        sta rp
+        sta plu+1
+        sta r_p+1
         lda ENTH,y
         ora stbh
-        sta rp+1
-        ldy #0
+        sta plu+2
+        sta r_p+2
         lda #OP_RTS
-        sta (rp),y
-        lda ENTL,x
-        sta @j+1
+r_p:     sta $FFFF
+r_go:    lda ENTL,x
+        sta r_j+1
         lda ENTH,x
         ora stbh
-        sta @j+2
+        sta r_j+2
+        lda ve
+        eor vo
+        sta tgl
         txa
         lsr a
         lda ve
         bcc :+
         lda vo
 :       ldy coff
-@j:     jsr $FFFF
-        ldy #0
-        lda #OP_STAY
-        sta (rp),y
-        rts
+r_j:     jmp $FFFF                  ; (its RTS returns from run)
+dummy:  .byte 0
 
 ; ---------------------------------------------------------------- the slow way
 ; A column two rungs (or more) split: each pixel's box at the top (ri - 1, and

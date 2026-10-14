@@ -41,6 +41,7 @@ SEA = 3                   # sea level: lower corners are flattened to it
 # rows clipped at the screen's edges (the nearest overhang them, as in Lander)
 NX, NZ = 13, 11           # corners across and deep
 ZBACK = 20                # the back row's depth, tiles (fz = 0)
+ZSKIP = 4                 # the far corner rows not drawn (their tiles: the far four rows)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
 HORIZON = 20              # screen y of the horizon
@@ -138,7 +139,7 @@ def project(hm, cx, cz):
     xt, zt = cx >> 8, cz >> 8
     xs = [xt - 5 + i for i in range(NX)]
     rows = []
-    for j in range(NZ):
+    for j in range(ZSKIP, NZ):
         z = zt + ZBACK - j
         r = recip((z << 8) - cz)
         row = []

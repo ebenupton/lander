@@ -499,7 +499,8 @@ init:   lda #0
 
 ; ---------------------------------------------------------------- project
 ; Lander's block of NX x NZ corners (proto/land.py: project): the columns' map x
-; (CX: cxt - 5 + i), each row's map row (czt + ZBACK - j, far to near); with
+; (CX: cxt - 5 + i), each drawn row's map row (czt + ZBACK - j, far to near, j
+; from ZSKIP: the far ZSKIP rows not drawn); with
 ; bank 4 paged, every corner's height (into PY); bank 5, each land strip's boxes'
 ; bytes (CLE, CLO: the tile at its left column and near row); bank 7, by the
 ; row's depth index (di = 16 (ZBACK - j) - czs - DI0), its y's (SYT7, from the
@@ -542,7 +543,7 @@ cph     = lqx+1
 project:
         lda #NX                    ; (always: the strips' np, nr)
         sta np
-        lda #NZ
+        lda #NZ-ZSKIP
         sta nr
         lda cxt                    ; the columns' map x
         sec
@@ -559,7 +560,7 @@ project:
         stx pr
 @h:     lda czt
         clc
-        adc #ZBACK
+        adc #ZBACK-ZSKIP
         sec
         sbc pr
         and #63
@@ -582,7 +583,7 @@ project:
         tax
         inc pr
         lda pr
-        cmp #NZ
+        cmp #NZ-ZSKIP
         beq :+
         jmp @h
 :
@@ -2890,13 +2891,13 @@ oswblk: .res 9
 ; the first row reaching YLIM the last (nr: the rows nearer are off the screen).
 prow7:  lda #0
         sta pr
-@r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0
+@r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0 (j = pr + ZSKIP)
         asl a
         asl a
         asl a
         asl a
         sta tmp                    ; (16 j: the row's place in PX, PY)
-        lda #ZBACK*16-DI0
+        lda #(ZBACK-ZSKIP)*16-DI0
         sec
         sbc tmp
         sec
@@ -2989,7 +2990,7 @@ prow7:  lda #0
         bne :-
         inc pr
         lda pr
-        cmp #NZ
+        cmp #NZ-ZSKIP
         beq :+
         jmp @r
 :       sta nr
@@ -3203,7 +3204,7 @@ pcol5:  lda #1
         sta pr
 @cs:    lda czt
         clc
-        adc #ZBACK
+        adc #ZBACK-ZSKIP
         sec
         sbc pr
         and #63

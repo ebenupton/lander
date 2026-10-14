@@ -106,6 +106,7 @@ def main():
         m[lab['cxt']], m[lab['cxs']] = (cx >> 8) & 63, (cx >> 4) & 15
         m[lab['czt']], m[lab['czs']] = (cz >> 8) & 63, (cz >> 4) & 15
         scr = 0x3000 if m[lab['back']] == 0 else 0x5800
+        m[lab['vcount']] = (m[lab['vflip']] + 1) & 255     # (a vertical sync since the flip)
         for r in cyc:
             cyc[r].append(call(mpu, lab[r]))
         # the projection

@@ -270,10 +270,7 @@ start:  ldx #<cmd_load2             ; TABLES2 to bank 5, TABLES to bank 4 (by
 
 loop:   jsr keys
         jsr project
-:       lda vcount                 ; the screen to draw shown no more
-        cmp vflip
-        beq :-
-        jsr strips
+        jsr strips                 ; (waiting for the flip before drawing)
         jsr readout
         jsr flip
         jmp loop
@@ -998,10 +995,16 @@ strips: lda back                   ; this screen's TOPS, BOTS
         stx np1
 @strip: jsr setup
         lda ns
-        beq :+                     ; (row 0: its line only)
+        beq @swap                  ; (row 0: its line only)
         jsr rungs
-        jsr cols
-:       lda topa+1                 ; the bottom row the next's top
+        lda ns                     ; (before the first drawing: the screen to
+        cmp #1                     ; draw shown no more)
+        bne @draw
+@wait:  lda vcount
+        cmp vflip
+        beq @wait
+@draw:  jsr cols
+@swap:  lda topa+1                 ; the bottom row the next's top
         ldx bota+1
         sta bota+1
         stx topa+1

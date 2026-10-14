@@ -1265,8 +1265,8 @@ t_seg:   stx tj
         tay
         bne :+
         lda tx1                    ; level: one fill
+        adc #1                     ; (C clear: bcc above)
         sta fe
-        inc fe
         lda BX,x
         tax
         jmp t_run                  ; (Y = 0: the last run)

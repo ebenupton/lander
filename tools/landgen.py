@@ -169,7 +169,7 @@ def build7():
         for h in range(L.HMAX + 1):
             put('SYT7', di * 16 + h, L.HORIZON + (((L.CAMH - h) * r + L.HSCALE * 128) // (L.HSCALE * 256)))
         for cxs in range(16):
-            dx0 = -5 * 256 - cxs * 16 - 128
+            dx0 = -6 * 256 - cxs * 16
             b0 = ((dx0 * r + 32768) >> 8) + L.XC * 256
             put('B0L', di * 16 + cxs, b0)
             put('B0H', di * 16 + cxs, b0 >> 8)

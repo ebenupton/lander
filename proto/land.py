@@ -32,19 +32,19 @@ HSCALE = 16               # height units a tile
 HMAX = 12                 # heights 0..HMAX (softened: under a tile)
 SEA = 3                   # sea level: lower corners are flattened to it
 # Lander's camera (Lander.arm): TILES_X = 13, TILES_Z = 11 corners (12 x 10 tiles),
-# the block's corners at x = -5.5 - fx + i (i 0..12) and z = 20 - fz - j (j 0..10,
-# far to near) tiles from the camera, fx, fz the camera's fractions of a tile (the
+# the block's corners at z = 20 - fz - j (j 0..10, far to near) tiles from the
+# camera, and at x = -6 - fx + i (i 0..12: Lander has -5.5 - fx + i, landscapeOffset's
+# -LANDSCAPE_X; here the sixth and seventh tiles' boundary is the centre at fx 0), fx, fz the camera's fractions of a tile (the
 # block of whole tiles slides, a tile at a time: no pinned edges, no slivers); its
 # projection on 320 x 256 (MODE 13): 160 + 256 x / z, 64 + 256 y / z.  Here: the
 # same, scaled to 256 wide (focal 204.8), the horizon moved up to fit 160 lines;
 # rows clipped at the screen's edges (the nearest overhang them, as in Lander)
 NX, NZ = 13, 11           # corners across and deep
 ZBACK = 20                # the back row's depth, tiles (fz = 0)
-XLEFT = 1408              # the left corner's x, 8.8 tiles (5.5), less fx
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 52429              # focal length, 8.8 pixels (204.8 = 256 * 256 / 320)
 HORIZON = 40              # screen y of the horizon
-XC, XR = 126, 252         # screen x of the centre, and the right edge (the last byte
+XC, XR = 128, 252         # screen x of the centre, and the right edge (the last byte
                           # boundary: the land is drawn in x 0..251)
 # the palette (proto/swatch35.py's numbering): the user's picks
 LAND = [1, 3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
@@ -134,7 +134,7 @@ def project(hm, cx, cz):
     """The rows, far to near, each (its tile z, [(sx, sy, height)] across); and the
     columns' tile x.  Camera (cx, cz) in 8.8 tiles."""
     xt, zt = cx >> 8, cz >> 8
-    xs = [xt - 5 + i for i in range(NX)]
+    xs = [xt - 6 + i for i in range(NX)]
     rows = []
     for j in range(NZ):
         z = zt + ZBACK - j
@@ -142,7 +142,7 @@ def project(hm, cx, cz):
         row = []
         for x in xs:
             h = int(hm[0][z % MAP, x % MAP])
-            dx = (x << 8) - cx - 128
+            dx = (x << 8) - cx
             sx = XC + ((dx * r + 32768) >> 16)
             sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))

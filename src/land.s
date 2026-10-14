@@ -497,7 +497,7 @@ init:   lda #0
 
 ; ---------------------------------------------------------------- project
 ; Lander's block of NX x NZ corners (proto/land.py: project): the columns' map x
-; (CX: cxt - 5 + i), each row's map row (czt + ZBACK - j, far to near); with
+; (CX: cxt - 6 + i), each row's map row (czt + ZBACK - j, far to near); with
 ; bank 4 paged, every corner's height (into PY); bank 5, each land strip's boxes'
 ; bytes (CLE, CLO: the tile at its left column and near row); bank 7, by the
 ; row's depth index (di = 16 (ZBACK - j) - czs - DI0), its y's (SYT7, from the
@@ -544,7 +544,7 @@ project:
         sta nr
         lda cxt                    ; the columns' map x
         sec
-        sbc #5
+        sbc #6
         ldx #0
 :       and #63
         sta CX,x

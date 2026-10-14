@@ -664,8 +664,7 @@ project:
         asl a
         tay
         ldx #0
-:       lda COLO,y
-        clc
+:       lda COLO,y                 ; (C clear: cxs < 16, then X < np)
         adc cxt
         and #63
         sta CT,x
@@ -694,8 +693,7 @@ project:
         asl a
         tay
         ldx #0
-:       lda ROWO,y
-        clc
+:       lda ROWO,y                 ; (C clear: czs < 16, then X < nr)
         adc czt
         and #63
         sta RZT,x

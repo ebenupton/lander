@@ -1122,8 +1122,10 @@ setup:  ldx #0                     ; the near strip: the ground below it too
 @m:
         ; the margins: a byte boundary MARGIN or more beyond the bottom row
         lda BX+1
+        .if MARGIN
         sec
         sbc #MARGIN
+        .endif
         and #$FC
         sta xl
         sta TX

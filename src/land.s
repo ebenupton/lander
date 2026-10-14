@@ -1813,17 +1813,25 @@ nearpost:
         lda (bota),y
         sta ys
         sta mn
-        ldx #1
-:       iny
+        iny
         lda (bota),y
-        sta ys,x
+        sta ys+1
         cmp mn
         bcs :+
         sta mn
-:       inx
-        cpx #4
-        bne :--
-        ldx mn
+:       iny
+        lda (bota),y
+        sta ys+2
+        cmp mn
+        bcs :+
+        sta mn
+:       iny
+        lda (bota),y
+        sta ys+3
+        cmp mn
+        bcs :+
+        sta mn
+:       ldx mn
 @l:     jsr pmask
         lda #0
         jsr zline

@@ -1811,8 +1811,7 @@ c_ri:   inx                        ; (the next rung)
         stx ri
         jmp c_rr
 c_v1:   .byte $40                  ; (BIT: V)
-c_z1:    jsr zone1
-        jmp c_r1
+c_z1:    jmp zone1                  ; (back to c_r1)
 c_split: cmp LO+1,x
         bcs c_dbl
         bvs :+
@@ -2237,22 +2236,48 @@ fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
 fs_nj:  jmp fs_c                   ; (split's: sp_c)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
-; pixels at or below their top.
+; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).
 zone1:  ldx mn
 @l:     cpx mx
         bcs @d
         cpx flr1
         bcs @d
-        jsr pmask
+        lda #0                     ; (pmask)
+        cpx ys+3
+        rol a
+        cpx ys+2
+        rol a
+        cpx ys+1
+        rol a
+        cpx ys
+        rol a
+        tay
+        lda MASKB,y
+        sta msk
+        lda LAH,x                  ; (zline)
+        clc
+        adc scrh
+        sta zp_+1
         txa
-        lsr a
-        lda ve
-        bcc :+
-        lda vo
-:       jsr zline
+        and #7
+        sta zp_
+        lsr a                      ; (C: an odd line)
+        ldy coff
+        lda (zp_),y
+        bcs @o
+        eor ve
+        and msk
+        eor (zp_),y
+        sta (zp_),y
         inx
         bne @l
-@d:     rts
+@o:     eor vo
+        and msk
+        eor (zp_),y
+        sta (zp_),y
+        inx
+        bne @l
+@d:     jmp c_r1
 
 ; msk: line X's pixels at or below their top.
 pmask:  lda #0

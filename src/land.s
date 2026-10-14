@@ -1150,17 +1150,44 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         lda ns
         bne @widen
         jmp @bot
-@widen: ldx xl                     ; the last strip's bottom row, widened
-        ldy TY
+@widen: ldy xl                     ; the last strip's bottom row, widened:
+        cpy xlp                    ; xl up to (not including) xlp at TY (all
+        bcs @w2                    ; byte boundaries: 4 at a time)
         lda xlp
-        jsr flatt
-        ldx np1
-        ldy TY,x
-        ldx xrp
+        sta @e1+1
+        lda TY
+:       sta (topa),y
+        iny
+        sta (topa),y
+        iny
+        sta (topa),y
+        iny
+        sta (topa),y
+        iny
+@e1:    cpy #0
+        bne :-
+@w2:    ldy xrp                    ; xrp up to xr (including) at TY+np+1
+        cpy xr                     ; (xrp, xr byte boundaries)
+        beq @w3
+        bcs @bot
         lda xr
-        clc
-        adc #1
-        jsr flatt
+        sta @e2+1
+        ldx np1
+        lda TY,x
+:       sta (topa),y
+        iny
+        sta (topa),y
+        iny
+        sta (topa),y
+        iny
+        sta (topa),y
+        iny
+@e2:    cpy #0
+        bne :-
+        beq @w4
+@w3:    ldx np1
+        lda TY,x
+@w4:    sta (topa),y
 @bot:   lda ns                     ; the bottom row's line
         cmp nr
         beq :+
@@ -1190,29 +1217,6 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         bne :--
         rts
 
-; (topa) from X up to (not including) A: Y.  flatb: (bota).
-flatt:  sta tj
-        cpx tj
-        bcs @d
-        stx tmp
-        tya
-        ldy tmp
-:       sta (topa),y
-        iny
-        cpy tj
-        bne :-
-@d:     rts
-flatb:  sta tj
-        cpx tj
-        bcs @d
-        stx tmp
-        tya
-        ldy tmp
-:       sta (bota),y
-        iny
-        cpy tj
-        bne :-
-@d:     rts
 
 ; The bottom row (BX, BY 0..np+1) into (bota): each segment as points.py's
 ; bresenham_ys, one y a pixel.  A shallow segment (|dy| < dx): the error kept

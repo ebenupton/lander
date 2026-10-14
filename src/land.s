@@ -774,24 +774,20 @@ project:
 @col:   lda #BANK2                 ; bank 5: each row's inner columns' x (PXT)
         sta ROMCOPY
         sta ROMSEL
+        lda cxs                    ; (16 * cxs < 256)
+        asl a
+        asl a
+        asl a
+        asl a
+        sta @c16+1
         ldx #0
         stx pr
-@ix:    ldy RDI,x                  ; PXT + di*128 + cxs*8
-        tya
+@ix:    lda RDI,x                  ; PXT + di*128 + cxs*8
         lsr a
-        tay
-        lda #0
-        ror a                      ; ((di & 1) << 7)
-        sta lp
-        tya
-        clc
-        adc #>PXT
+        ora #>PXT                  ; (+: di < 64, >PXT's low 6 bits 0)
         sta lp+1
-        lda cxs
-        asl a
-        asl a
-        asl a
-        ora lp
+@c16:   lda #0                     ; ((di & 1) << 7) | 8 * cxs
+        ror a
         sta lp
         txa
         asl a
@@ -849,6 +845,7 @@ project:
         cmp nr
         beq :+
         jmp @cs
+        .res 4                     ; (the layout kept)
 :
         lda #BANK
         sta ROMCOPY

@@ -490,8 +490,29 @@ init:   lda #0
         sta ENTHT+160-YSKY,x
         adc #2
         sta ENTHT+240-YSKY,x
+        txa                        ; run's entries: an odd line's 2 bytes early,
+        and #1                     ; at the line before's EOR tgl (so A is the
+        asl a                      ; even lines' byte on entry, either way)
+        sta tmp+1
+        lda ENTL,x
+        sec
+        sbc tmp+1
+        sta EXL-YSKY,x
+        lda ENTH,x
+        sbc #0
+        ora #>STAB
+        sta EXHT-YSKY,x
+        clc
+        adc #2
+        sta EXHT+80-YSKY,x
+        adc #2
+        sta EXHT+160-YSKY,x
+        adc #2
+        sta EXHT+240-YSKY,x
 :       inx
-        bne @ent
+        beq :+
+        jmp @ent
+:
         ldx #127                   ; nothing drawn yet
 :       lda #$FF
         sta TOPS,x
@@ -1858,9 +1879,11 @@ sethalf:
         tay
         lda enthl,y
         sta r_eh1+1
-        sta r_eh2+1
         lda enthh,y
         sta r_eh1+2
+        lda exhl,y
+        sta r_eh2+1
+        lda exhh,y
         sta r_eh2+2
         lda lahsl,y
         sta ln_h+1
@@ -1869,6 +1892,8 @@ sethalf:
         sta ln_h+2
         sta s2_h+2
         rts
+exhl:   .byte <(EXHT-YSKY), <(EXHT+80-YSKY), <(EXHT+160-YSKY), <(EXHT+240-YSKY)
+exhh:   .byte >(EXHT-YSKY), >(EXHT+80-YSKY), >(EXHT+160-YSKY), >(EXHT+240-YSKY)
 lahsl:  .byte <(LAHS0-YSKY), <(LAHS0+80-YSKY), <(LAHS0+160-YSKY), <(LAHS0+240-YSKY)
 lahsh:  .byte >(LAHS0-YSKY), >(LAHS0+80-YSKY), >(LAHS0+160-YSKY), >(LAHS0+240-YSKY)
 enthl:  .byte <(ENTHT-YSKY), <(ENTHT+80-YSKY), <(ENTHT+160-YSKY), <(ENTHT+240-YSKY)
@@ -2375,19 +2400,15 @@ r_eh1:  lda ENTHT,y                ; (sethalf: the STAB's own)
         sta r_p+2
         lda #OP_RTS
 r_p:     sta $FFFF
-r_go:    lda ENTL,x
+r_go:    lda EXL-YSKY,x
         sta r_j+1
-r_eh2:  lda ENTHT,x
+r_eh2:  lda EXHT,x
         sta r_j+2
         lda ve
         eor vo
         sta tgl
-        txa
-        lsr a
-        lda ve
-        bcc :+
-        lda vo
-:       ldy coff
+        eor vo                     ; (ve: an odd line's entry EORs first)
+        ldy coff
 r_j:     jmp $FFFF                  ; (its RTS returns from run)
 dummy:  .byte 0
 
@@ -2641,6 +2662,8 @@ putg:   asl a
 LAHS0:  .res 320                   ; each line's address, high byte: by screen and half (80 each, lines YSKY on)
 BE:     .res 5                     ; fsplit's bytes by bpos
 BO:     .res 5
+EXL:    .res 80                    ; run's entries (lines YSKY on): low, and high
+EXHT:   .res 320                   ; by STAB
 ENTHT:  .res 320                   ; each STAB's ENTH (80 a STAB, lines YSKY on)
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8

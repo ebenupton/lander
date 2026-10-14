@@ -981,11 +981,13 @@ strips: lda back                   ; this screen's TOPS, BOTS
         lda #>TOPS
         sta tsp+1
         sta bsp+1
-        ldx #63
+        ldx #31
 :       lda #$FF
         sta CURT,x
+        sta CURT+32,x
         lda #0
         sta CURB,x
+        sta CURB+32,x
         dex
         bpl :-
         lda #>ROWA

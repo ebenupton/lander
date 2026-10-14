@@ -1925,7 +1925,27 @@ c_rec:                             ; a column new this frame (strip 1's, or
 c_ra:   cpy #0                     ; beyond the last strip's): record it
         bcc record
 c_rb:   cpy #0
-        bcs record
+        bcc c_rd
+; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
+; inline: on to c_rd, Y = x4).
+record: tya                        ; (always the column's first strip this
+        lsr a                      ; frame: PINL, PINR widen to the near row)
+        lsr a
+        tax
+        lda mn                     ; the column's first strip this frame: its
+pT3:    sta CURT,x                 ; highest line, and black from the land's
+pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
+                                   ; (the pixels above their top in its top zone
+                                   ; kept)
+        cmp mx
+        bcs c_rd                   ; (Y = x4)
+        tax
+        ldy mx
+        lda #0
+        sta ve
+        sta vo
+        jsr run
+        ldy x4
 c_rd:
         ldx ri                     ; the rungs: past those wholly left
         tya
@@ -1975,28 +1995,6 @@ c_split: cmp LO+1,x
         bvs :+
         jmp fsplit                 ; (back to c_next)
 :       jmp split
-; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
-; inline: back to c_rd, Y = x4).
-record: tya                        ; (always the column's first strip this
-        lsr a                      ; frame: PINL, PINR widen to the near row)
-        lsr a
-        tax
-        lda mn                     ; the column's first strip this frame: its
-pT3:    sta CURT,x                 ; highest line, and black from the land's
-pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
-                                   ; (the pixels above their top in its top zone
-                                   ; kept)
-        cmp mx
-        bcc :+
-        jmp c_rd                   ; (Y = x4)
-:       tax
-        ldy mx
-        lda #0
-        sta ve
-        sta vo
-        jsr run
-        ldy x4
-        jmp c_rd
 
 c_dbl:   bvs :+                     ; (the slow ways read ys)
         lda mn

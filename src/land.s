@@ -2438,7 +2438,7 @@ fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
         sta fen_e+1
         sta fen_o+1
         sec
-fs_nj:  jmp fs_c                   ; (split's: sp_c)
+fs_nj:  jmp fs_c                   ; (split's: sp_r)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).
@@ -2526,16 +2526,16 @@ zline:  sta zv
 split:  ldx ri
         cpx lastri
         beq sp_c
-        lda #<sp_c                 ; (fs_new: back to sp_c)
+        lda #<sp_r                 ; (fs_new: back to sp_r)
         sta fs_nj+1
-        lda #>sp_c
+        lda #>sp_r
         sta fs_nj+2
         jmp fs_new
-sp_c:   lda #<fs_c                 ; (C set)
+sp_r:   lda #<fs_c                 ; (C set) fs_new's own again
         sta fs_nj+1
         lda #>fs_c
         sta fs_nj+2
-        lda rbl                    ; as fs_c
+sp_c:   lda rbl                    ; (C set) as fs_c
         adc x4
         sta rtp
         lda rbh

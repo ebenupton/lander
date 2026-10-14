@@ -777,11 +777,14 @@ project:
         cmp nr
         beq @col
         jmp @row
-@zr:    lda #1                     ; (a pinned row: interpolated down)
-        sta tj
-:       ldy tj
-        lda CT,y
-        tay
+@zr:    txa                        ; (a pinned row: interpolated down; X: the
+        adc #<PY                   ; column, PY's store row X's: C clear, 16 *
+        sta @zs+1                  ; row + PY < 256)
+        ldy np
+        dey
+        sty @zc+1
+        ldx #1
+:       ldy CT,x
         lda (hp0),y
         and #15
         sta ha
@@ -795,13 +798,9 @@ project:
         adc ha                     ; (LERPQ: less 1)
         tay
         lda (syp),y
-        ldy tj
-        sta PY+1,x
+@zs:    sta PY,x
         inx
-        iny
-        sty tj
-        iny
-        cpy np
+@zc:    cpx #0
         bcc :-
         ldx tmp
         jmp @nx

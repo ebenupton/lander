@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""A compatibility swatch for the land colours (land.LAND): an n x n grid of 64x64 squares,
-the square's colour by column, a 40x40 circle in it of the colour by row, each dithered as
-the BBC shows it (swatch35's 2x2 cells, pixel for pixel).
+"""Compatibility swatches for the land colours (land.LAND) and the sea's (land.SEAC): for
+each, an n x n grid of 64x64 squares, the square's colour by column, a 40x40 circle in it
+of the colour by row, each dithered as the BBC shows it (swatch35's 2x2 cells, pixel for
+pixel).
 
-    python3 proto/landcompat.py  -> landcompat.png
+    python3 proto/landcompat.py  -> landcompat.png, seacompat.png
 """
 import numpy as np
 from PIL import Image
@@ -14,8 +15,7 @@ import swatch35 as SW
 SQ, D = 64, 40
 
 
-def main():
-    cols = L.LAND
+def swatch(cols, path):
     n = len(cols)
     idx = np.zeros((n * SQ, n * SQ), dtype=int)
     yy, xx = np.mgrid[0:SQ, 0:SQ]
@@ -29,8 +29,13 @@ def main():
     for y in range(idx.shape[0]):
         for x in range(idx.shape[1]):
             out[y, x] = SW.PHYS[cells[idx[y, x]][(x & 1, y & 1)]]
-    Image.fromarray(out).save('landcompat.png')
-    print(f'{n} colours {cols}: squares by column, circles by row')
+    Image.fromarray(out).save(path)
+    print(f'{path}: {n} colours {cols}: squares by column, circles by row')
+
+
+def main():
+    swatch(L.LAND, 'landcompat.png')
+    swatch(L.SEAC, 'seacompat.png')
 
 
 if __name__ == '__main__':

@@ -104,6 +104,7 @@ LAH1    = $1660-YSKY               ; screen 1
         .assert YGND+2-YSKY <= $60, error, "LAH, ENTL: $60 lines each"
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
+ZCF     = $07D0                    ; the near clip on (1; shipb.s's keys: SPACE)
 LJ      = $07B0                    ; each row's leading corners at XL or left
 RJ      = $07C0                    ; and its first at XR or right
 
@@ -267,6 +268,7 @@ go:     jsr init
 
 loop:   lda #<B6_KEYS              ; (bank 6: the keys, the ship's controls)
         jsr call6
+        jsr space                  ; SPACE: the near clip on or off
         jsr project
         jsr strips                 ; (waiting for the flip before drawing)
         jsr readout
@@ -277,6 +279,34 @@ vsync:  php
         inc vcount
         plp
         rts
+
+; SPACE (read directly, the system VIA's auto-scan off a moment): the near clip
+; (ZCF) on or off as it goes down (down now, not last time).
+space:  sei
+        lda #$7F
+        sta $FE43
+        lda #3
+        sta $FE40
+        lda #$62                   ; (SPACE)
+        sta $FE4F
+        lda $FE4F
+        and #$80
+        tax
+        lda #$0B
+        sta $FE40
+        cli
+        txa
+        eor spcl
+        stx spcl
+        sta tmp
+        txa
+        and tmp
+        beq :+
+        lda ZCF
+        eor #1
+        sta ZCF
+:       rts
+spcl:   .byte 0                    ; (SPACE last time: bit 7)
 
 ; Bank 6's routine at $8000 + A (B6_KEYS or B6_SHIP), bank 4 paged back after.
 call6:  sta @j+1
@@ -331,6 +361,7 @@ setback:
 ; (no OS calls: the soak test runs it.)  Both screens black; STAB; ENTL, ENTH;
 ; LAH; the camera.
 init:   lda #0
+        sta ZCF                    ; (the near clip off)
         tay
         sta ptr
         ldx #$30
@@ -2904,7 +2935,12 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         asl a
         sta @lq0+1
         sta @lq1+1
-        lda #0
+        lda ZCF                    ; the near clip: its row's heights (all
+        beq :+                     ; still raw)
+        lda #(ZBACK-ZCLIP-ZSKIP)*16
+        sta tmp
+        jsr zlerp
+:       lda #0
         sta pr
 @r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0 (j = pr + ZSKIP)
         asl a
@@ -2918,7 +2954,13 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         sec
         sbc czs
         tay
-        sty xt1                    ; (di)
+        lda ZCF                    ; the near clip's row: on its plane (its
+        beq :+                     ; heights: zlerp's, above)
+        lda pr
+        cmp #ZBACK-ZCLIP-ZSKIP
+        bne :+
+        ldy #ZCLIP*16-DI0
+:       sty xt1                    ; (di)
         lda R7L,y
         sta rl
         lda R7H,y
@@ -2989,7 +3031,22 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         lda CLP7,y                 ; past the screen's edges: clipr
         beq @nx
         jsr clipr
-@nx:    ldx tmp                    ; LJ: the leading corners at x <= XL
+@nx:    lda ZCF                    ; the near clip's row: a line or more below
+        beq @lj                    ; the row before (then the last)
+        lda pr
+        cmp #ZBACK-ZCLIP-ZSKIP
+        bne @lj
+        ldx tmp
+        ldy #NX
+:       lda PY-16,x
+        cmp PY,x
+        bcc :+
+        adc #0                     ; (C set: + 1)
+        sta PY,x
+:       inx
+        dey
+        bne :--
+@lj:    ldx tmp                    ; LJ: the leading corners at x <= XL
         ldy #0
 :       lda PX,x
         cmp #XL+1
@@ -3023,7 +3080,12 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         inx
         dey
         bne :-
-        inc pr
+        lda ZCF                    ; (the near clip's row: the last)
+        beq :+
+        lda pr
+        cmp #ZBACK-ZCLIP-ZSKIP
+        beq @last
+:       inc pr
         lda pr
         cmp #NZ-ZSKIP
         beq :+
@@ -3035,6 +3097,45 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         stx nr
         rts
 
+
+; The near clip's row's heights (X: 16 j, raw): from the row before's by 1 -
+; fz (land.lerp, LERPQ7: q = 16 - czs; none at fz 0: the row itself).
+zlerp:  lda czs
+        beq @d
+        lda #16
+        sec
+        sbc czs
+        pha
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>LERPQ7
+        sta @zq+2
+        pla
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta @zq+1
+        ldx tmp
+        ldy #NX
+        sty tmp+1
+:       lda PY,x                   ; b - a + 12
+        sec
+        sbc PY-16,x
+        clc
+        adc #12
+        tay
+@zq:    lda LERPQ7,y
+        clc
+        adc PY-16,x
+        sta PY,x
+        inx
+        dec tmp+1
+        bne :-
+@d:     rts
 
 ; A row the screen's edges clip (X: 16 j): its corners left of XL onto XL, those
 ; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +

@@ -44,6 +44,8 @@ ZBACK = 20                # the back row's depth, tiles (fz = 0)
 XSKIP = 1                 # the corner columns not drawn either side (their tiles: the
                           # left and right columns)
 XCLIP = 1152              # the clip planes in x, 8.8 tiles from the camera either side (4.5)
+ZCLIP = 10                # the near clip plane's depth, tiles (the ship's 15, less 5)
+ZON = False               # the near clip on (the BBC: SPACE toggles it)
 ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
@@ -146,10 +148,15 @@ def project(hm, cx, cz):
     xt, zt, fx = cx >> 8, cz >> 8, cx & 255
     xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]      # corners 1..11
     rows = []
+    jc = ZBACK - ZCLIP                    # (the corner row the near clip replaces)
     for j in range(ZSKIP, NZ):
         z = zt + ZBACK - j
         r = recip((z << 8) - cz)
         hs = [int(hm[0][z % MAP, x % MAP]) for x in xs]
+        if ZON and j == jc:               # on the near clip plane: from the row
+            r = recip(ZCLIP << 8)         # before by 1 - fz
+            hp = [int(hm[0][(z + 1) % MAP, x % MAP]) for x in xs]
+            hs = [lerp(a, b, 256 - (cz & 255)) for a, b in zip(hp, hs)]
         pts = [(-XCLIP, lerp(hs[0], hs[1], fx))]
         pts += [((x << 8) - cx - 128, h) for x, h in zip(xs[1:-1], hs[1:-1])]
         pts += [(XCLIP, lerp(hs[-2], hs[-1], fx))]
@@ -159,9 +166,12 @@ def project(hm, cx, cz):
             sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))
         row = clip([(sx, min(sy, YLIM), h) for sx, sy, h in row])
+        if ZON and j == jc:               # (at least a line below the row before: the
+            row = [(x, max(y, py + 1), h) # strip between can be thin)
+                   for (x, y, h), (_, py, _) in zip(row, rows[-1][1])]
         rows.append((z, row))
-        if any(sy >= YLIM for _, sy, _ in row):
-            break                         # (the rows nearer: off the screen)
+        if any(sy >= YLIM for _, sy, _ in row) or (ZON and j == jc):
+            break                         # (the rows nearer: off the screen, or clipped)
     return xs, rows
 
 

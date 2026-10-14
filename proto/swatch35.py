@@ -15,7 +15,8 @@ ORDER = [(0, 0), (1, 1), (1, 0), (0, 1)]       # the diagonals first: pairs are 
 
 def cell(k, c, m, y):
     """The 2x2 cell: cyan from the front of ORDER, yellow then magenta from the back,
-    black in between."""
+    black in between; SHEARED cells with their odd line's two pixels swapped (a shear
+    by a pixel: their one ink filling a column becomes a diagonal, no vertical strips)."""
     out, back = {}, ORDER[::-1]
     for pos in ORDER[:c]:
         out[pos] = C
@@ -25,11 +26,14 @@ def cell(k, c, m, y):
         out[pos] = M
     for pos in ORDER:
         out.setdefault(pos, K)
+    if (k, c, m, y) in SHEARED:
+        out[(0, 1)], out[(1, 1)] = out[(1, 1)], out[(0, 1)]
     return out
 
 
 ALL = [(k, c, m, y) for k, c, m, y in product(range(5), repeat=4) if k + c + m + y == 4]
 ALL.sort(key=lambda t: (t[0], -t[1], -t[3], -t[2]))      # by darkness, then hue
+SHEARED = {ALL[i] for i in (23, 26, 27)}                  # (vertical strips otherwise)
 
 
 def main():

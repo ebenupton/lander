@@ -36,7 +36,8 @@ def strips_of(hm, cx, cz, m=M):
     cols = [[L.colour(hm, x, rows[k + 1][0], 0, 0) for x in xs[:-1]]
             for k in range(len(rows) - 1)]
     sky = [(x, YSKY) for x, _ in pts[0]]
-    gnd = [(x, YGND) for x, _ in pts[-1]]
+    gnd = [(x, max(YGND, y + 1)) for x, y in pts[-1]]      # (a line or more below: past
+                                                           # the screen's bottom, clipped)
     pairs = [(sky, pts[0], [BLACK] * n)] + list(zip(pts, pts[1:], cols)) + [(pts[-1], gnd, [BLACK] * n)]
     out = []
     for t, b, c in pairs:

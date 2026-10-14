@@ -105,6 +105,7 @@ LAH1    = $1661-YSKY               ; screen 1
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
 ZCF     = $07D0                    ; the far clip on (1: always, init's)
+BCL     = $07D5                    ; bclip: this strip's bottom row held at YGND+1
 ZB      = $07D1                    ; project's: ZBACK less the first row's j, the
 RN      = $07D2                    ; near clip's row (j ZBACK - ZCLIP, less it), the
 DIB     = $07D3                    ; first row's di (less 16 j, czs), and the far
@@ -686,6 +687,7 @@ strips: ldx back                   ; this screen's TOPS, BOTS (a set of three)
         inx
         stx np1
 @strip: jsr setup
+        jsr bclip                  ; (the bottom row past the screen's bottom)
         lda ns
         beq @swap                  ; (row 0: its line only)
         jsr rungs
@@ -722,6 +724,37 @@ setTl:  .byte <TOPS, <(TOPS+64), <CURT
 setTh:  .byte >TOPS, >(TOPS+64), >CURT
 setBl:  .byte <BOTS, <(BOTS+64), <CURB
 setBh:  .byte >BOTS, >(BOTS+64), >CURB
+
+; The bottom row clipped at the screen's bottom: if a point of it is past
+; YGND, its line (bota) held at YGND+1 (so every column's floor, top and line
+; stay on the screen: flr1 at most YGND+1, cols' c_lv's flrc), BCL set.
+bclip:  lda #0
+        sta BCL
+        ldx np1
+:       lda BY,x
+        cmp #YGND+1
+        bcs :+
+        dex
+        bpl :-
+        rts
+:       inc BCL
+        ldy #0
+        lda #YGND+1
+:       cmp (bota),y
+        bcs :+
+        sta (bota),y
+:       iny
+        bne :--
+        rts
+; (c_lv's, for a strip whose bottom row bclip held: the floor's line after, at
+; most YGND+1.)
+flrc:   tax
+        inx
+        cpx #YGND+2
+        bcc :+
+        dex
+:       stx flr1
+        rts
 
 ; The strip's points (TX..BY) and boxes (CE, CO), its top row's line (the
 ; last strip's bottom row's, widened, or the sky's) and its bottom row's.
@@ -1497,7 +1530,23 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         ldx #$85                   ; (the near strip: STA flr / STA flr1, the floor
         ldy #flr                   ; itself if level; JMP nearpost)
         txa
-:       stx c_lv
+        bne @lvs
+:       lda BCL                    ; (bclip's: JSR flrc / NOP)
+        beq @lvn
+        ldx #$20
+        ldy #<flrc
+        lda #$EA
+        sta c_lv+3
+        lda #>flrc
+        bne @lvp
+@lvs:   ldx #$85                   ; (STA flr / STA flr1)
+@lvn:   lda #flr1
+        sta c_lv+3
+        lda #$86
+        cpx #$85
+        bne @lvp
+        txa
+@lvp:   stx c_lv
         sty c_lv+1
         sta c_lv+2
         lda #<c_nd
@@ -1672,7 +1721,11 @@ zb3:    cmp ROWB+3,y
 :       sta flr                    ; (not level)
         tax
         inx
-        stx flr1
+        cpx #YGND+2                ; (at most YGND+1, and flr then YGND: bclip's;
+        bcc :+                     ; nearpost's not level kept)
+        dex
+        dec flr
+:       stx flr1
         jmp c_rec
 c_ri:   inx                        ; (the next rung)
         cmp HI,x
@@ -1711,6 +1764,8 @@ nearpost:
         lda flr                    ; (its bottom level: flr1 = flr)
         cmp flr1
         bne np_z
+        cmp #YGND+1                ; (off the screen: bclip's)
+        bcs np_b
         tax
         and #7
         sta zp_
@@ -1722,6 +1777,10 @@ np_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
 np_b:     ldx x4                     ; the land's lowest line now, and last time's
         ldy DIV4,x
         lda flr
+        cmp #YGND+1                ; (on the screen: bclip's)
+        bcc :+
+        lda #YGND
+:
 pB4:    sta CURB,y
 pB5:    cmp BOTS,y
         bcs np_n

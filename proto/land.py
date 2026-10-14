@@ -49,7 +49,9 @@ ZCLIP = 10                # the near clip plane's depth, tiles (the ship's 15, l
 ZFCLIP = 16               # the far clip plane's depth, tiles (the near's, and 6)
 FON = True                # the far clip on (always)
 ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
-CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
+CAMH = int(__import__('os').environ.get('LAND_CAMH', 80))   # camera height, height units
+                          # (HSCALE a tile: 5; LAND_CAMH: the tests', to push the land off
+                          # the bottom)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
 HORIZON = 20              # screen y of the horizon
 XC = 128                  # screen x of the centre (Lander's 160 of 320)

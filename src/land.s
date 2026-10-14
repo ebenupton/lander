@@ -223,7 +223,7 @@ kk:     .res 1
 fwe     = kk                       ; (fsplit's: kk is split2's): the walk's end, in the row
 rsm     = yy                       ; fsplit: the walker's row's first line - 1
 fwu     = tj                       ; fsplit: a transition beyond the row
-FSRJ    = 7                        ; fsplit: t walked to if within 8 + FSRJ of the row
+FSRJ    = 8                        ; fsplit: t walked to if within 8 + FSRJ of the row
 msk:     .res 1
 zv:     .res 1
 zp_:    .res 2
@@ -1234,7 +1234,7 @@ t_seg:  stx tj
         sta tyv
         lda BY+1,x
         sec
-        sbc BY,x
+        sbc tyv
         beq t_next                 ; (level: the run pending goes on)
         ldy #$E6                   ; INC zp
         bcs :+
@@ -1885,10 +1885,8 @@ c_rb:   cpy #0
         bcc c_rd
 ; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
 ; inline: on to c_rd, Y = x4).
-record: tya                        ; (always the column's first strip this
-        lsr a                      ; frame: PINL, PINR widen to the near row)
-        lsr a
-        tax
+record: ldx DIV4,y                 ; (always the column's first strip this
+                                   ; frame: PINL, PINR widen to the near row)
         lda mn                     ; the column's first strip this frame: its
 pT3:    sta CURT,x                 ; highest line, and black from the land's
 pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
@@ -1897,6 +1895,21 @@ pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
         cmp mx
         bcs c_rd                   ; (Y = x4)
         tax
+        inx                        ; one line: here (V kept: c_rr's)
+        cpx mx
+        bne rc_r
+        dex
+rc_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
+        sta zp_+1
+        txa
+        and #7
+        sta zp_
+        ldy coff
+        lda #0
+        sta (zp_),y
+        ldy x4
+        jmp c_rd
+rc_r:   dex
         ldy mx
         lda #0
         sta ve
@@ -1920,7 +1933,7 @@ c_r1:    ldx mx
         cpx flr1
         bcs c_next
         ldy flr1
-        jsr run
+        jsr run2
 c_next:
 c_np:   jmp nearpost               ; (cols: c_nd but in the near strip; back to c_nd)
 c_zb:                               ; (rare) the lowest (A: the first's; cols:
@@ -2031,10 +2044,8 @@ np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; se
         inx
         cpx flr1
         bcc np_l
-np_b:     lda x4                     ; the land's lowest line now, and last time's
-        lsr a
-        lsr a
-        tay
+np_b:     ldx x4                     ; the land's lowest line now, and last time's
+        ldy DIV4,x
         lda flr
 pB4:    sta CURB,y
 pB5:    cmp BOTS,y
@@ -2164,17 +2175,37 @@ sethalf:
         sta r_eh2+1
         lda exhh,y
         sta r_eh2+2
+        lda #OP_STAY               ; run2's RTSes back (its pages change)
+        ldx rE+1
+sh_1:   sta $9C00,x
+        ldx rO+1
+sh_2:   sta $A100,x
+        sty pY+1                   ; (none planted: Y < YSKY)
+        lda tpe,y
+        sta pr0+2
+        sta pp0+2
+        sta je+2
+        sta sh_1+2
+        lda tpo,y
+        sta pr1+2
+        sta pp1+2
+        sta jo+2
+        sta sh_2+2
         lda lahsl,y
         sta fs_h+1
         sta fr_h+1
         sta np_h+1
         sta np_h2+1
+        sta rc_h+1
         lda lahsh,y
         sta fs_h+2
         sta fr_h+2
         sta np_h+2
         sta np_h2+2
+        sta rc_h+2
         rts
+tpe:    .byte $9C, $9E, $9F, $A0     ; (tools/landgen.py's TPE, TPO)
+tpo:    .byte $A1, $A2, $BD, $93
 exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3)
 exhh:   .byte >(EXHB0), >(EXHB1), >(EXHB2), >(EXHB3)
 lahsl:  .byte <(LAHSB0), <(LAHSB1), <(LAHSB2), <(LAHSB3)
@@ -2289,7 +2320,7 @@ fr:     sty bpos                   ; (C set) lines X .. t-1, a run
         adc rsm                    ; the line
         tax
         ldy fwu
-        jsr run
+        jsr run2
         ldx fwu
 fr_h:   lda LAHSB0,x               ; (sethalf) the walker from t
         sta f_wse+2
@@ -2340,12 +2371,8 @@ fe_r:   lda BE,y                   ; the floor's run
         adc rsm
         tax
         ldy flr1
-        jsr run
+        jsr run2
         jmp c_next
-RSMT    = * - YSKY                 ; each line's row's first line - 1
-        .repeat YGND+2-YSKY, i
-        .byte ((YSKY+i) & $F8) - 1
-        .endrepeat
 fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         lda CE-1,x                 ; 4 the left (Y: the two EORed)
         sta BE+4
@@ -2787,6 +2814,37 @@ r_eh1:  lda ENTB0,y
         ldy coff
 r_j:    jmp $FFFF                  ; (its RTS returns from run)
 dummy:  .byte 0
+
+; Lines X .. Y-1 (X < Y), as run, in two passes: the even lines (ve), then the
+; odd (vo), each through its table for the screen and half (tools/landgen.py's,
+; sethalf's pages: pr0, pp0, je; pr1, pp1, jo), from EIN, OIN + X to an RTS
+; planted at EIN, OIN + Y (OIN = EIN - 1; rE, rO; pY: the line they are for,
+; kept while the next run2's end is the same; put back by the next run2's that
+; ends elsewhere, or sethalf).
+run2:   lda EIN,x
+        sta je+1
+        lda EIN-1,x                ; (OIN)
+        sta jo+1
+pY:     cpy #$FF                   ; (the RTSes already at Y's)
+        beq pY_k
+        sty pY+1
+        lda #OP_STAY               ; the last back
+rE:     ldx #$FF
+pr0:    sta $FF00,x
+rO:     ldx #$FF
+pr1:    sta $FF00,x
+        lda #OP_RTS
+        ldx EIN,y
+        stx rE+1
+pp0:    sta $FF00,x
+        ldx EIN-1,y
+        stx rO+1
+pp1:    sta $FF00,x
+pY_k:   lda ve
+        ldy coff
+je:     jsr $FFFF
+        lda vo
+jo:     jmp $FFFF                  ; (its RTS returns from run2)
 
 ; ---------------------------------------------------------------- the slow way
 ; A column two rungs (or more) split: each pixel's box at the top (ri - 1, and

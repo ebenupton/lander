@@ -38,8 +38,13 @@ ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, SYPL=0xBC80, SYPH=0xBCC0, SYT=0x
             LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00,
             COLO=0xB600, COLQ=0xB700, ROWO=0xB800, ROWQ=0xB880, ROWD=0xB900,
             NPT=0xB980, NRT=0xB990, LERPQ=0xBA00,
-            DVH=0xBD00, DVR=0xBD20, DVL=0xBD40, CLMP1=0xBE00,
-            TBLK4=0x9B00, TBLK5=0x9D00, TENL=0x9F00, TENH4=0xA000, TENH5=0xA100)
+            DVH=0xBD00, DVR=0xBD20, DVL=0xBD40, CLMP1=0xBE00, DIV4=0xBF00,
+            TBLK4=0x9B00, TBLK5=0x9D00, TENL=0x9F00, TENH4=0xA000, TENH5=0xA100,
+            RSMT=0xA3A0 - 68, EIN=0xB9A0 - 67)
+# run2's store tables: by t (2 screen + half), the even lines' at TPE[t] * 256 + $8D,
+# the odd lines' at TPO[t] * 256 + $8D (bank 4's scraps)
+TPE = (0x9C, 0x9E, 0x9F, 0xA0)
+TPO = (0xA1, 0xA2, 0xBD, 0x93)
 TNB = 128
 NDI = (L.ZFAR - L.ZNEAR) // 16 + 1
 
@@ -118,6 +123,8 @@ def build():
     for d in range(256):                    # fsplit's: d + 1 (signed) clamped to 0..4
         v = (d + 1) & 255
         put('CLMP1', d, 0 if v >= 128 else min(v, 4))
+    for d in range(256):                    # record's, nearpost's: x4's column
+        put('DIV4', d, d >> 2)
     for blk, pg, enh in (('TBLK4', 4, 'TENH4'), ('TBLK5', 5, 'TENH5')):
         # traceb's fills: STA page*256-k,X for k = TNB..1, then JMP (init: t_back);
         # entered at L stores before the JMP: X - L .. X - 1
@@ -132,6 +139,23 @@ def build():
             e = ADDR[blk] + 3 * (TNB - n)
             put('TENL', n, e & 255)
             put(enh, n, e >> 8)
+    for y in range(68, 146):                # fsplit's: each line's row's first line - 1
+        put('RSMT', y, (y & 0xF8) - 1)
+    # run2's: STA addr(y),Y for the even lines 68..142, then 144's slot (RTS); the odd
+    # lines 69..143, then 145's; EIN by line y (67..144): the low byte of the first
+    # even line's at or after y (EIN - 1 by y: the first odd line's at or after y)
+    for t in range(4):
+        for y in range(68, 144):
+            a = 0x3000 + 0x2800 * (t >> 1) + 256 * (t & 1) + 512 * (y >> 3) + (y & 7)
+            pg = TPE[t] if y % 2 == 0 else TPO[t]
+            o = pg * 256 + 0x8D + 3 * ((y - 68) // 2) - BASE
+            assert not any(img[o:o + 3])
+            img[o:o + 3] = bytes([0x99, a & 255, a >> 8])
+        for pg in (TPE[t], TPO[t]):
+            assert not img[pg * 256 + 0x8D + 114 - BASE]
+            img[pg * 256 + 0x8D + 114 - BASE] = 0x60
+    for y in range(67, 145):
+        put('EIN', y, 0x8D + 3 * ((y + 1) // 2 - 34))
     return img
 
 

@@ -2185,7 +2185,7 @@ split:  ldx ri
         cpx flr1
         bcs @rd
 @rl:    stx yy
-        ldy kk
+@rl2:   ldy kk                     ; (X = yy)
         lda TRL,y
         cmp flr1
         bcc :+
@@ -2201,12 +2201,11 @@ split:  ldx ri
         ldx yy
         cpx flr1
         bcs @rd
-@tr:    ldy kk
+@tr:    ldy kk                     ; (X = yy)
         lda TRB,y
         sta bpos
         inc kk
-        ldx yy
-        jmp @rl
+        jmp @rl2
 @rd:    rts
 
 ; Rung X's transitions in the column into TRL, TRB (bpos as its LM mask) from
@@ -2301,7 +2300,7 @@ split2: ldx ri
         cpx flr1
         bcs @rd
 @rl:    stx yy
-        ldy kk                     ; the next transition, or the floor
+@rl2:   ldy kk                     ; the next transition, or the floor
         lda TRL,y
         ldy kb
         cmp TRL,y
@@ -2321,9 +2320,8 @@ split2: ldx ri
         ldx yy
         cpx flr1
         bcs @rd
-@tr:    ldx yy
-        jsr catch2
-        jmp @rl
+@tr:    jsr catch2                 ; (X = yy, kept)
+        jmp @rl2
 @rd:    rts
 
 ; bpos, bpos2 by their transitions at or above line X.

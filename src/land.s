@@ -210,15 +210,10 @@ le:     .res 1                     ; split2: the boxes' bytes
 lo2:    .res 1
 me:     .res 1
 mo:     .res 1
-        .code                      ; (the readout's: not zero page)
-fps10:  .res 2
-dvs:    .res 8
-dvi:    .res 1
-vlast:  .res 1
-tcol:   .res 1
 
         .code
 ; ---------------------------------------------------------------- start
+        .assert * = $1900, error, "start must be first: *RUN enters at $1900"
 start:  ldx #<cmd_load              ; TABLES to $3000, then to bank 4
         ldy #>cmd_load
         jsr OSCLI
@@ -2556,5 +2551,11 @@ putg:   asl a
         bne :-
         inc tcol
         rts
+
+fps10:  .res 2                     ; (the readout's)
+dvs:    .res 8
+dvi:    .res 1
+vlast:  .res 1
+tcol:   .res 1
 
         .assert * <= $3000, error, "code over the screen"

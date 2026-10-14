@@ -2339,11 +2339,11 @@ fr_h:   lda LAHSB0,x               ; (sethalf) the walker from t
 fe_x:   lda flr1                   ; the floor: the rest at bpos
         clc
         sbc rsm
+        cmp #8
+        bcs fe_r                   ; (beyond the row: a run; X < 8 here)
         sta fwe                    ; (the floor in the row)
         cpx fwe
         bcs ff_d
-        cmp #8
-        bcs fe_r                   ; (beyond the row: a run)
         txa                        ; (in it: walked, by the walker's copy)
         lsr a
         lda f_wse+2

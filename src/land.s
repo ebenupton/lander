@@ -57,7 +57,8 @@ ROMSEL  = $FE30
 ROMCOPY = $F4
 CRTC_IDX = $FE00
 CRTC_DAT = $FE01
-BANK    = 4
+BANK    = 4                        ; sideways RAM: the tables
+BANK2   = 5                        ; and the tiles' colours (project's, a moment)
 
 YSKY    = 68                       ; proto/frame.py's
 YGND    = 143
@@ -100,6 +101,9 @@ ENTL    = $1700
 RZT     = $0B30                    ; the rows': tile, sixteenths, depth index
 RZQ     = $0B38
 RDI     = $0B40
+RML     = $0B48                    ; each row's map row address
+RMH     = $0B50
+PINRX   = $0B58                    ; and its right pinned column's x
 
 OP_STAY = $99
 OP_EORZ = $45
@@ -131,8 +135,9 @@ rl:     .res 1
 rh:     .res 1
 ha:     .res 1
 hb:     .res 1
-xq:     .res 1
-xt:     .res 1
+lqx:    .res 2
+xt1:    .res 1
+lqz:    .res 2
 ; strips
 ns:     .res 1                     ; the strip (0 sky, nr ground)
 np1:    .res 1                     ; np + 1: the right margin's index
@@ -214,32 +219,16 @@ mo:     .res 1
         .code
 ; ---------------------------------------------------------------- start
         .assert * = $1900, error, "start must be first: *RUN enters at $1900"
-start:  ldx #<cmd_load              ; TABLES to $3000, then to bank 4
+start:  ldx #<cmd_load2             ; TABLES2 to bank 5, TABLES to bank 4 (by
+        ldy #>cmd_load2            ; $3000)
+        lda #BANK2
+        jsr ldbank
+        ldx #<cmd_load
         ldy #>cmd_load
-        jsr OSCLI
+        lda #BANK
+        jsr ldbank
         lda #119                   ; close !BOOT (an EXEC file): the filing
         jsr OSBYTE                 ; system's workspace is then ours
-        sei
-        lda #BANK
-        sta ROMCOPY
-        sta ROMSEL
-        cli
-        lda #$30
-        sta ptr+1
-        lda #$80
-        sta tmp+1
-        ldy #0
-        sty ptr
-        sty tmp
-        ldx #$40
-:       lda (ptr),y
-        sta (tmp),y
-        iny
-        bne :-
-        inc ptr+1
-        inc tmp+1
-        dex
-        bne :-
         ldx #0                     ; the palette (!BOOT has set MODE 1)
 :       lda vdu_init,x
         jsr OSWRCH
@@ -293,6 +282,34 @@ vsync:  php
         rts
 
 cmd_load: .byte "LOAD TABLES 3000", 13
+cmd_load2: .byte "LOAD TABLES2 3000", 13
+
+; *LOAD (X, Y: the command) to $3000, then the 16K there to bank A (which is
+; left paged in).
+ldbank: pha
+        jsr OSCLI
+        pla
+        sei
+        sta ROMCOPY
+        sta ROMSEL
+        cli
+        lda #$30
+        sta ptr+1
+        lda #$80
+        sta tmp+1
+        ldy #0
+        sty ptr
+        sty tmp
+        ldx #$40
+:       lda (ptr),y
+        sta (tmp),y
+        iny
+        bne :-
+        inc ptr+1
+        inc tmp+1
+        dex
+        bne :-
+        rts
 
 vdu_init:
         .byte 19, 1, 6, 0, 0, 0
@@ -556,280 +573,355 @@ away:   inc czs
 ; The columns (CT, CQ: tile, sixteenths; np of them), the rows far to near
 ; (RZT, RZQ, RDI), then each row's points (PX, PY: 16 a row) and each land
 ; strip's boxes' bytes (CLE, CLO: 16 a strip).
+; project's: inner column i's x (vx's top byte, then vx += r << 8; C clear
+; before and after), and its y at an inner row (a whole corner).  X: 16 * row.
+.macro PXI i
+        lda vx+1
+        adc rl
+        sta vx+1
+        lda vx+2
+        sta PX+i,x
+        adc rh
+        sta vx+2
+.endmacro
+.macro PXT_ i                       ; (bank 5) inner column i's x, from PXT
+        ldy #i
+        lda (lp),y
+        sta PX+i,x
+.endmacro
+.macro CBOX i                       ; (bank 5) box i's colour: CMAPE, CMAPO
+        ldy CT+i
+        lda (hp0),y
+        sta CLE-16+i,x
+        lda (hp1),y
+        sta CLO-16+i,x
+.endmacro
+.macro PYI i
+        ldy CT+i
+        lda (hp0),y
+        and #15
+        tay
+        lda (syp),y
+        sta PY+i,x
+.endmacro
+
 project:
-        ldx #0
-        lda cxs                    ; the left pinned column: cx - 3.5 tiles
-        cmp #8
-        bcs :+
-        adc #8
-        sta CQ
-        lda cxt
-        sbc #3                     ; (C clear: - 4)
-        jmp @lp
-:       sbc #8
-        sta CQ
-        lda cxt
-        sbc #3                     ; (C set)
-@lp:    sta CT
-        inx
-        lda #<-3                   ; the inner columns: cxt - 3 + (cxs > 0) .. cxt + 3
-        ldy cxs
-        beq :+
-        lda #<-2
-:       sta tmp
-@in:    lda tmp
-        clc
-        adc cxt
-        sta CT,x
-        lda #0
-        sta CQ,x
-        inx
-        inc tmp
-        lda tmp
-        cmp #4
-        bne @in
-        lda cxs                    ; the right pinned column: cx + 3.5
-        clc
-        adc #8
-        cmp #16
-        and #15
-        sta CQ,x
-        lda cxt
-        adc #3                     ; (+ 1 if cxs >= 8: C)
-        sta CT,x
-        inx
-        stx np
-        ; rows: far pinned (cz + 7.5), inner (czt + 7 down to czt + 5 + (czs > 8)), near pinned (cz + 4)
-        ldx #0
-        lda czs
-        clc
-        adc #8
-        cmp #16
-        and #15
-        sta RZQ
-        lda czt
-        adc #7
-        sta RZT
-        lda #ZFARDI
-        sta RDI
-        inx
-        lda #5                     ; the inner rows: czt + 7 down to czt + 5 + (czs > 8)
-        ldy czs
-        cpy #9
-        bcc :+
-        lda #6
-:       sta ha                     ; (the last)
-        lda #7
-        sta tmp
-@rin:   lda tmp
-        clc
-        adc czt
-        sta RZT,x
-        lda #0
-        sta RZQ,x
-        lda tmp                    ; di = 16k - czs - 64
-        asl a
-        asl a
-        asl a
-        asl a
-        sec
-        sbc czs
-        sec
-        sbc #64
-        sta RDI,x
-        inx
-        dec tmp
-        lda tmp
-        cmp ha
-        bcs @rin
-@rnear: lda czs
-        sta RZQ,x
-        lda czt
-        clc
-        adc #4
-        sta RZT,x
-        lda #0
-        sta RDI,x
-        inx
-        stx nr
-        ; each row's points
-        lda #0
-        sta pr
-@row:   ldx pr
-        lda RZQ,x
-        sta zq
-        lda RZT,x
-        jsr maprow
-        stx hp0
-        sty hp0+1
-        ldx pr
-        lda RZT,x
-        clc
-        adc #1
-        jsr maprow
-        stx hp1
-        sty hp1+1
-        ldx pr
-        lda RDI,x
-        tay                        ; di
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>SYT
-        sta syp+1
-        sta lp+1                   ; (lp: VX's)
+        ldy cxs                    ; the columns (landgen's COLO, COLQ, NPT)
+        lda NPT,y
+        sta np
         tya
         asl a
         asl a
         asl a
         asl a
-        sta syp
-        ora cxs
-        sta lp
-        lda RLO,y
-        sta rl
-        lda RHI,y
-        sta rh
-        lda lp+1                   ; vx from VX0/1/2 + di*16 + cxs
-        clc
-        adc #>(VX0-SYT)
-        sta lp+1
-        ldy #0
-        lda (lp),y
-        sta vx
-        lda lp+1
-        adc #>(VX1-VX0)
-        sta lp+1
-        lda (lp),y
-        sta vx+1
-        lda lp+1
-        adc #>(VX2-VX1)
-        sta lp+1
-        lda (lp),y
-        sta vx+2
-        ; the points
-        lda pr
-        asl a
-        asl a
-        asl a
-        asl a
-        sta tmp                    ; 16 * row
-        ldx #0
-@pt:    stx tmp+1
-        lda CT,x
-        sta xt
-        lda CQ,x
-        sta xq
-        jsr height
         tay
-        lda (syp),y
-        ldy tmp
-        sta PY,y
-        ldx tmp+1
-        bne :+
-        ldy pr                     ; the left pinned column
-        ldx RDI,y
-        lda PINL,x
-        jmp @px
-:       inx
-        cpx np
-        bne :+
-        ldy pr                     ; the right
-        ldx RDI,y
-        lda PINR,x
-        jmp @px
-:       lda vx+1                   ; an inner one: vx's top byte, then add r << 8
+        ldx #0
+:       lda COLO,y
         clc
-        adc rl
-        sta vx+1
-        lda vx+2
-        tax
-        adc rh
-        sta vx+2
-        txa
-@px:    ldy tmp
-        sta PX,y
-        inc tmp
-        ldx tmp+1
+        adc cxt
+        and #63
+        sta CT,x
+        lda COLQ,y
+        sta CQ,x
+        iny
         inx
         cpx np
-        bne @pt
-        inc pr
-        lda pr
-        cmp nr
-        beq :+
-        jmp @row
-:       ; each land strip's boxes: the tile row of its bottom row
-        lda #1
-        sta pr
-@cs:    ldx pr
-        lda RZT,x
-        jsr maprow
-        stx hp0
-        sty hp0+1
-        lda pr
-        sec
-        sbc #1
+        bne :-
+        lda CQ                     ; (both pinned columns' sixteenths)
         asl a
         asl a
         asl a
         asl a
-        sta tmp                    ; 16 * strip
-        ldx #0
-@box:   stx tmp+1
-        lda CT,x
-        and #63
+        asl a
+        sta lqx
+        lda #>LERPQ
+        adc #0
+        sta lqx+1
+        ldy czs                    ; the rows, far to near (ROWO, ROWQ, ROWD, NRT)
+        lda NRT,y
+        sta nr
+        tya
+        asl a
+        asl a
+        asl a
         tay
-        lda (hp0),y
-        sta ha
+        ldx #0
+:       lda ROWO,y
+        clc
+        adc czt
+        and #63
+        sta RZT,x
+        lda ROWQ,y
+        sta RZQ,x
+        lda ROWD,y
+        sta RDI,x
+        iny
+        inx
+        cpx nr
+        bne :-
+        lda #0
+        sta pr
+@row:   ldx pr                     ; a row: its map rows, SYT's, LERPQ's
+        ldy RZT,x
+        lda MRL,y
+        sta hp0
+        sta RML,x
+        lda MRH,y
+        sta hp0+1
+        sta RMH,x
         iny
         tya
         and #63
         tay
-        lda (hp0),y
-        and #15
-        cmp #SEA
-        bne @land
-        lda ha
-        and #15
-        cmp #SEA
-        bne @land
-        lda ha
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        tax
-        lda SEAT,x
-        jmp @pal
-@land:  lda ha
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        tax
-        lda LANDT,x
-@pal:   tax
-        ldy tmp
-        lda DE,x
-        sta CLE,y
-        lda DO,x
-        sta CLO,y
-        inc tmp
-        ldx tmp+1
-        inx
+        lda MRL,y
+        sta hp1
+        lda MRH,y
+        sta hp1+1
+        lda RZQ,x
+        sta zq
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta lqz
+        lda #>LERPQ
+        adc #0
+        sta lqz+1
+        ldy RDI,x                  ; di
+        lda SYPL,y
+        sta syp
+        lda SYPH,y
+        sta syp+1
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        tax                        ; (X: 16 * row, throughout)
+        stx tmp
+        lda PINL,y                 ; its pinned columns' x (the inner ones' from
+        sta PX,x                   ; bank 5, after)
+        lda PINR,y
+        ldy pr
+        sta PINRX,y
+        pha
         txa
         clc
-        adc #1
-        cmp np
-        bne @box
+        adc np
+        tay
+        pla
+        sta PX-1,y
+@py:    ldy #0                     ; its y: the pinned columns' (interpolated)
+        jsr pinc
+        tay
+        lda (syp),y
+        sta PY,x
+        ldy np
+        dey
+        sty tj
+        jsr pinc
+        tay
+        lda (syp),y
+        pha
+        txa
+        clc
+        adc tj
+        tay
+        pla
+        sta PY,y
+        lda zq                     ; then the inner ones: whole corners
+        bne @zr
+        PYI 1
+        PYI 2
+        PYI 3
+        PYI 4
+        PYI 5
+        PYI 6
+        lda np
+        cmp #9
+        bne @nx
+        PYI 7
+@nx:    inc pr
+        lda pr
+        cmp nr
+        beq @col
+        jmp @row
+@zr:    lda #1                     ; (a pinned row: interpolated down)
+        sta tj
+:       ldy tj
+        lda CT,y
+        tay
+        lda (hp0),y
+        and #15
+        sta ha
+        lda (hp1),y
+        and #15
+        jsr lerpz
+        tay
+        lda (syp),y
+        ldy tj
+        sta PY+1,x
+        inx
+        iny
+        sty tj
+        iny
+        cpy np
+        bcc :-
+        ldx tmp
+        jmp @nx
+@col:   lda #BANK2                 ; bank 5: each row's inner columns' x (PXT)
+        sta ROMCOPY
+        sta ROMSEL
+        ldx #0
+        stx pr
+@ix:    ldy RDI,x                  ; PXT + di*128 + cxs*8
+        tya
+        lsr a
+        tay
+        lda #0
+        ror a                      ; ((di & 1) << 7)
+        sta lp
+        tya
+        clc
+        adc #>PXT
+        sta lp+1
+        lda cxs
+        asl a
+        asl a
+        asl a
+        ora lp
+        sta lp
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        tax
+        PXT_ 1
+        PXT_ 2
+        PXT_ 3
+        PXT_ 4
+        PXT_ 5
+        PXT_ 6
+        PXT_ 7                     ; (np 8: overwritten by the pinned one, below)
+        ldx pr
+        inx
+        stx pr
+        cpx nr
+        bne @ix
+        ldx #0                     ; (the right pinned x again, for np 8)
+:       txa
+        asl a
+        asl a
+        asl a
+        asl a
+        clc
+        adc np
+        tay
+        lda PINRX,x
+        sta PX-1,y
+        inx
+        cpx nr
+        bne :-
+        lda #1                     ; each land strip's boxes: their tiles'
+        sta pr                     ; colours (CMAPE, CMAPO), the tile row its
+@cs:    ldx pr                     ; bottom row's
+        lda RML,x
+        sta hp0
+        sta hp1
+        lda RMH,x
+        clc
+        adc #>(CMAPE-MAP)
+        sta hp0+1
+        adc #>(CMAPO-CMAPE)
+        sta hp1+1
+        lda pr
+        asl a
+        asl a
+        asl a
+        asl a
+        tax                        ; 16 * strip + 16
+        CBOX 0
+        CBOX 1
+        CBOX 2
+        CBOX 3
+        CBOX 4
+        CBOX 5
+        CBOX 6
+        lda np
+        cmp #9
+        bne :+
+        CBOX 7
+:
         inc pr
         lda pr
         cmp nr
-        bne @cs
+        beq :+
+        jmp @cs
+:
+        lda #BANK
+        sta ROMCOPY
+        sta ROMSEL
         rts
+
+; ha to A by the column's sixteenths (lerpx) or the row's (lerpz): land.lerp,
+; by LERPQ.  X kept.
+lerpx:  sec
+        sbc ha
+        clc
+        adc #12
+        tay
+        lda (lqx),y
+        clc
+        adc ha
+        rts
+lerpz:  sec
+        sbc ha
+        clc
+        adc #12
+        tay
+        lda (lqz),y
+        clc
+        adc ha
+        rts
+
+; Pinned column Y's height at the row (across by its sixteenths, and down by
+; the row's if it is pinned too): A.  X kept.
+pinc:   lda CT,y
+        tay
+        lda (hp0),y
+        and #15
+        sta ha
+        iny
+        tya
+        and #63
+        sta xt1
+        tay
+        lda (hp0),y
+        and #15
+        jsr lerpx
+        ldy zq
+        beq @d
+        sta hb
+        ldy xt1
+        dey
+        tya
+        and #63
+        tay
+        lda (hp1),y
+        and #15
+        sta ha
+        ldy xt1
+        lda (hp1),y
+        and #15
+        jsr lerpx
+        pha
+        lda hb
+        sta ha
+        pla
+        jmp lerpz
+@d:     rts
 
 ; The map's row A (mod 64): its address in (X, Y).
 maprow: and #63
@@ -845,78 +937,6 @@ maprow: and #63
         ror a
         ror a                      ; (A & 3) << 6
         tax
-        rts
-
-; The height at column (xt, xq) of the row (hp0, hp1, zq), as land.corner.
-height: lda xt
-        and #63
-        tay
-        lda xq
-        ora zq
-        bne :+
-        lda (hp0),y                ; a whole corner
-        and #15
-        rts
-:       lda (hp0),y                ; across, in the row
-        and #15
-        sta ha
-        iny
-        tya
-        and #63
-        tay
-        lda (hp0),y
-        and #15
-        ldx xq
-        jsr lerp
-        sta hb
-        lda zq
-        bne :+
-        lda hb
-        rts
-:       lda xt                     ; and in the row after, then down
-        and #63
-        tay
-        lda (hp1),y
-        and #15
-        sta ha
-        iny
-        tya
-        and #63
-        tay
-        lda (hp1),y
-        and #15
-        ldx xq
-        jsr lerp
-        pha
-        lda hb
-        sta ha
-        pla
-        ldx zq
-        ; fall into lerp
-; ha to A by X/16 (land.lerp): ha + LERP[(A - ha + 12) * 16 + X].
-lerp:   sec
-        sbc ha
-        clc
-        adc #12
-        pha
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>LERP
-        sta lp+1
-        pla
-        asl a
-        asl a
-        asl a
-        asl a
-        sta lp
-        txa
-        tay
-        lda (lp),y
-        clc
-        adc ha
         rts
 
 ; ---------------------------------------------------------------- strips

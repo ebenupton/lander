@@ -14,6 +14,7 @@ import sys
 
 import numpy as np
 from py65.devices.mpu6502 import MPU
+from py65.memory import ObservableMemory
 
 ROOT = os.path.join(os.path.dirname(__file__), '..')
 sys.path.insert(0, os.path.join(ROOT, 'proto'))
@@ -63,18 +64,34 @@ def screen_bytes(img):
     return out
 
 
+def machine():
+    """py65 with LAND at $1900, TABLES in bank 4 and TABLES2 in bank 5 (a write
+    to ROMSEL, $FE30, pages one in at $8000), init run: (mpu, labels)."""
+    lab = labels()
+    banks = {4: open(os.path.join(B, 'TABLES'), 'rb').read(),
+             5: open(os.path.join(B, 'TABLES2'), 'rb').read()}
+    mem = ObservableMemory()
+
+    def romsel(addr, value):
+        if value in banks:
+            mem._subject[0x8000:0xC000] = banks[value]
+        return value
+    mem.subscribe_to_write([0xFE30], romsel)
+    mpu = MPU(memory=mem)
+    code = open(os.path.join(B, 'LAND'), 'rb').read()
+    mpu.memory[0x1900:0x1900 + len(code)] = code
+    mem._subject[0x8000:0xC000] = banks[4]
+    call(mpu, lab['init'])
+    mpu.memory[lab['back']] = 0
+    call(mpu, lab['setback'])
+    return mpu, lab
+
+
 def main():
     frames = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     rng = np.random.default_rng(int(sys.argv[2]) if len(sys.argv) > 2 else 1)
     step = int(sys.argv[3]) if len(sys.argv) > 3 else 2
-    lab = labels()
-    mpu = MPU()
-    code = open(os.path.join(B, 'LAND'), 'rb').read()
-    mpu.memory[0x1900:0x1900 + len(code)] = code
-    mpu.memory[0x8000:0xC000] = open(os.path.join(B, 'TABLES'), 'rb').read()
-    call(mpu, lab['init'])
-    mpu.memory[lab['back']] = 0
-    call(mpu, lab['setback'])
+    mpu, lab = machine()
     hm = L.heightmap()
     cx, cz = 40 << 8, 30 << 8
     cyc = {'project': [], 'strips': []}

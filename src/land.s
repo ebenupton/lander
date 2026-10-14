@@ -2404,12 +2404,11 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         and #$EE
         eor BO
         sta BO+3
-        lda TX,x
-        cmp BX,x
-        beq fs_nr
-        bcc fs_nr
+        lda BX,x
+        cmp TX,x
+        bcs fs_nr
         lda RTPL,x                 ; leaning left: x4 + bpos - 1, bpos - 1 after
-        sbc #2                     ; (C set)
+        sbc #1                     ; (C clear: - 2)
         sta rbl
         lda RTPH,x
         sbc #0
@@ -2425,8 +2424,7 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         sec
         bcs fs_nj
 fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
-        clc                        ; changes, bpos + 1 after (- 1)
-        sbc #0
+        sbc #1                     ; changes, bpos + 1 after (- 1; C set)
         sta rbl
         lda RTPH,x
         sbc #0

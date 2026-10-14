@@ -175,7 +175,7 @@ tyy:    .res 1
 tx1:    .res 1
 tj:     .res 1
 ; rungs
-rD:     .res 1
+tyv:    .res 1                     ; (traceb: the run's y)
 ra2:    .res 1
 rq:     .res 1
 rrem:   .res 1
@@ -1253,7 +1253,7 @@ setup:  ldx #0                     ; the near strip: the ground below it too
 
 ; The bottom row (BX, BY 0..np+1) into (bota): each segment as points.py's
 ; bresenham_ys, one y a pixel.  A shallow segment (|dy| < dx): the error kept
-; in Y biased by 256 - 2dx, so the carry is the step; y in tr_y's LDA #.
+; in Y biased by 256 - 2dx, so the carry is the step; y in tyv.
 traceb: lda bota+1
         sta tr_st+2
         sta tg_st+2
@@ -1262,6 +1262,8 @@ traceb: lda bota+1
         sta fl_2+2
         sta fl_3+2
         ldx #0
+        beq t_seg
+t_o:    jmp t_old                  ; (in reach)
 t_seg:   stx tj
         lda BX+1,x
         sta tx1
@@ -1270,60 +1272,68 @@ t_seg:   stx tj
         bne :+
         jmp t_next                 ; (a margin on the row's end: none)
 :       sta terr                   ; dx
-        asl a
-        sta tdx2
         lda BY,x
-        sta tr_y+1
-        ldy BX,x
-        sta (bota),y
+        sta tyv
         lda BY+1,x
         sec
         sbc BY,x
-        ldy #$EE                   ; INC abs
+        bne :+
+        lda tx1                    ; level: one fill (C set: + 1)
+        adc #0
+        sta fe                     ; (C clear: tx1 < 255)
+        lda BX,x
+        tax
+        ldy #0                     ; (the last run)
+        jmp t_run
+:       ldy #$E6                   ; INC zp
         bcs :+
         eor #$FF                   ; rising: |dy|, DEC
         adc #1
-        ldy #$CE
-:       sty tr_inc
-        cmp terr
+        ldy #$C6
+:       cmp terr
         bcc :+
-        jmp t_steep
-:       sty t_inc                  ; ($EE or $CE: +1 or -1 below)
-        tay
-        bne :+
-        lda tx1                    ; level: one fill
-        adc #1                     ; (C clear: bcc above)
-        sta fe
-        lda BX,x
-        tax
-        jmp t_run                  ; (Y = 0: the last run)
-:       sta dva                    ; a run a y: the steps at x0 + ceil(dx (2k-1) / 2|dy|)
-        asl a                      ; (k = 1 .. |dy|; ragged.transitions' sum)
+        jmp t_steep                ; (Y: INC or DEC)
+:       sty t_inc                  ; ($E6 or $C6: +1 or -1 below)
+        sta dva                    ; a run a y: the steps at x0 + ceil(dx (2k-1) / 2|dy|)
+        tay                        ; (k = 1 .. |dy|; ragged.transitions' sum)
+        cmp #32
+        bcs t_o
+        asl a
         sta ra2
-        cpy #32
-        bcs t_old
         lda terr
         cmp #64
-        bcs t_old
-        sta dvd
-        jsr divt
-        lda rrem                   ; e: how far short of the next step
-        beq :+
-        lda ra2
+        bcs t_o
+        lda DVH,y                  ; divt's, inline: q, rem = dx div 2|dy|, mod;
+        sta t_dq+2                 ; q2, r2 = 2dx's
+        lda DVR,y
+        sta t_dr+2
+        lda DVL,y
+        ora terr
+        tay
+t_dr:   lda DRT,y                  ; r = dx mod |dy|: r2 = 2r
+        asl a
+        sta rr2
+t_dq:   lda DQT,y                  ; q2 = dx div |dy|: q = q2 / 2
+        sta rq2
+        lsr a
+        sta rq
+        lda rr2                    ; rem = r + |dy| (q2 odd)
+        bcc :+
+        adc ra2                    ; (C set: 2r + 2|dy| + 1)
+:       lsr a                      ; (C clear if rem = 0)
+        beq :+                     ; e: how far short of the next step (2|dy| - rem,
+        eor #$FF                   ; or 0; C: rem > 0)
         sec
-        sbc rrem
+        adc ra2
 :       sta rrem
-        cmp #1
         lda BX,x
         tax                        ; (C kept)
         adc rq
         sta fe                     ; the first step
         ldy dva                    ; (Y: the runs left after this one)
-t_run:  lda tr_y+1                 ; (bota) from X to (not including) fe: A,
-        cpx fe                     ; 4 at a time (up to 3 more: the next run's,
-        bcs fl_d                   ; or the next segment's, put right after)
-fl_0:   sta ROWB,x
-fl_1:   sta ROWB+1,x
+t_run:  lda tyv                    ; (bota) from X to (not including) fe (> X):
+fl_0:   sta ROWB,x                 ; A, 4 at a time (up to 3 more: the next run's,
+fl_1:   sta ROWB+1,x               ; or the next segment's, put right after)
 fl_2:   sta ROWB+2,x
 fl_3:   sta ROWB+3,x
         inx
@@ -1333,7 +1343,7 @@ fl_3:   sta ROWB+3,x
         cpx fe
         bcc fl_0
 fl_d:   ldx fe                     ; (C set)
-t_inc:  inc tr_y+1                 ; (INC or DEC: as tr_inc, patched)
+t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         dey
         bmi t_next
         beq t_last
@@ -1342,21 +1352,29 @@ t_inc:  inc tr_y+1                 ; (INC or DEC: as tr_inc, patched)
         bcs :+
         adc ra2                    ; (C set after: + 1)
         sta rrem
-        lda fe
+        txa                        ; (X = fe)
         adc rq2
         sta fe
         jmp t_run
 :       sta rrem
-        lda fe
+        txa
         clc
         adc rq2
         sta fe
         jmp t_run
-t_last: lda tx1                    ; the last run, to x1
+t_last: lda tx1                    ; the last run, to x1 (C set: + 1)
+        adc #0
         sta fe
-        inc fe
         jmp t_run
-t_old:  lda dva                    ; (dx >= 64 or |dy| >= 32) a pixel at a time
+t_old:  lda t_inc                  ; (dx >= 64 or |dy| >= 32) a pixel at a time
+        sta tr_inc
+        lda terr
+        asl a
+        sta tdx2
+        ldy BX,x                   ; (x0's)
+        lda tyv
+        sta (bota),y
+        lda dva
         asl a
         sta tdy2
         lda #0                     ; k: 256 - 2dx, less the carry
@@ -1380,9 +1398,15 @@ t_next: ldx tj
         bcs :+
         jmp t_seg
 :       rts
-t_steep: asl a                      ; (rare) the general loop
+t_steep: sty tr_inc                 ; (rare) the general loop
+        asl a
         sta tdy2
-        lda tr_y+1
+        lda terr
+        asl a
+        sta tdx2
+        ldy BX,x                   ; (x0's)
+        lda tyv
+        sta (bota),y
         sta tyy
         lda BX,x
         tax
@@ -1402,7 +1426,7 @@ tg_st:  sta ROWB,x
         bne t_gl
         beq t_next
 tg_inc: lda tr_inc                 ; tyy +- 1, as tr_inc
-        cmp #$EE
+        cmp #$E6
         bne :+
         inc tyy
         rts
@@ -1468,7 +1492,7 @@ tr_l:   inx                        ; X: the pixel, Y: the biased error, C clear
         adc tdy2
         tay
         bcs tr_s
-tr_y:   lda #0
+tr_y:   lda tyv
 tr_st:  sta ROWB,x
         cpx tx1
         bne tr_l
@@ -1476,7 +1500,7 @@ tr_st:  sta ROWB,x
 tr_s:   tya                        ; a step: unbias, y +- 1
 tr_k:   adc #0
         tay
-tr_inc: inc tr_y+1
+tr_inc: inc tyv
         jmp tr_y
 
 ; ---------------------------------------------------------------- rungs

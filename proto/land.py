@@ -42,9 +42,10 @@ SEA = 3                   # sea level: lower corners are flattened to it
 NX, NZ = 13, 11           # corners across and deep
 ZBACK = 20                # the back row's depth, tiles (fz = 0)
 CAMH = 80                 # camera height, height units (HSCALE a tile: 5)
-F256 = 52429              # focal length, 8.8 pixels (204.8 = 256 * 256 / 320)
+F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
 HORIZON = 40              # screen y of the horizon
 XC = 128                  # screen x of the centre (Lander's 160 of 320)
+YLIM = 156                # the lowest a row's corner goes (proto/frame.py's YGND - 1)
 XL, XR = 4, 252           # the edges the rows are clipped to, either side of XC alike
                           # (XR the last byte boundary: the land is drawn in x 4..251)
 # the palette (proto/swatch35.py's numbering): the user's picks
@@ -147,8 +148,18 @@ def project(hm, cx, cz):
             sx = XC + ((dx * r + 32768) >> 16)
             sy = HORIZON + (((CAMH - h) * r + HSCALE * 128) // (HSCALE * 256))
             row.append((sx, sy, h))
-        rows.append((z, clip(row)))
+        row = clip([(sx, min(sy, YLIM), h) for sx, sy, h in row])
+        rows.append((z, row))
+        if any(sy >= YLIM for _, sy, _ in row):
+            break                         # (the rows nearer: off the screen)
     return xs, rows
+
+
+def off(top, bot, i):
+    """Box i between rows top and bot (points) touches the screen's edges: a corner
+    clipped at XL or XR or at YLIM (crudely, the box is then not drawn)."""
+    return any(x <= XL or x >= XR or y >= YLIM
+               for x, y, *_ in (top[i], top[i + 1], bot[i], bot[i + 1]))
 
 
 TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC's map: 4 bits a tile)
@@ -177,7 +188,7 @@ def frame(hm, cx, cz):
         if not S.ok(t, b):
             bad += 1
             continue
-        cols = [colour(hm, x, z1, k + 1, len(rows) - 1) for x in xs[:-1]]
+        cols = [None if off(top, bot, i) else colour(hm, x, z1, k + 1, len(rows) - 1) for i, x in enumerate(xs[:-1])]
         m = S.mask(t, b)
         img[m >= 0] = np.array(cols)[m[m >= 0]] + 1
     return img, bad, len(rows) - 1

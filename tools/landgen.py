@@ -9,7 +9,7 @@
 Bank 7, by a row's depth index di = d/16 - DI0 (d its depth, 8.8 tiles: (20 - j)*256
 - 16*czs, so di 0..NDI-1) and r = land.recip(d) (pixels a tile, 8.8):
   R7L, R7H + di           r
-  SYT7 + di*16 + h        screen y of a corner of height h (0..HMAX)
+  SYT7 + di*16 + h        screen y of a corner of height h (0..HMAX), YLIM at most
   B0L, B0H, B0X + di*16 + cxs  the row's first corner's x * 256 (24 bits, signed),
                           XC on: corner i's x is (B0 + i*r) >> 8
   CLP + di*16 + cxs       1 if the row overhangs the screen (corner 0 left of 0, or
@@ -167,7 +167,7 @@ def build7():
         put('R7L', di, r)
         put('R7H', di, r >> 8)
         for h in range(L.HMAX + 1):
-            put('SYT7', di * 16 + h, L.HORIZON + (((L.CAMH - h) * r + L.HSCALE * 128) // (L.HSCALE * 256)))
+            put('SYT7', di * 16 + h, min(L.YLIM, L.HORIZON + (((L.CAMH - h) * r + L.HSCALE * 128) // (L.HSCALE * 256))))
         for cxs in range(16):
             dx0 = -5 * 256 - cxs * 16 - 128
             b0 = ((dx0 * r + 32768) >> 8) + L.XC * 256
@@ -189,7 +189,7 @@ def main():
         for k, v in list(ADDR.items()) + list(ADDR2.items()) + list(ADDR7.items()):
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=TNB, MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34,
-                      NX=L.NX, NZ=L.NZ, ZBACK=L.ZBACK, DI0=DI0, XC=L.XC, XL=L.XL, XR=L.XR,
+                      NX=L.NX, NZ=L.NZ, ZBACK=L.ZBACK, DI0=DI0, XC=L.XC, XL=L.XL, XR=L.XR, YLIM=L.YLIM,
                       YSKY=YSKY, YGND=YGND, R2OFF=R2OFF,
                       TPE0=TPE[0], TPE1=TPE[1], TPE2=TPE[2], TPE3=TPE[3],
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])

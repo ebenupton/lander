@@ -104,6 +104,8 @@ LAH1    = $1660-YSKY               ; screen 1
         .assert YGND+2-YSKY <= $60, error, "LAH, ENTL: $60 lines each"
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
+LJ      = $07B0                    ; each row's leading corners at XL or left
+RJ      = $07C0                    ; and its first at XR or right
 
 SWT     = $9400                    ; init's line tables, in bank 4's free space: two a
                                    ; page, by line (YSKY..YGND+1: no page crossed)
@@ -584,317 +586,17 @@ project:
         beq :+
         jmp @h
 :
-        lda #BANK2                 ; (bank 5) each land strip's boxes: their
-        sta ROMCOPY                ; tiles' bytes, the near row's
-        sta ROMSEL
-        lda #1
-        sta pr
-@cs:    lda czt
-        clc
-        adc #ZBACK
-        sec
-        sbc pr
-        and #63
-        tax
-        lsr a
-        lsr a
-        ora #>CMAPE                ; (CMAPE: $8000, 64 a row)
-        sta hp0+1
-        ora #>CMAPO
-        sta hp1+1
-        txa
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta hp0
-        sta hp1
-        lda pr
-        asl a
-        asl a
-        asl a
-        asl a
-        tax                        ; 16 * strip + 16
-        .repeat NX-1, i
-        CBOX i
-        .endrepeat
-        inc pr
-        lda pr
-        cmp #NZ
-        beq :+
-        jmp @cs
-:
-        lda #BANK7                 ; (bank 7) each row's y's and x's
+        lda #BANK7                 ; (bank 7) each row's y's and x's (prow7)
         sta ROMCOPY
         sta ROMSEL
-        lda #0
-        sta pr
-@r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0
-        asl a
-        asl a
-        asl a
-        asl a
-        sta tmp                    ; (16 j: the row's place in PX, PY)
-        lda #ZBACK*16-DI0
-        sec
-        sbc tmp
-        sec
-        sbc czs
-        tay
-        lda R7L,y
-        sta rl
-        lda R7H,y
-        sta rh
-        tya                        ; di * 16: the row's SYT7, and B0's for cxs
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        sta tmp+1
-        tya
-        asl a
-        asl a
-        asl a
-        asl a
-        sta syp
-        sta lp
-        sta hp0
-        sta hp1
-        lda tmp+1
-        clc
-        adc #>SYT7
-        sta syp+1
-        ldx tmp
-        .repeat NX, i
-        PYS i
-        .endrepeat
-        lda tmp+1
-        clc
-        adc #>CLP
-        sta lp+1
-        lda tmp+1
-        clc
-        adc #>B0L
-        sta hp0+1
-        lda tmp+1
-        clc
-        adc #>B0H
-        sta hp1+1
-        ldy cxs
-        lda (lp),y                 ; clipped?
-        beq :+
-        jmp @clip
-:
-        lda (hp0),y
-        sta vx
-        lda (hp1),y
-        clc
-        .repeat NX, i
-        PXS i
-        .endrepeat
-@nx:    inc pr
-        lda pr
-        cmp #NZ
-        beq :+
-        jmp @r
-:       lda #BANK
+        jsr prow7
+        lda #BANK2                 ; (bank 5) each land strip's boxes (pcol5)
         sta ROMCOPY
         sta ROMSEL
-        rts
-@clip:  jsr clipr
-        jmp @nx
-
-; A row the screen's edges clip (X: 16 j, Y: cxs; hp0, hp1: its B0L, B0H; its
-; B0X): each corner's x as 9 bits (PX, PXX), then those left of XL onto XL, those
-; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +
-; floor(((y1 - y0) n 2 + d) / 2d), n the distance to the edge, d the segment's
-; width).
-clipr:  lda (hp0),y
-        sta vx
-        lda (hp1),y
-        sta vx+1
-        lda tmp+1
-        clc
-        adc #>B0X
-        sta hp1+1
-        lda (hp1),y
-        sta vx+2
-        ldy #0
-:       lda vx+1                   ; x's: B >> 8, 9 bits (B += r)
-        sta PX,x
-        lda vx+2
-        sta PXX,y
-        lda vx
-        clc
-        adc rl
-        sta vx
-        lda vx+1
-        adc rh
-        sta vx+1
-        lda vx+2
-        adc #0
-        sta vx+2
-        inx
-        iny
-        cpy #NX
-        bne :-
-        ldx tmp
-        ldy #0                     ; the left edge: the first corner on (x >= XL)
-@lf:    lda PXX,y
-        bne @ln                    ; (x < 0)
-        tya
-        clc
-        adc tmp
-        tax
-        lda PX,x
-        cmp #XL
-        bcs :+
-@ln:    iny
-        bne @lf
-:       tya
-        beq @rt
-        sta tj                     ; k
-        clc
-        adc tmp
-        tax                        ; X: 16 j + k
-        lda PX,x                   ; d = x1 - x0 (x0 < 0)
-        sec
-        sbc PX-1,x
-        sta cd
-        lda #XL                    ; n = XL - x0
-        sec
-        sbc PX-1,x
-        sta cn
-        lda PY,x                   ; dy = y1 - y0
-        sec
-        sbc PY-1,x
-        jsr cyc
-        sta cdy
-        lda tj
-        clc
-        adc tmp
-        tax
-        lda cdy
-        clc
-        adc PY-1,x                 ; yc
-        ldy tj                     ; corners 0..k-1 onto (XL, yc)
-        ldx tmp
-:       sta PY,x
-        lda #XL
-        sta PX,x
-        lda PY,x
-        inx
-        dey
-        bne :-
-@rt:    ldy #NX-1                  ; the right edge: the last corner on (x <= XR)
-:       lda PXX,y
-        bne :+
-        tya
-        clc
-        adc tmp
-        tax
-        lda PX,x
-        cmp #XR+1
-        bcc :++
-:       dey
-        bpl :--
-:       cpy #NX-1
-        beq @d
-        sty tj                     ; k
-        tya
-        clc
-        adc tmp
-        tax                        ; X: 16 j + k
-        lda PX+1,x                 ; d = x1 - x0 (x1 > XR: 9 bits)
-        sec
-        sbc PX,x
-        sta cd
-        lda #XR                    ; n = XR - x0
-        sec
-        sbc PX,x
-        sta cn
-        lda PY+1,x
-        sec
-        sbc PY,x
-        jsr cyc
-        sta cdy
-        lda tj
-        clc
-        adc tmp
-        tax
-        lda cdy
-        clc
-        adc PY,x                   ; yc
-        ldy tj                     ; corners k+1..NX-1 onto (XR, yc)
-:       iny
-        cpy #NX
-        beq @d
-        inx
-        sta PY,x
-        pha
-        lda #XR
-        sta PX,x
-        pla
-        bne :-                     ; (yc > 0)
-@d:     rts
-
-; floor((A n 2 + d) / 2d), A signed (dy), n = cn, d = cd (1..127): A.  The
-; product by adding, the quotient by subtracting (both small).
-cyc:    sta cdy
-        lda #0
-        sta cpl
-        sta cph
-        ldy cn
-        beq @m
-@a:     lda cdy                    ; + dy, n times (16 bits, signed)
-        bpl :+
-        dec cph
-:       clc
-        adc cpl
-        sta cpl
-        bcc :+
-        inc cph
-:       dey
-        bne @a
-@m:     asl cpl                    ; * 2, + d
-        rol cph
-        lda cpl
-        clc
-        adc cd
-        sta cpl
-        bcc :+
-        inc cph
-:       lda cd                     ; 2d
-        asl a
-        sta cd
-        ldy #0                     ; floor(N / 2d): N >= 0 by subtracting; N < 0
-        lda cph                    ; by adding (q from 0 down)
-        bmi @n
-@p:     lda cpl
-        sec
-        sbc cd
-        tax
-        lda cph
-        sbc #0
-        bcc @pq
-        sta cph
-        stx cpl
-        iny
-        bne @p
-@pq:    tya
-        rts
-@n:     dey                        ; N + 2d (q - 1) until N >= 0
-        lda cpl
-        clc
-        adc cd
-        sta cpl
-        lda cph
-        adc #0
-        sta cph
-        bmi @n
-        tya
+        jsr pcol5
+        lda #BANK
+        sta ROMCOPY
+        sta ROMSEL
         rts
 
 ; ---------------------------------------------------------------- strips
@@ -3181,3 +2883,414 @@ gchars: .byte "0123456789. FPS"
 gchars_end:
 oswblk: .res 9
 
+; ---------------------------------------------------------------- bank 7
+        .segment "B7CODE"
+; (bank 7) Each row's y's (SYT7: clamped at YLIM) and x's (fast, or clipr),
+; its leading corners at XL or left (LJ) and its first at XR or right (RJ);
+; the first row reaching YLIM the last (nr: the rows nearer are off the screen).
+prow7:  lda #0
+        sta pr
+@r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0
+        asl a
+        asl a
+        asl a
+        asl a
+        sta tmp                    ; (16 j: the row's place in PX, PY)
+        lda #ZBACK*16-DI0
+        sec
+        sbc tmp
+        sec
+        sbc czs
+        tay
+        lda R7L,y
+        sta rl
+        lda R7H,y
+        sta rh
+        tya                        ; di * 16: the row's SYT7, and B0's for cxs
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta tmp+1
+        tya
+        asl a
+        asl a
+        asl a
+        asl a
+        sta syp
+        sta lp
+        sta hp0
+        sta hp1
+        lda tmp+1
+        clc
+        adc #>SYT7
+        sta syp+1
+        ldx tmp
+        .repeat NX, i
+        PYS i
+        .endrepeat
+        lda tmp+1
+        clc
+        adc #>CLP
+        sta lp+1
+        lda tmp+1
+        clc
+        adc #>B0L
+        sta hp0+1
+        lda tmp+1
+        clc
+        adc #>B0H
+        sta hp1+1
+        ldy cxs
+        lda (lp),y                 ; clipped?
+        beq :+
+        jmp @clip
+:
+        lda (hp0),y
+        sta vx
+        lda (hp1),y
+        clc
+        .repeat NX, i
+        PXS i
+        .endrepeat
+@nx:    ldx tmp                    ; LJ: the leading corners at x <= XL
+        ldy #0
+:       lda PX,x
+        cmp #XL+1
+        bcs :+
+        inx
+        iny
+        cpy #NX
+        bne :-
+:       tya
+        ldy pr
+        sta LJ,y
+        lda tmp                    ; RJ: the first corner at x >= XR
+        clc
+        adc #NX-1
+        tax
+        ldy #NX
+:       lda PX,x
+        cmp #XR
+        bcc :+
+        dex
+        dey
+        bne :-
+:       tya
+        ldy pr
+        sta RJ,y
+        ldx tmp                    ; reaching YLIM: the last row
+        ldy #NX
+:       lda PY,x
+        cmp #YLIM
+        beq @last
+        inx
+        dey
+        bne :-
+        inc pr
+        lda pr
+        cmp #NZ
+        beq :+
+        jmp @r
+:       sta nr
+        rts
+@last:  ldx pr
+        inx
+        stx nr
+        rts
+@clip:  jsr clipr
+        jmp @nx
+
+
+; A row the screen's edges clip (X: 16 j, Y: cxs; hp0, hp1: its B0L, B0H; its
+; B0X): each corner's x as 9 bits (PX, PXX), then those left of XL onto XL, those
+; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +
+; floor(((y1 - y0) n 2 + d) / 2d), n the distance to the edge, d the segment's
+; width).
+clipr:  lda (hp0),y
+        sta vx
+        lda (hp1),y
+        sta vx+1
+        lda tmp+1
+        clc
+        adc #>B0X
+        sta hp1+1
+        lda (hp1),y
+        sta vx+2
+        ldy #0
+:       lda vx+1                   ; x's: B >> 8, 9 bits (B += r)
+        sta PX,x
+        lda vx+2
+        sta PXX,y
+        lda vx
+        clc
+        adc rl
+        sta vx
+        lda vx+1
+        adc rh
+        sta vx+1
+        lda vx+2
+        adc #0
+        sta vx+2
+        inx
+        iny
+        cpy #NX
+        bne :-
+        ldx tmp
+        ldy #0                     ; the left edge: the first corner on (x >= XL)
+@lf:    lda PXX,y
+        bne @ln                    ; (x < 0)
+        tya
+        clc
+        adc tmp
+        tax
+        lda PX,x
+        cmp #XL
+        bcs :+
+@ln:    iny
+        bne @lf
+:       tya
+        beq @rt
+        sta tj                     ; k
+        clc
+        adc tmp
+        tax                        ; X: 16 j + k
+        lda PX,x                   ; d = x1 - x0 (x0 < 0)
+        sec
+        sbc PX-1,x
+        sta cd
+        lda #XL                    ; n = XL - x0
+        sec
+        sbc PX-1,x
+        sta cn
+        lda PY,x                   ; dy = y1 - y0
+        sec
+        sbc PY-1,x
+        jsr cyc
+        sta cdy
+        lda tj
+        clc
+        adc tmp
+        tax
+        lda cdy
+        clc
+        adc PY-1,x                 ; yc
+        ldy tj                     ; corners 0..k-1 onto (XL, yc)
+        ldx tmp
+:       sta PY,x
+        lda #XL
+        sta PX,x
+        lda PY,x
+        inx
+        dey
+        bne :-
+@rt:    ldy #NX-1                  ; the right edge: the last corner on (x <= XR)
+:       lda PXX,y
+        bne :+
+        tya
+        clc
+        adc tmp
+        tax
+        lda PX,x
+        cmp #XR+1
+        bcc :++
+:       dey
+        bpl :--
+:       cpy #NX-1
+        beq @d
+        sty tj                     ; k
+        tya
+        clc
+        adc tmp
+        tax                        ; X: 16 j + k
+        lda PX+1,x                 ; d = x1 - x0 (x1 > XR: 9 bits)
+        sec
+        sbc PX,x
+        sta cd
+        lda #XR                    ; n = XR - x0
+        sec
+        sbc PX,x
+        sta cn
+        lda PY+1,x
+        sec
+        sbc PY,x
+        jsr cyc
+        sta cdy
+        lda tj
+        clc
+        adc tmp
+        tax
+        lda cdy
+        clc
+        adc PY,x                   ; yc
+        ldy tj                     ; corners k+1..NX-1 onto (XR, yc)
+:       iny
+        cpy #NX
+        beq @d
+        inx
+        sta PY,x
+        pha
+        lda #XR
+        sta PX,x
+        pla
+        bne :-                     ; (yc > 0)
+@d:     rts
+
+; floor((A n 2 + d) / 2d), A signed (dy), n = cn, d = cd (1..127): A.  The
+; product by adding, the quotient by subtracting (both small).
+cyc:    sta cdy
+        lda #0
+        sta cpl
+        sta cph
+        ldy cn
+        beq @m
+@a:     lda cdy                    ; + dy, n times (16 bits, signed)
+        bpl :+
+        dec cph
+:       clc
+        adc cpl
+        sta cpl
+        bcc :+
+        inc cph
+:       dey
+        bne @a
+@m:     asl cpl                    ; * 2, + d
+        rol cph
+        lda cpl
+        clc
+        adc cd
+        sta cpl
+        bcc :+
+        inc cph
+:       lda cd                     ; 2d
+        asl a
+        sta cd
+        ldy #0                     ; floor(N / 2d): N >= 0 by subtracting; N < 0
+        lda cph                    ; by adding (q from 0 down)
+        bmi @n
+@p:     lda cpl
+        sec
+        sbc cd
+        tax
+        lda cph
+        sbc #0
+        bcc @pq
+        sta cph
+        stx cpl
+        iny
+        bne @p
+@pq:    tya
+        rts
+@n:     dey                        ; N + 2d (q - 1) until N >= 0
+        lda cpl
+        clc
+        adc cd
+        sta cpl
+        lda cph
+        adc #0
+        sta cph
+        bmi @n
+        tya
+        rts
+
+
+; ---------------------------------------------------------------- bank 5
+        .segment "B5CODE"
+; (bank 5) Each land strip's boxes' bytes (CLE, CLO): box i the tile at its left
+; column and the near row's, black if a corner is at XL or left, XR or right
+; (i < max LJ, i >= min RJ - 1) or at YLIM (the near row's).
+pcol5:  lda #1
+        sta pr
+@cs:    lda czt
+        clc
+        adc #ZBACK
+        sec
+        sbc pr
+        and #63
+        tax
+        lsr a
+        lsr a
+        ora #>CMAPE                ; (CMAPE: $8000, 64 a row)
+        sta hp0+1
+        ora #>CMAPO
+        sta hp1+1
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta hp0
+        sta hp1
+        lda pr                     ; the strip's stores (16 (strip - 1) on), the
+        asl a                      ; near row's ys (16 strip)
+        asl a
+        asl a
+        asl a
+        sta @y0+1
+        ora #1
+        sta @y1+1
+        and #$F0
+        sec
+        sbc #16
+        sta tmp
+        clc
+        adc #<CLE
+        sta @se+1
+        sta @se2+1
+        lda #>CLE
+        adc #0
+        sta @se+2
+        sta @se2+2
+        lda tmp
+        clc
+        adc #<CLO
+        sta @so+1
+        sta @so2+1
+        lda #>CLO
+        adc #0
+        sta @so+2
+        sta @so2+2
+        ldx pr                     ; the boxes drawn: max LJ .. min RJ - 2
+        lda LJ-1,x
+        cmp LJ,x
+        bcs :+
+        lda LJ,x
+:       sta tmp
+        lda RJ-1,x
+        cmp RJ,x
+        bcc :+
+        lda RJ,x
+:       sec
+        sbc #1
+        sta tmp+1
+        ldx #0
+@b:     cpx tmp
+        bcc @k
+        cpx tmp+1
+        bcs @k
+@y0:    lda PY,x
+        cmp #YLIM
+        beq @k
+@y1:    lda PY,x                   ; (+ 1: @y1's operand)
+        cmp #YLIM
+        beq @k
+        ldy CX,x
+        lda (hp0),y
+@se:    sta CLE,x
+        lda (hp1),y
+@so:    sta CLO,x
+        jmp @n
+@k:     lda #0                     ; (black)
+@se2:   sta CLE,x
+@so2:   sta CLO,x
+@n:     inx
+        cpx #NX-1
+        bne @b
+        inc pr
+        lda pr
+        cmp nr
+        beq :+
+        jmp @cs
+:       rts

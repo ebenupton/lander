@@ -8,6 +8,15 @@ mkdir -p $B
 python3 tools/landgen.py $B
 ca65 -g --cpu 6502 -I src -I $B -o $B/land.o src/land.s -l $B/land.lst
 ld65 -C src/land.cfg -o $B/LAND $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/land.dbg
+python3 - $B <<'PY'                 # bank 5's and bank 7's code into their tables
+import sys
+for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES7', 'B7CODE', 0x3900)):
+    img = bytearray(open(f'{sys.argv[1]}/{t}', 'rb').read())
+    code = open(f'{sys.argv[1]}/{c}', 'rb').read()
+    assert not any(img[off:off + len(code)]), t + ': code over the tables'
+    img[off:off + len(code)] = code
+    open(f'{sys.argv[1]}/{t}', 'wb').write(img)
+PY
 python3 - $B <<'PY'                 # LAND's symbols for bank 6, L_ before each
 import sys
 want = {'TRL', 'TRB', 'scrb', 'back', 'sidx', 'setTl', 'setTh', 'setBl', 'setBh',

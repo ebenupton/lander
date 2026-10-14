@@ -125,6 +125,9 @@ OP_STAY = $99
 OP_LDAZ = $A5
 OP_TXA  = $8A
 OP_RTS  = $60
+OP_JMP  = $4C
+OP_INY  = $C8
+OP_DEY  = $88
 
         .zeropage
 cxt:    .res 1                     ; the camera: tile and step (0-15), x and z
@@ -189,7 +192,7 @@ fe:     .res 1
 tcnt:   .res 1
 tsy:    .res 1
 last:   .res 1                     ; the near strip ($80)
-sx_:    .res 1
+lastri: .res 1                     ; fsplit: the rung BE, BO, rbl, rbh are for
 ; columns
 x4:     .res 1                     ; the column's first pixel
 x4p4:   .res 1
@@ -206,13 +209,12 @@ ve:     .res 1                     ; the bytes being drawn: even and odd lines
 vo:     .res 1
 re:     .res 1                     ; a split column: the right box's bytes
 ro:     .res 1
-xe:     .res 1                     ; and the two boxes' EORed
-xo:     .res 1
 bpos:   .res 1
 p0:     .res 1
 p1:     .res 1
 yy:     .res 1
 kk:     .res 1
+cnt     = kk                       ; (fsplit's: kk is split2's)
 msk:     .res 1
 zv:     .res 1
 zp_:    .res 2
@@ -1466,8 +1468,8 @@ rungs:  lda xl
         lda xr
         sta LO,x
         sta HI,x
-        lda #<RTBUF
-        sta alloc
+        lda #<(RTBUF+2)            ; (alloc + 2: each rung's a + 1 bytes from alloc
+        sta alloc                  ; + 1, its sentinel after leaning right, before
         lda #>RTBUF
         sta alloc+1
         ldx #1
@@ -1480,9 +1482,24 @@ rungs:  lda xl
         sta rend                   ; (the last pixel's end: xb either way)
         cmp TX,x
         bne :+
-        sta LO,x                   ; upright: none
+        sta LO,x                   ; upright: none (its sentinel only)
         sta HI,x
-        jmp @nx
+        tay
+        lda alloc
+        clc
+        sbc LO,x
+        sta RTPL,x
+        sta rtp
+        lda alloc+1
+        sbc #0
+        sta RTPH,x
+        sta rtp+1
+        lda #$FF
+        sta (rtp),y
+        inc alloc
+        bne @upd
+        inc alloc+1
+@upd:   jmp @nx
 :       bcs @right
         sta LO,x                   ; leaning left: pixels xb .. xt-1
         lda TX,x
@@ -1498,9 +1515,8 @@ rungs:  lda xl
         sbc TX,x
 @a:     sta dva                    ; (a)
         asl a
-        sta ra2                    ; 2a
-        lda alloc                  ; RTP = alloc - LO
-        sec
+        sta ra2                    ; 2a (C clear: a < 128)
+        lda alloc                  ; RTP = alloc - LO - 1
         sbc LO,x
         sta RTPL,x
         sta rtp
@@ -1508,8 +1524,8 @@ rungs:  lda xl
         sbc #0
         sta RTPH,x
         sta rtp+1
-        lda alloc                  ; alloc += a
-        clc
+        lda alloc                  ; alloc += a + 1
+        sec
         adc dva
         sta alloc
         bcc :+
@@ -1530,7 +1546,7 @@ rungs:  lda xl
 @rl:    sta (rtp),y                ; leaning right: xt .. xb-1
         iny
         cpy rend
-        beq @nx
+        beq @nr
 @rs:    tax                        ; the next pixel's: + 2D / 2a, by e
         lda rrem
         sec
@@ -1544,7 +1560,7 @@ rungs:  lda xl
         iny
         cpy rend
         bne @rs
-        beq @nx
+        beq @nr
 :       sta rrem
         txa
         clc
@@ -1553,11 +1569,11 @@ rungs:  lda xl
         iny
         cpy rend
         bne @rs
-        beq @nx
+        beq @nr
 @ll:    dey                        ; leaning left: xt-1 .. xb
         sta (rtp),y
         cpy rend
-        beq @nx
+        beq @nl
 @ls:    tax                        ; (C set: Y > rend)
         lda rrem
         sbc rr2
@@ -1570,7 +1586,7 @@ rungs:  lda xl
         sta (rtp),y
         cpy rend
         bne @ls
-        beq @nx
+        beq @nl
 :       sta rrem
         txa
         clc
@@ -1579,6 +1595,9 @@ rungs:  lda xl
         sta (rtp),y
         cpy rend
         bne @ls
+@nl:    dey                        ; the sentinel: past the last pixel
+@nr:    lda #$FF
+        sta (rtp),y
 @nx:    ldx tj
         inx
         cpx np1
@@ -1587,7 +1606,9 @@ rungs:  lda xl
 :       rts
 
 ; ---------------------------------------------------------------- columns
-cols:   lda topa+1                 ; this strip's rows' pages
+cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
+        sta lastri
+        lda topa+1                 ; this strip's rows' pages
         sta pt0+2
         sta pt1+2
         sta pt2+2
@@ -1923,12 +1944,12 @@ sethalf:
         lda exhh,y
         sta r_eh2+2
         lda lahsl,y
-        sta ln_h+1
-        sta s2_h+1
+        sta fs_h+1
+        sta fr_h+1
         sta np_h+1
         lda lahsh,y
-        sta ln_h+2
-        sta s2_h+2
+        sta fs_h+2
+        sta fr_h+2
         sta np_h+2
         rts
 exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3)
@@ -1938,163 +1959,212 @@ lahsh:  .byte >(LAHSB0), >(LAHSB1), >(LAHSB2), >(LAHSB3)
 enthl:  .byte <(ENTB0), <(ENTB1), <(ENTB2), <(ENTB3)
 enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3)
 
+fs_nt:  jmp fs_new
 ; A column a rung (X = ri) splits, its top level: from mx down to the floor,
 ; the boxes split at bpos (the rung's pixels left of it), bpos moving a pixel
-; at each of the rung's transitions in the column.  Each bpos's bytes first
-; (BE, BO); then between transitions a single line inline, more by seg2.
-fsplit: lda RTPL,x
-        sta rtp
-        lda RTPH,x
-        sta rtp+1
-        lda CE,x
-        sta re
-        eor CE-1,x
-        sta xe
-        lda CO,x
-        sta ro
-        eor CO-1,x
-        sta xo
-        lda BX,x                   ; p1: the rung's bottom in the column
-        sec
-        sbc x4
-        bcs :+
-        lda #0
-:       cmp #4
-        bcc :+
-        lda #4
-:       sta p1
-        lda TX,x                   ; bpos: its top
-        sec
-        sbc x4
-        bcs :+
-        lda #0
-:       cmp #4
-        bcc :+
-        lda #4
-:       sta bpos
-        lda mx
-        sta yy
-        ldx bpos
-        cpx p1
-        beq fs_e
-        bcc fs_r
-fs_l:   txa                        ; leaning left: pixel x4 + bpos - 1 changes,
-        clc                        ; bpos - 1 after
+; at each of the rung's transitions in the column.  Y = bpos throughout; rtp +
+; Y: its transition (pixel x4 + Y changes, bpos + 1 after, leaning right; x4 +
+; Y - 1, bpos - 1, leaning left), ended by the rung's sentinel ($FF: rungs) or
+; the column's edge (fend); BE, BO + Y: its bytes (the rung's, made at its
+; first column, fs_new: lastri).  Between transitions 8 lines or more a run,
+; fewer the walker: X = the line & 7, each line's byte stored at f_wse or
+; f_wso (by its parity; operand: the line's character row, coff).
+fsplit: cpx lastri
+        bne fs_nt
+fs_c:   lda rbl                    ; (C set) rtp = RTP + x4 (- 1 leaning left)
         adc x4
+        sta rtp
+        lda rbh
+        adc #0
+        sta rtp+1                  ; (C clear)
+        lda TX,x                   ; bpos: TX - x4, clamped to 0..4
+        sbc x4
         tay
-        dey
-        lda (rtp),y
+        lda CLMP1,y
+        tay
+fs_w:   lda #OP_JMP
+        sta f_fxe
+        sta f_fxo
+        lda coff
+        sta f_wse+1
+        sta f_wso+1
+        ldx mx
+        stx yy
+fs_h:   lda LAHSB0,x               ; (sethalf: the screen and half's)
+        sta f_wse+2
+        sta f_wso+2
+        txa
+        and #7
+        tax
+        lsr a                      ; (by yy's parity: fl_e, fl_o)
+        bcc fl_e
+        bcs fl_o
+fn_e:                              ; yy even
+fst_e:  iny                        ; (or DEY: fs_new)
+fen_e:  cpy #4                     ; (or 0)
+        beq f_fe
+fl_e:   lda (rtp),y                ; the transition's line
         cmp flr1
-        bcs fs_e
-        sta tj
-        clc
+        bcs f_fe
+        sbc yy                     ; (C clear) - yy - 1
+        bcc fn_e                   ; (at or above yy: bpos only)
+        cmp #7
+        bcs f_frun
+        sta cnt                    ; lines yy .. t-1, walked (cnt: their number - 1)
+f_we:   lda BE,y                   ; an even line
+f_wse:  sta $FF00,x
+        inx                        ; (no new character row after an even line)
+        dec cnt
+        bpl f_wo
+        lda (rtp),y
+        sta yy
+f_fxe:  jmp fn_o                   ; (f_fe's: RTS)
+f_fwr:  lda f_wse+2                ; the next character row: + 2 (C set)
+        adc #1
+        sta f_wse+2
+        sta f_wso+2
+        ldx #0
+        beq f_fwn
+fn_o:                              ; yy odd
+fst_o:  iny                        ; (or DEY: fs_new)
+fen_o:  cpy #4                     ; (or 0)
+        beq f_fe
+fl_o:   lda (rtp),y
+        cmp flr1
+        bcs f_fe
         sbc yy
-        bcc fs_ln
-        bne :+
-        jsr line1
-        dex
-        cpx p1
-        bne fs_l
-        beq fs_e
-:       adc #0
-        jsr seg2
-fs_ln:  dex
-        cpx p1
-        bne fs_l
-fs_e:   lda flr1                   ; the rest at bpos
-        sta tj
-        sec
+        bcc fn_o
+        cmp #7
+        bcs f_frun
+        sta cnt
+f_wo:   lda BO,y                   ; an odd line
+f_wso:  sta $FF00,x
+        inx
+        cpx #8
+        beq f_fwr
+f_fwn:  dec cnt
+        bpl f_we
+        lda (rtp),y
+        sta yy
+f_fxo:  jmp fn_e                   ; (f_fe's: RTS)
+f_fe:   lda flr1                   ; (C set) the rest at bpos
         sbc yy
         beq :+
         bcc :+
-        jmp seg2
-:       rts
-fs_r:   txa                        ; leaning right: pixel x4 + bpos changes at
-        adc x4                     ; its line, bpos + 1 after (C clear here)
-        tay
-        lda (rtp),y
-        cmp flr1
-        bcs fs_e
-        sta tj
-        clc                        ; (tj - yy - 1)
-        sbc yy
-        bcc fs_rn
-        bne :+
-        jsr line1
-        inx
-        cpx p1
-        bcc fs_r
-        bcs fs_e
-:       adc #0                     ; (C set: tj - yy)
-        jsr seg2
-fs_rn:  inx
-        cpx p1
-        bcc fs_r
-        bcs fs_e
-
-; Line yy at bpos X; yy + 1 after.  X kept.
-line1:  ldy yy
-ln_h:   lda LAHSB0,y                ; (sethalf: the screen and half's)
-        sta zp_+1
-        tya
-        and #7
-        sta zp_
+        cmp #4
+        bcs :++
+        sbc #0                     ; (C clear) - 1
+        sta cnt
+        lda #OP_RTS
+        sta f_fxe
+        sta f_fxo
+        txa
         lsr a
-        lda LM,x                   ; (the line's parity's byte at bpos X)
-        bcs :+
-        and xe
-        eor re
-        ldy coff
-        sta (zp_),y
-        inc yy
-        rts
-:       and xo
-        eor ro
-        ldy coff
-        sta (zp_),y
-        inc yy
-        rts
-
-; Lines yy .. tj-1 (A of them, 2 or more) at bpos X: a run if 3 or more,
-; else a line at a time; yy = tj after.  X kept.
-seg2:   stx sx_
-        tay
-        lda LM,x
-        and xe
-        eor re
+        bcs f_wo
+        bcc f_we
+:       rts
+:       lda BE,y
         sta ve
-        lda LM,x
-        and xo
-        eor ro
+        lda BO,y
         sta vo
-        tya
-        cmp #3
-        bcs s2_run
         ldx yy
-        ldy coff
-s2_l:
-s2_h:   lda LAHSB0,x
-        sta zp_+1
+        ldy flr1
+        jmp run
+f_frun: sty bpos                   ; lines yy .. t-1, a run
+        lda BE,y
+        sta ve
+        lda BO,y
+        sta vo
+        lda (rtp),y
+        sta tj
+        ldx yy
+        tay
+        jsr run
+        ldx tj
+        stx yy
+fr_h:   lda LAHSB0,x               ; (sethalf) the walker from t
+        sta f_wse+2
+        sta f_wso+2
         txa
         and #7
-        sta zp_
+        tax
+        ldy bpos
         lsr a
-        lda ve
-        bcc :+
-        lda vo
-:       sta (zp_),y
-        inx
-        cpx tj
-        bne s2_l
-        stx yy
-        ldx sx_
-        rts
-s2_run: ldx yy
-        ldy tj
-        sty yy                     ; (run reads neither)
-        jsr run
-        ldx sx_
-        rts
+        bcs :+
+        jmp fn_e
+:       jmp fn_o
+fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
+        lda CE-1,x                 ; 4 the left (Y: the two EORed)
+        sta BE+4
+        lda CE,x
+        sta BE
+        eor BE+4
+        tay
+        and #$88
+        eor BE
+        sta BE+1
+        tya
+        and #$CC
+        eor BE
+        sta BE+2
+        tya
+        and #$EE
+        eor BE
+        sta BE+3
+        lda CO-1,x
+        sta BO+4
+        lda CO,x
+        sta BO
+        eor BO+4
+        tay
+        and #$88
+        eor BO
+        sta BO+1
+        tya
+        and #$CC
+        eor BO
+        sta BO+2
+        tya
+        and #$EE
+        eor BO
+        sta BO+3
+        lda TX,x
+        cmp BX,x
+        beq fs_nr
+        bcc fs_nr
+        lda RTPL,x                 ; leaning left: x4 + bpos - 1, bpos - 1 after
+        sbc #2                     ; (C set)
+        sta rbl
+        lda RTPH,x
+        sbc #0
+        sta rbh
+        lda #OP_DEY                ; (the last rung's lean, kept)
+        cmp fst_e
+        beq fs_nj                  ; (C set)
+        sta fst_e
+        sta fst_o
+        lda #0
+        sta fen_e+1
+        sta fen_o+1
+        sec
+        bcs fs_nj
+fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
+        clc                        ; changes, bpos + 1 after (- 1)
+        sbc #0
+        sta rbl
+        lda RTPH,x
+        sbc #0
+        sta rbh
+        lda #OP_INY
+        cmp fst_e
+        beq fs_nj                  ; (C set)
+        sta fst_e
+        sta fst_o
+        lda #4
+        sta fen_e+1
+        sta fen_o+1
+        sec
+fs_nj:  jmp fs_c                   ; (split's: sp_c)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top.
@@ -2148,64 +2218,77 @@ zline:  sta zv
         sta (zp_),y
         rts
 
-; A column a rung splits: L = box ri-1, R = box ri.
+; A column a rung splits, its top not level: the zone (lines mn .. min(mx,
+; flr1)-1, each the pixels at or below their top) at bpos as it is at the
+; line, from fsplit's tables (rtp, BE, BO); then fsplit's, from mx.
 split:  ldx ri
-        lda CE,x
-        sta re
-        eor CE-1,x
-        sta xe
-        lda CO,x
-        sta ro
-        eor CO-1,x
-        sta xo
-        lda #0
-        jsr mktr
-        sta bpos
-        ; the zone
-        lda #0
-        sta kk
+        cpx lastri
+        beq sp_c
+        lda #<sp_c                 ; (fs_new: back to sp_c)
+        sta fs_nj+1
+        lda #>sp_c
+        sta fs_nj+2
+        jmp fs_new
+sp_c:   lda #<fs_c                 ; (C set)
+        sta fs_nj+1
+        lda #>fs_c
+        sta fs_nj+2
+        lda rbl                    ; as fs_c
+        adc x4
+        sta rtp
+        lda rbh
+        adc #0
+        sta rtp+1
+        lda TX,x
+        sbc x4
+        tay
+        lda CLMP1,y
+        tay
         ldx mn
-@z:     cpx mx
-        bcs @zd
+        lda fst_e
+        cmp #OP_INY
+        bne sp_lz
+sp_rz:  cpx mx                     ; leaning right (or upright)
+        bcs sp_zd
         cpx flr1
-        bcs @zd
-        jsr catchup
+        bcs sp_zd
+sp_rc:  cpy #4                     ; bpos: the transitions at or above line X
+        beq sp_rb
+        txa
+        cmp (rtp),y
+        bcc sp_rb
+        iny
+        bne sp_rc
+sp_rb:  jsr sp_ln
+        inx
+        bne sp_rz
+sp_lz:  cpx mx                     ; leaning left
+        bcs sp_zd
+        cpx flr1
+        bcs sp_zd
+sp_lc:  cpy #0
+        beq sp_lb
+        txa
+        cmp (rtp),y
+        bcc sp_lb
+        dey
+        bpl sp_lc
+sp_lb:  jsr sp_ln
+        inx
+        bne sp_lz
+sp_zd:  jmp fs_w
+; Line X of the zone at bpos Y (X, Y kept).
+sp_ln:  sty bpos
         jsr pmask
-        jsr bytes
+        ldy bpos
         txa
         lsr a
-        lda ve
+        lda BE,y
         bcc :+
-        lda vo
+        lda BO,y
 :       jsr zline
-        inx
-        bne @z
-@zd:    ldx mx                     ; the runs, from mx
-        cpx flr1
-        bcs @rd
-@rl:    stx yy
-@rl2:   ldy kk                     ; (X = yy)
-        lda TRL,y
-        cmp flr1
-        bcc :+
-        lda flr1
-:       cmp yy
-        beq @tr                    ; (transition at or above: bpos only)
-        bcc @tr
-        tay
-        jsr bytes
-        ldx yy
-        sty yy
-        jsr run
-        ldx yy
-        cpx flr1
-        bcs @rd
-@tr:    ldy kk                     ; (X = yy)
-        lda TRB,y
-        sta bpos
-        inc kk
-        jmp @rl2
-@rd:    rts
+        ldy bpos
+        rts
 
 ; Rung X's transitions in the column into TRL, TRB (bpos as its LM mask) from
 ; A, ended by $FF; A: LM of its position in the column at the top (p0).
@@ -2216,12 +2299,17 @@ mktr:   sta tj
         sta rtp
         lda RTPH,x
         adc #0
-        sta rtp+1
-        lda BX,x
-        jsr clamp4
+        sta rtp+1                  ; (C clear)
+        lda BX,x                   ; (A - x4, clamped to 0..4)
+        sbc x4
+        tay
+        lda CLMP1,y
         sta p1
+        clc
         lda TX,x
-        jsr clamp4
+        sbc x4
+        tay
+        lda CLMP1,y
         sta p0
         ldx tj
         cmp p1
@@ -2365,42 +2453,7 @@ bytes2: lda me
         sta vo
         rts
 
-; bpos by the transitions at or above line X.
-catchup:
-        ldy kk
-        txa
-:       cmp TRL,y
-        bcc :+
-        lda TRB,y
-        sta bpos
-        iny
-        txa
-        bne :-
-:       sty kk
-        rts
-
-; ve, vo: the split column's bytes at bpos (an LM mask; X, Y kept).
-bytes:  lda xe
-        and bpos
-        eor re
-        sta ve
-        lda xo
-        and bpos
-        eor ro
-        sta vo
-        rts
 LM:     .byte $00, $88, $CC, $EE, $FF
-
-; A - x4, clamped to 0..4.
-clamp4: sec
-        sbc x4
-        bcs :+
-        lda #0
-        rts
-:       cmp #4
-        bcc :+
-        lda #4
-:       rts
 
 ; Lines X .. Y-1 (X < Y) of the column: ve on even lines, vo odd, through STAB
 ; (STA line,Y / LDA vo or TXA), from line X's entry to an RTS planted at line
@@ -2671,8 +2724,10 @@ putg:   asl a
         inc tcol
         rts
 
-BE:     .res 5                     ; fsplit's bytes by bpos
+BE:     .res 5                     ; fsplit's rung's bytes by bpos
 BO:     .res 5
+rbl:    .res 1                     ; and its transitions, less 1 (2 leaning left)
+rbh:    .res 1
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8
 dvi:    .res 1

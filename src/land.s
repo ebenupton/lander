@@ -26,8 +26,8 @@
 ;   - a rung splits it: the same, the bytes split at the rung's position in the
 ;     column (bpos: its pixels left of the rung), a run between transitions;
 ;   - two rungs split it (rare): a line at a time, each pixel by itself.
-; A run is STAB (STA line,Y / EOR tgl a line, for the screen and half being
-; drawn) from its first line's entry to an RTS planted at the line after it.
+; A run is STAB (STA line,Y, then LDA vo after an even line, TXA (X = ve)
+; after an odd, for the screen and half being drawn) from its first line's entry to an RTS planted at the line after it.
 ;
 ; Memory.  LAND loads at $1900 and loads TABLES (tools/landgen.py) into
 ; sideways RAM bank 4, paged in throughout; then it closes !BOOT and takes the
@@ -105,8 +105,25 @@ RML     = $0B48                    ; each row's map row address
 RMH     = $0B50
 PINRX   = $0B58                    ; and its right pinned column's x
 
+SWT     = $9400                    ; init's line tables, in bank 4's free space: two a
+                                   ; page, by line (YSKY..YGND+1: no page crossed)
+EXLB    = SWT                      ; run's entries (low), and high by STAB
+LAHSB0  = SWT+$6C                  ; each line's address, high byte: by screen and half
+LAHSB1  = SWT+$100
+LAHSB2  = SWT+$16C
+LAHSB3  = SWT+$200
+EXHB0   = SWT+$26C
+EXHB1   = SWT+$300
+EXHB2   = SWT+$36C
+EXHB3   = SWT+$400
+ENTB0   = SWT+$46C                 ; each STAB's ENTH
+ENTB1   = SWT+$500
+ENTB2   = SWT+$56C
+ENTB3   = SWT+$600
+        .assert YGND+1+$6C < $100, error, "SWT: a line table crosses a page"
 OP_STAY = $99
-OP_EORZ = $45
+OP_LDAZ = $A5
+OP_TXA  = $8A
 OP_RTS  = $60
 
         .zeropage
@@ -171,14 +188,12 @@ dvq:    .res 2
 fe:     .res 1
 tcnt:   .res 1
 tsy:    .res 1
-bflat:  .res 1                     ; the column's bottom row level
 last:   .res 1                     ; the near strip ($80)
 sx_:    .res 1
 ; columns
 x4:     .res 1                     ; the column's first pixel
 x4p4:   .res 1
 coff:   .res 1                     ; 8 * column, mod 256 (STAB's Y)
-half:   .res 1
 scrh:   .res 1                     ; the screen's high byte, and the half
 stbh:   .res 1                     ; STAB's page for the screen and half
 ri:     .res 1                     ; the first rung not wholly left of the column
@@ -189,7 +204,6 @@ flr:    .res 1                     ; the floor, and the line after it
 flr1:   .res 1
 ve:     .res 1                     ; the bytes being drawn: even and odd lines
 vo:     .res 1
-tgl:    .res 1                     ; the two EORed (STAB's EOR operand)
 re:     .res 1                     ; a split column: the right box's bytes
 ro:     .res 1
 xe:     .res 1                     ; and the two boxes' EORed
@@ -207,8 +221,7 @@ rp:     .res 2
 TRL:    .res 12                    ; a split column's transitions: line, bpos after
 TRB:    .res 12                    ; (a second rung's from 6)
 kb:     .res 1
-plY:    .res 1                     ; run's planted RTS: its line and STAB page
-plT:    .res 1
+pp:     .res 2                     ; run's planted RTS
 tsp:    .res 2                     ; TOPS, BOTS for the screen being drawn
 bsp:    .res 2
 rec:    .res 1                     ; a land strip: record CURT, CURB
@@ -387,7 +400,12 @@ init:   lda #0
         lda #0
         sta ptr
         ldx #YSKY
-@line:  ldy #0
+@line:  lda ptr                    ; ENTL, ENTH: the line's place in its STAB
+        sta ENTL,x
+        lda ptr+1
+        and #1                     ; (each STAB at an even page)
+        sta ENTH,x
+        ldy #0
         lda #OP_STAY
         cpx #YGND+1
         bne :+
@@ -415,15 +433,19 @@ init:   lda #0
         adc tmp+1
         iny
         sta (ptr),y
-        lda #OP_EORZ
         iny
+        txa                        ; an even line: LDA vo; odd: TXA
+        lsr a
+        lda #OP_TXA
+        bcs :+
+        lda #OP_LDAZ
         sta (ptr),y
-        lda #tgl
         iny
-        sta (ptr),y
-        lda ptr
-        clc
-        adc #5
+        lda #vo
+:       sta (ptr),y
+        tya
+        sec                        ; (C: 1 past)
+        adc ptr
         sta ptr
         bcc :+
         inc ptr+1
@@ -434,23 +456,11 @@ init:   lda #0
         lda tmp
         cmp #4
         bne @tab
-        ldx #0                     ; ENTL, ENTH: 5 * (y - YSKY); LAH
-@ent:   txa
-        sec
-        sbc #YSKY
-        sta tmp
-        lda #0
-        sta tmp+1
-        lda tmp
-        asl a
-        rol tmp+1
-        asl a
-        rol tmp+1
-        cpx #YSKY                  ; (in range only: ENTH follows ENTL)
+        ldx #0                     ; LAH; each STAB's ENTH
+@ent:   cpx #YSKY                  ; (in range only: ENTH follows ENTL)
         bcc :+
         cpx #YGND+2
         bcs :+
-        pha
         txa
         lsr a
         lsr a
@@ -463,49 +473,43 @@ init:   lda #0
         sta LAH1,x
         sec                        ; (+ the half: LAHS)
         sbc #$28
-        sta LAHS0-YSKY,x
+        sta LAHSB0,x
         adc #0
-        sta LAHS0+80-YSKY,x
+        sta LAHSB1,x
         adc #$28
-        sta LAHS0+240-YSKY,x
+        sta LAHSB3,x
         sec
         sbc #1
-        sta LAHS0+160-YSKY,x
-        pla
-        clc
-        adc tmp
-        sta ENTL,x
-        lda tmp+1
-        adc #0
-        and #1
-        sta ENTH,x
+        sta LAHSB2,x
+        lda ENTH,x
         ora #>STAB                 ; and each STAB's
-        sta ENTHT-YSKY,x
-        adc #2                     ; (C clear)
-        sta ENTHT+80-YSKY,x
+        sta ENTB0,x
+        clc
         adc #2
-        sta ENTHT+160-YSKY,x
+        sta ENTB1,x
         adc #2
-        sta ENTHT+240-YSKY,x
+        sta ENTB2,x
+        adc #2
+        sta ENTB3,x
         txa                        ; run's entries: an odd line's 2 bytes early,
-        and #1                     ; at the line before's EOR tgl (so A is the
-        asl a                      ; even lines' byte on entry, either way)
+        and #1                     ; at the line before's LDA vo (so A need be
+        asl a                      ; the even lines' byte only at an even's)
         sta tmp+1
         lda ENTL,x
         sec
         sbc tmp+1
-        sta EXL-YSKY,x
+        sta EXLB,x
         lda ENTH,x
         sbc #0
         ora #>STAB
-        sta EXHT-YSKY,x
+        sta EXHB0,x
         clc
         adc #2
-        sta EXHT+80-YSKY,x
+        sta EXHB1,x
         adc #2
-        sta EXHT+160-YSKY,x
+        sta EXHB2,x
         adc #2
-        sta EXHT+240-YSKY,x
+        sta EXHB3,x
 :       inx
         beq :+
         jmp @ent
@@ -517,8 +521,10 @@ init:   lda #0
         sta BOTS,x
         dex
         bpl :-
-        lda #$FF                   ; no RTS planted
-        sta plY
+        lda #<dummy                ; no RTS planted
+        sta pp
+        lda #>dummy
+        sta pp+1
         lda #40                    ; the camera
         sta cxt
         lda #30
@@ -1580,52 +1586,93 @@ rungs:  lda xl
         rts
 
 ; ---------------------------------------------------------------- columns
-; (rare: out of cols' way) a column whose top or floor is not level
-c_zt:    lda (topa),y               ; (rare) each pixel's top, the highest and lowest
-        sta ys
-        sta mn
-        sta mx
-        ldx #1
-:       iny
-        lda (topa),y
-        sta ys,x
-        cmp mn
-        bcs :+
-        sta mn
-:       cmp mx
-        bcc :+
-        sta mx
-:       inx
-        cpx #4
-        bne :---
-        ldy x4
-        jmp c_ft
-
 cols:   lda topa+1                 ; this strip's rows' pages
         sta pt0+2
         sta pt1+2
         sta pt2+2
         sta pt3+2
+        sta zt1+2
+        sta zt2+2
+        sta zt3+2
         lda bota+1
         sta pb0+2
         sta pb1+2
         sta pb2+2
         sta pb3+2
+        sta zb1+2
+        sta zb1+7
+        sta zb2+2
+        sta zb2+7
+        sta zb3+2
+        sta zb3+7
+        ldx #$E8                   ; INX: the floor's line after (BIT: no nearpost)
+        ldy #$2C
+        bit last
+        bpl :+
+        ldx #$EA                   ; (the near strip: NOP, the floor itself if level;
+        ldy #$4C                   ; JMP nearpost)
+:       stx c_inx
+        sty c_np
+        lda xlp                    ; record below c_ra or from c_rb on (strip 1: all)
+        ldx ns
+        dex
+        bne :+
         lda #$FF
-        sta half
-        lda xl
-        sta x4
+:       sta c_ra+1
+        lda xrp
+        sta c_rb+1
         lda #0
         sta ri
-c_col:   lda x4
+        lda xl
+        sta x4
         asl a                      ; 8 * column (C: the right half)
         sta coff
         lda #0
         rol a
-        cmp half
-        beq :+
         jsr sethalf
-:       ldy x4                     ; the top: level across the column?
+        jmp c_col
+; (rare: out of cols' way) a column whose top or floor is not level
+c_zt:    sta ys                     ; (rare) each pixel's top (A: the first's), the
+        sta mn                     ; highest and lowest (cols: zt1-3 this strip's)
+        sta mx
+        bit c_v1                   ; (V: a top not level, to c_r1's and
+                                   ; c_split's tests; nothing between touches V)
+.macro ZTP n
+        lda ROWA+n,y
+        sta ys+n
+        cmp mn
+        bcs :+
+        sta mn
+        bcc :++
+:       cmp mx
+        bcc :+
+        sta mx
+:
+.endmacro
+zt1:    ZTP 1
+zt2:    ZTP 2
+zt3:    ZTP 3
+        jmp c_ft
+
+c_zb:                               ; (rare) the lowest (A: the first's; cols:
+zb1:    cmp ROWB+1,y               ; zb1-3 this strip's)
+        bcs :+
+        lda ROWB+1,y
+:
+zb2:    cmp ROWB+2,y
+        bcs :+
+        lda ROWB+2,y
+:
+zb3:    cmp ROWB+3,y
+        bcs :+
+        lda ROWB+3,y
+:       sta flr                    ; (not level)
+        tax
+        inx
+        stx flr1
+        jmp c_rec
+c_col:   ldy x4                     ; the top: level across the column? (V clear:
+c_coly:                            ; the adc #4 below, or sethalf's last sbc)
 pt0:    lda ROWA,y
 pt1:    cmp ROWA+1,y
         bne c_zt
@@ -1643,105 +1690,69 @@ pb2:    cmp ROWB+2,y
         bne c_zb
 pb3:    cmp ROWB+3,y
         bne c_zb
-        ldx #1                     ; (level)
-        stx bflat
-c_fb:    sta flr
+        sta flr                    ; (level)
         tax
-        inx
-        stx flr1
-        bit last                   ; (the near strip, its bottom level: the
-        bpl :+                     ; ground's from the floor's line on)
-        ldx bflat
-        beq :+
-        dec flr1
-:
-        lda ns                     ; a column new this frame (strip 1's, or
-        cmp #1                     ; beyond the last strip's): record it
-        beq :+
-        cpy xlp
-        bcc :+
-        cpy xrp
-        bcc :++
-:       jsr record
-:
+c_inx:  inx                        ; (cols: NOP in the near strip, its ground's
+        stx flr1                   ; from the floor's line on)
+c_rec:                             ; a column new this frame (strip 1's, or
+c_ra:   cpy #0                     ; beyond the last strip's): record it
+        bcc record
+c_rb:   cpy #0
+        bcs record
+c_rd:
         ldx ri                     ; the rungs: past those wholly left
         tya
-:       cmp HI,x
-        bcc :+
-        inx
-        bne :-
-:       stx ri
-        ora #3
+        cmp HI,x
+        bcs c_ri
+c_rr:   ora #3
         cmp LO,x
         bcs c_split                 ; (LO <= x4 + 3)
         lda CE-1,x                 ; one box: ri - 1
         sta ve
         lda CO-1,x
         sta vo
-        lda mn
-        cmp mx
-        bne c_z1
+        bvs c_z1                   ; (a top not level)
 c_r1:    ldx mx
         cpx flr1
         bcs c_next
         ldy flr1
         jsr run
-c_next:  bit last
-        bpl :+
-        jsr nearpost
-:       lda x4
+c_next:
+c_np:   jmp nearpost               ; (cols: BIT but in the near strip; back to c_nd)
+c_nd:
+        lda x4
         clc
         adc #4
         sta x4
         cmp xr
+        beq :++
+        tay
+        asl a                      ; 8 * column
+        sta coff
         beq :+
+        jmp c_coly
+:       lda #0                     ; (a new half)
+        rol a
+        jsr sethalf
         jmp c_col
 :       rts
-c_zb:    lda (bota),y               ; (rare) the lowest
-        iny
-        cmp (bota),y
-        bcs :+
-        lda (bota),y
-:       iny
-        cmp (bota),y
-        bcs :+
-        lda (bota),y
-:       iny
-        cmp (bota),y
-        bcs :+
-        lda (bota),y
-:       ldy x4
-        ldx #0                     ; (not level)
-        stx bflat
-        jmp c_fb
+c_ri:   inx                        ; (the next rung)
+        cmp HI,x
+        bcs c_ri
+        stx ri
+        jmp c_rr
+c_v1:   .byte $40                  ; (BIT: V)
 c_z1:    jsr zone1
         jmp c_r1
 c_split: cmp LO+1,x
         bcs c_dbl
-        lda mn
-        cmp mx
-        bne :+
+        bvs :+
         jsr fsplit
         jmp c_next
 :       jsr split
         jmp c_next
-c_dbl:   lda mn                     ; (the slow ways read ys)
-        cmp mx
-        bne :+
-        sta ys
-        sta ys+1
-        sta ys+2
-        sta ys+3
-:       lda x4
-        ora #3
-        cmp LO+2,x
-        bcs :+
-        jsr split2
-        jmp c_next
-:       jsr slow                   ; (three: never seen)
-        jmp c_next
-
-; A land strip's column: its highest and lowest lines into CURT, CURB.
+; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
+; inline: back to c_rd, Y = x4).
 record: tya
         lsr a
         lsr a
@@ -1763,19 +1774,35 @@ record: tya
         sta vo
         jsr run
 @d:     ldy x4
-        rts
+        jmp c_rd
+
+c_dbl:   bvs :+                     ; (the slow ways read ys)
+        lda mn
+        sta ys
+        sta ys+1
+        sta ys+2
+        sta ys+3
+:       lda x4
+        ora #3
+        cmp LO+2,x
+        bcs :+
+        jsr split2
+        jmp c_next
+:       jsr slow                   ; (three: never seen)
+        jmp c_next
 
 ; The near strip's column, drawn (to the line before its floor if its bottom
 ; row is level there, else to the floor): below the near row black (the line
 ; at the floor, or the pixels at or below their bottom-row line, read-modify-
-; write); then black to the land's lowest line last time (BOTS); CURB.
+; write); then black to the land's lowest line last time (BOTS); CURB.  (cols'
+; inline: back to c_nd.)
+np_h    = nearpost+8               ; (nearpost's LAHS)
 nearpost:
-        lda bflat
-        beq @z
+        lda flr                    ; (its bottom level: flr1 = flr)
+        cmp flr1
+        bne @z
         ldx flr
-        lda LAH,x
-        clc
-        adc scrh
+        lda LAHSB0,x               ; (np_h: sethalf's, the screen and half's)
         sta zp_+1
         txa
         and #7
@@ -1823,7 +1850,7 @@ nearpost:
         sta ve
         sta vo
         jsr run
-@n:     rts
+@n:     jmp c_nd
 
 ; Columns the land has left since last time: black from its highest line to
 ; its lowest.
@@ -1868,15 +1895,15 @@ gone:   ldx #0
 
 ; The column's half of the screen: A (0 left, 1 right).
 sethalf:
-        sta half
+        pha
         clc
         adc scrb
         sta scrh
-        lda half
+        pla
         asl a
         adc stb0
         sta stbh
-        sec                        ; run's entries: ENTHT + 80 t, t the STAB
+        sec                        ; t: the STAB (its ENTBt, EXHBt, LAHSBt)
         sbc #>STAB
         lsr a
         tay
@@ -1891,16 +1918,18 @@ sethalf:
         lda lahsl,y
         sta ln_h+1
         sta s2_h+1
+        sta np_h+1
         lda lahsh,y
         sta ln_h+2
         sta s2_h+2
+        sta np_h+2
         rts
-exhl:   .byte <(EXHT-YSKY), <(EXHT+80-YSKY), <(EXHT+160-YSKY), <(EXHT+240-YSKY)
-exhh:   .byte >(EXHT-YSKY), >(EXHT+80-YSKY), >(EXHT+160-YSKY), >(EXHT+240-YSKY)
-lahsl:  .byte <(LAHS0-YSKY), <(LAHS0+80-YSKY), <(LAHS0+160-YSKY), <(LAHS0+240-YSKY)
-lahsh:  .byte >(LAHS0-YSKY), >(LAHS0+80-YSKY), >(LAHS0+160-YSKY), >(LAHS0+240-YSKY)
-enthl:  .byte <(ENTHT-YSKY), <(ENTHT+80-YSKY), <(ENTHT+160-YSKY), <(ENTHT+240-YSKY)
-enthh:  .byte >(ENTHT-YSKY), >(ENTHT+80-YSKY), >(ENTHT+160-YSKY), >(ENTHT+240-YSKY)
+exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3)
+exhh:   .byte >(EXHB0), >(EXHB1), >(EXHB2), >(EXHB3)
+lahsl:  .byte <(LAHSB0), <(LAHSB1), <(LAHSB2), <(LAHSB3)
+lahsh:  .byte >(LAHSB0), >(LAHSB1), >(LAHSB2), >(LAHSB3)
+enthl:  .byte <(ENTB0), <(ENTB1), <(ENTB2), <(ENTB3)
+enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3)
 
 ; A column a rung (X = ri) splits, its top level: from mx down to the floor,
 ; the boxes split at bpos (the rung's pixels left of it), bpos moving a pixel
@@ -1997,7 +2026,7 @@ fs_ln:  dex
 
 ; Line yy at bpos X; yy + 1 after.  X kept.
 line1:  ldy yy
-ln_h:   lda LAHS0,y                ; (sethalf: the screen and half's)
+ln_h:   lda LAHSB0,y                ; (sethalf: the screen and half's)
         sta zp_+1
         tya
         and #7
@@ -2018,7 +2047,7 @@ ln_h:   lda LAHS0,y                ; (sethalf: the screen and half's)
         inc yy
         rts
 
-; Lines yy .. tj-1 (A of them, 2 or more) at bpos X: a run if 4 or more,
+; Lines yy .. tj-1 (A of them, 2 or more) at bpos X: a run if 3 or more,
 ; else a line at a time; yy = tj after.  X kept.
 seg2:   stx sx_
         tay
@@ -2031,12 +2060,12 @@ seg2:   stx sx_
         eor ro
         sta vo
         tya
-        cmp #4
+        cmp #3
         bcs s2_run
         ldx yy
         ldy coff
 s2_l:
-s2_h:   lda LAHS0,x
+s2_h:   lda LAHSB0,x
         sta zp_+1
         txa
         and #7
@@ -2383,36 +2412,25 @@ clamp4: sec
 :       rts
 
 ; Lines X .. Y-1 (X < Y) of the column: ve on even lines, vo odd, through STAB
-; (A: STA line,Y / EOR tgl), from line X's entry to the RTS at line Y's.  The
-; RTS stays planted until a run ends elsewhere (one at a time: plY, plT).
-run:    cpy plY
-        bne r_re
-        lda stbh
-        cmp plT
-        beq r_go
-r_re:    sty plY
-        lda stbh
-        sta plT
-        lda #OP_STAY               ; the last back
-plu:    sta dummy
-        lda ENTL,y
-        sta plu+1
-        sta r_p+1
-r_eh1:  lda ENTHT,y                ; (sethalf: the STAB's own)
-        sta plu+2
-        sta r_p+2
-        lda #OP_RTS
-r_p:     sta $FFFF
-r_go:    lda EXL-YSKY,x
+; (STA line,Y / LDA vo or TXA), from line X's entry to an RTS planted at line
+; Y's (pp: put back by the next run).
+run:    lda EXLB,x
         sta r_j+1
-r_eh2:  lda EXHT,x
+r_eh2:  lda EXHB0,x                 ; (sethalf: the STAB's own)
         sta r_j+2
-        lda ve
-        eor vo
-        sta tgl
-        eor vo                     ; (ve: an odd line's entry EORs first)
+        ldx #0
+        lda #OP_STAY               ; the last back
+        sta (pp,x)
+        lda ENTL,y
+        sta pp
+r_eh1:  lda ENTB0,y
+        sta pp+1
+        lda #OP_RTS
+        sta (pp,x)
+        ldx ve                     ; (X: ve, for the odd lines' TXA)
+        txa
         ldy coff
-r_j:     jmp $FFFF                  ; (its RTS returns from run)
+r_j:    jmp $FFFF                  ; (its RTS returns from run)
 dummy:  .byte 0
 
 ; ---------------------------------------------------------------- the slow way
@@ -2662,12 +2680,8 @@ putg:   asl a
         inc tcol
         rts
 
-LAHS0:  .res 320                   ; each line's address, high byte: by screen and half (80 each, lines YSKY on)
 BE:     .res 5                     ; fsplit's bytes by bpos
 BO:     .res 5
-EXL:    .res 80                    ; run's entries (lines YSKY on): low, and high
-EXHT:   .res 320                   ; by STAB
-ENTHT:  .res 320                   ; each STAB's ENTH (80 a STAB, lines YSKY on)
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8
 dvi:    .res 1

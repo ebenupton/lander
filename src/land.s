@@ -1088,9 +1088,10 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         asl a
         asl a
         asl a
-        adc #$F0
+        adc np                     ; (C clear after: 16 ns + np < 256)
+        adc #$EF                   ; 16 (ns - 1) + np - 1: box np, down to 1
         tay
-        ldx #1
+        ldx np
 @p:     lda PX,y
         sta TX,x
         lda PY,y
@@ -1103,11 +1104,10 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         sta CE,x
         lda CLO,y
         sta CO,x
-        iny
-        inx
-        cpx np1
-        bcc @p
-        bcs @m
+        dey
+        dex
+        bne @p
+        beq @m
         ; the sky (row 0 both, the top at YSKY) and the ground (row nr-1
         ; both, the bottom at YGND): boxes black
 @g:     asl a                      ; (C clear: 4 shifts of nr < 16)

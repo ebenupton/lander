@@ -1995,7 +1995,48 @@ np_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
         ldy coff
         lda #0
         sta (zp_),y
-        beq np_b
+np_b:     ldx x4                     ; the land's lowest line now, and last time's
+        ldy DIV4,x
+        lda flr
+pB4:    sta CURB,y
+pB5:    cmp BOTS,y
+        bcs np_n
+        adc #1                     ; (C clear) flr + 1
+        tax
+pB6:    cmp BOTS,y
+        bne np_r
+        lda LAH,x                  ; one line (flr + 1 = BOTS): black, here
+        clc
+        adc scrh
+        sta zp_+1
+        txa
+        and #7
+        sta zp_
+        ldy coff
+        lda #0
+        sta (zp_),y
+        jmp c_nd
+np_r:
+pB8:    lda BOTS,y
+        tay
+        iny
+        lda #0
+        sta ve
+        sta vo
+        jsr run
+        jmp c_nd                   ; (C clear: run keeps it)
+np_n:   lda x4                     ; (C set: c_nd's, inline)
+        adc #3
+        sta x4
+        cmp xr
+        beq np_e
+        tay
+        asl a
+        sta coff
+        beq np_hf
+        jmp c_coly                 ; (V clear: the adc above)
+np_e:   rts
+np_hf:  jmp c_nh
 np_z:     ldy x4
         lda (bota),y
         sta ys
@@ -2041,48 +2082,7 @@ np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; se
         inx
         cpx flr1
         bcc np_l
-np_b:     ldx x4                     ; the land's lowest line now, and last time's
-        ldy DIV4,x
-        lda flr
-pB4:    sta CURB,y
-pB5:    cmp BOTS,y
-        bcs np_n
-        adc #1                     ; (C clear) flr + 1
-        tax
-pB6:    cmp BOTS,y
-        bne np_r
-        lda LAH,x                  ; one line (flr + 1 = BOTS): black, here
-        clc
-        adc scrh
-        sta zp_+1
-        txa
-        and #7
-        sta zp_
-        ldy coff
-        lda #0
-        sta (zp_),y
-        jmp c_nd
-np_r:
-pB8:    lda BOTS,y
-        tay
-        iny
-        lda #0
-        sta ve
-        sta vo
-        jsr run
-        jmp c_nd                   ; (C clear: run keeps it)
-np_n:   lda x4                     ; (C set: c_nd's, inline)
-        adc #3
-        sta x4
-        cmp xr
-        beq np_e
-        tay
-        asl a
-        sta coff
-        beq np_hf
-        jmp c_coly                 ; (V clear: the adc above)
-np_e:   rts
-np_hf:  jmp c_nh
+        jmp np_b
 
 ; Columns the land has left since last time: black from its highest line to
 ; its lowest.  Each column outside this frame's land: none this frame (CURT

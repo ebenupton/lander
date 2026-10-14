@@ -1,0 +1,3 @@
+across cycles: mean   3286, min   3188, max   3426
+down cycles:   mean   1990, min   1957, max   2023
+fill cycles:   mean  34585, min  23104, max  49766

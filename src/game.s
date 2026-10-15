@@ -8,7 +8,7 @@
 ; X or right: left and right), whose offset is the ship's target attitude as
 ; Lander's mouse: its distance the pitch, its direction the way the thrust
 ; pushes; SPACE full thrust, SHIFT hover.  Fuel burns while thrusting; landing
-; slowly on the pad (Lander's: tiles 0..7 in x and z) refuels.  Touching the
+; slowly on the pad (tiles 0..PADN-1 in x and z; Lander's 8) refuels.  Touching the
 ; ground anywhere else, or the pad too fast, crashes: a burst of dots, then the
 ; ship back on the pad.
 ;
@@ -25,8 +25,9 @@
 ; height YTOP (the camera can follow it all the way).
 ;
 ; The screen's top 64 lines are the game's (LAND draws from YSKY, 64): the
-; frame rate (row 0), FUEL (a bar), LANDED and CRASHED (counts); the map (64 x
-; 64 pixels, a tile each) at the top right, the ship a blinking dot on it.
+; FUEL (a bar, row 0), the frame rate (row 2: F toggles it, LAND's readout); the
+; map (64 x 64 pixels, a tile each, the pad in the middle) at the top right, the
+; ship a blinking magenta dot on it.
 ; ============================================================================
 
 GSHK    = $07DB                    ; the ship for bank 6's B6_SHIP (B6_KEYS copies
@@ -67,12 +68,9 @@ CRASHT  = 50                       ; steps the crash lasts
 NPART   = 10                       ; dots
 PGRAV   = 48                       ; a dot's gravity (height units / 256 a step^2)
 PADX    = PADN/2                   ; the pad's middle: the start
-FUELR   = 2                        ; FUEL's row (lines 16..23), its bar's lines and
+FUELR   = 0                        ; FUEL's row (lines 0..7), its bar's lines and
 FBL     = 2                        ; columns (bytes 10..29: 80 pixels, fuel >> 6)
 FBC     = 10
-LANDR   = 4                        ; LANDED's row, CRASHED's
-CRSHR   = 6
-CNTC    = 8                        ; their counts' column (8 pixels each)
 
         .segment "B5GAME"
         .assert * = $A100, error, "the game's entries at $A100"
@@ -176,8 +174,6 @@ gscr:   sta gt4
         bne @t
 @td:    rts
 LABT:   .byte FUELR, 0, 0, 1, 2, 3, $FF                ; FUEL
-        .byte LANDR, 0, 3, 4, 5, 6, 2, 6, $FF         ; LANDED
-        .byte CRSHR, 0, 7, 8, 4, 9, 10, 2, 6, $FF     ; CRASHED
         .byte $FF
 
 ; Letter A (GLY5) at row gt2, column gt3 (8 pixels) of screen scrg.
@@ -389,10 +385,21 @@ keys:   lda #0
         KEYB $29, 8
         KEYB $62, 16               ; SPACE: thrust
         KEYB $00, 32               ; SHIFT: hover
+        KEYB $43, 64               ; F: the frame rate on / off
         lda #$0B                   ; and on
         sta SVIA_ORB
         cli
-        rts
+        lda gkb                    ; (F: toggles as it goes down)
+        and #64
+        cmp fkey
+        beq :+
+        sta fkey
+        tax
+        beq :+
+        lda fpson
+        eor #1
+        sta fpson
+:       rts
 
 ; ---------------------------------------------------------------- a step
 step:   lda gkb                     ; the virtual mouse
@@ -1132,7 +1139,7 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         sta (bsg),y
 @o:     rts
 
-; The ship's dot on the map: on screen 0 only (it blinks), screen 1's put back.
+; The ship's dot on the map, magenta: on screen 0 only (it blinks), screen 1's put back.
 marker: ldx back
         lda mkon,x
         beq :+
@@ -1149,13 +1156,16 @@ marker: ldx back
         bne @r
         lda GSHV
         beq @r
-        lda sz+2                   ; line 63 - z, column 48 + x / 4
+        lda #MAPZ                  ; line MAPZ - z, column 48 + (x + MAPX) / 4
+        sec                        ; (gamegen's: the pad in the middle)
+        sbc sz+2
         and #63
-        eor #63
         sta gt0
         and #7
         sta g0
         lda sx+2
+        clc
+        adc #MAPX
         and #63
         sta gt1
         lsr a
@@ -1182,16 +1192,21 @@ marker: ldx back
         lda gt1
         and #3
         tay
-        lda PIXM,y
+        lda PIXM,y                 ; (magenta)
+        sta gt2
         eor #$FF
         ldy #0
         and (g0),y
+        sta gt3
+        lda gt2
+        and #$F0
+        ora gt3
         sta (g0),y
         lda #1
         sta mkon,x
 @r:     rts
 
-; The fuel bar and the counts, on this screen if changed.
+; The fuel bar, on this screen if changed.
 status: ldx back
         lda fuel+1                 ; the bar: fuel >> 6 pixels
         sta gt1
@@ -1233,36 +1248,8 @@ status: ldx back
         sta g0
         cmp #(FBC+20)*8+FBL
         bcc @b
-        ldx back
-@c:     lda nland
-        cmp dl,x
-        beq :+
-        sta dl,x
-        ldy #LANDR
-        jsr cnt
-        ldx back
-:       lda ncrash
-        cmp dc,x
-        beq :+
-        sta dc,x
-        ldy #CRSHR
-        jsr cnt
-:       rts
+@c:     rts
 BARB:   .byte $00, $88, $CC, $EE, $FF
-; Count A (BCD) at row Y.
-cnt:    sty gt2
-        pha
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ldx #CNTC
-        stx gt3
-        jsr putd
-        pla
-        and #15
-        inc gt3
-        jmp putd
 
 ; ---------------------------------------------------------------- state
 gmx:     .byte 0                    ; the virtual mouse (signed)
@@ -1281,6 +1268,7 @@ gvy:     .res 2
 gvz:     .res 2
 su:     .res 2                     ; (units' height, 8.8)
 fuel:   .res 2
+fkey:   .byte 0                    ; (F held last time)
 nland:  .byte 0                    ; (BCD)
 ncrash: .byte 0
 vlastg: .byte 0

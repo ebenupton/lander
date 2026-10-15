@@ -8,7 +8,9 @@
                     faces +x, 8 towards the camera (-z), 16 -x, 24 away), 127 a unit
   THY + p           and its y (up)
   MAPI              the map, 64 x 64 MODE 1 pixels (a tile each, z up): 16 bytes a
-                    line, 64 lines: sea cyan, land yellow, the pad magenta
+                    line, 64 lines: sea cyan, land yellow, the pad grey (its dither,
+                    PADC's), turned round the torus so the pad's middle is the map's:
+                    tile x at column (x + MAPX) & 63, z at line (MAPZ - z) & 63
 """
 import math
 import os
@@ -19,8 +21,11 @@ sys.path.insert(0, os.path.join(HERE, '..', 'proto'))
 sys.path.insert(0, HERE)
 import land as L     # noqa: E402
 import shipgen as SG  # noqa: E402
+import swatch35 as SW  # noqa: E402
 
 NDIR, NPITCH = SG.NDIR, SG.NPITCH
+MAPX = 32 - L.PADN // 2   # the pad's middle (tile PADN/2) to the map's (column 32,
+MAPZ = 31 + L.PADN // 2   # line 31; game.s's marker likewise)
 
 
 def tables():
@@ -45,18 +50,20 @@ def tables():
 def mapimg():
     hm = L.heightmap()[0]
     out = bytearray(1024)
+    grey = SW.cell(*SW.ALL[L.PADC])
     for line in range(64):
-        z = 63 - line
-        for x in range(64):
+        z = (MAPZ - line) % 64
+        for px in range(64):
+            x = (px - MAPX) % 64
             if x < L.PADN and z < L.PADN:
-                c = 2                     # the pad: magenta
+                c = grey[(px & 1, line & 1)]   # the pad: grey
             elif all(hm[(z + dz) % L.MAP, (x + dx) % L.MAP] == L.SEA for dz in (0, 1) for dx in (0, 1)):
                 c = 1                     # sea: cyan
             else:
                 c = 3                     # land: yellow
-            p = x & 3
+            p = px & 3
             v = ((c >> 1) << (7 - p)) | ((c & 1) << (3 - p))
-            out[line * 16 + (x >> 2)] |= v
+            out[line * 16 + (px >> 2)] |= v
     return out
 
 
@@ -75,6 +82,8 @@ def main():
     emit('THZ', thz)
     emit('THY', thy)
     emit('MAPI', list(mapimg()))
+    lines.append(f'MAPX = {MAPX}')
+    lines.append(f'MAPZ = {MAPZ}')
     open(os.path.join(out, 'gametab.inc'), 'w').write('\n'.join(lines) + '\n')
 
 

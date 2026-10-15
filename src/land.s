@@ -2993,7 +2993,16 @@ G_SP    = 11                       ; glyphs makes them)
 G_F     = 12
 
 readout:
-        ldx #7                     ; the sum
+        lda fpson                  ; (off: blanks, game.s's F)
+        bne @on
+        sta tcol
+:       lda #G_SP
+        jsr putg
+        lda tcol
+        cmp #8
+        bne :-
+        rts
+@on:    ldx #7                     ; the sum
         lda #0
         clc
 :       adc dvs,x
@@ -3047,7 +3056,7 @@ readout:
         jsr putg
         lda #G_F+2
         ; fall into putg
-; Character A at column tcol of the top character row of the screen drawn.
+; Character A at column tcol of character row 2 of the screen drawn.
 putg:   asl a
         asl a
         asl a
@@ -3059,7 +3068,9 @@ putg:   asl a
         asl a
         asl a
         sta ptr
-        lda scrb
+        lda scrb                   ; (character row 2)
+        clc
+        adc #4
         sta ptr+1
         ldy #0
 :       lda GLY,x
@@ -3075,6 +3086,7 @@ pkx:    .byte $FF                  ; project's: cxt, czt + ZB its heights (HT) a
 pkz:    .byte $FF                  ; boxes (CLE, CLO) are for
 SHF:    .byte 0                    ; (zsh4's: HT a row on (1) or back ($FF), HTN)
 fps10:  .res 2                     ; (the readout's)
+fpson:  .byte 1                    ; (the readout on: game.s's F toggles it)
 dvs:    .res 8
 dvi:    .res 1
 vlast:  .res 1

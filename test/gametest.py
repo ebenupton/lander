@@ -3,7 +3,7 @@
 scripted keys, and print the ship's state each frame.  For debugging src/game.s.
 
     python3 test/gametest.py [script]     script: frames:keys,... e.g. "20:,30:T,40:TK"
-                                          keys: L R F B (mouse), T thrust, H hover
+                                          keys: L R F B (mouse), T thrust, H hover, P the F key (frame rate)
 """
 import os
 import sys
@@ -14,7 +14,7 @@ from py65.memory import ObservableMemory
 ROOT = os.path.join(os.path.dirname(__file__), '..')
 B = os.path.join(ROOT, 'build', 'land')
 RET = 0xFF00
-KEYS = {'L': 0x61, 'R': 0x42, 'F': 0x46, 'B': 0x65, 'T': 0x62, 'H': 0x00}
+KEYS = {'L': 0x61, 'R': 0x42, 'F': 0x46, 'B': 0x65, 'T': 0x62, 'H': 0x00, 'P': 0x43}
 
 
 def labels(f='labels.txt'):

@@ -56,7 +56,7 @@ CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height abov
                           # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
 EMAX = 46                 # the camera's most above CAMH (the near row's y's within a byte)
 ZSHIP = 15                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID)
-PADN = 8                  # the landing pad: tiles 0..PADN-1 in x and z (Lander's LAUNCHPAD_SIZE)
+PADN = 4                  # the landing pad: tiles 0..PADN-1 in x and z (Lander's: 8)
 PADH = 4                  # its height
 PADC = 19                 # its colour (swatch35: one of each ink, a grey)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
@@ -87,7 +87,7 @@ def heightmap():
             base[z, x] = (raw >> 2) & 3
     land = s >= SEAS
     h = np.where(land, 1 + np.round((s - SEAS) / (s.max() - SEAS) * (HMAX - 1)), 0).astype(int)
-    h[:PADN + 1, :PADN + 1] = PADH        # the landing pad: flat (Lander's: 0 <= x, z < 8)
+    h[:PADN + 1, :PADN + 1] = PADH        # the landing pad: flat (0 <= x, z < PADN)
     return h, base
 
 

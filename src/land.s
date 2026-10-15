@@ -883,14 +883,6 @@ bclip:  lda BCL                    ; (setup's: a point past YGND seen)
 :       iny
         bne :--
         rts
-; c_coly's tests for rung X (ri): its HI, and its LO's byte column (x4 a
-; multiple of 4: LO <= x4 + 3 iff LO & $FC <= x4).
-rpatch: lda HI,x
-        sta c_hi+1
-        lda LO,x
-        and #$FC
-        sta c_lo+1
-        rts
 c_rix:
         ldx ri
         tya
@@ -898,6 +890,10 @@ c_rix:
         cmp HI,x
         bcs :-
         stx ri
+        lda CE-1,x                 ; (c_one's run2 bytes: box ri - 1's)
+        sta RVE
+        lda CO-1,x
+        sta RVO
         lda HI,x                   ; (rpatch, inline)
         sta c_hi+1
         lda LO,x
@@ -1704,9 +1700,8 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         sta ph_hi+1
         ldx #0
         stx ri
-        jsr rpatch                 ; (c_coly's: rung 0's)
-        lda #$FF                   ; (c_one's ve, vo: none this strip yet)
-        sta c_vri+1
+        jsr rpatch                 ; (c_coly's: rung 0's; c_one's RVE, RVO:
+                                   ; the first column's c_rix's)
         lda xl
         sta x4
         jsr phase
@@ -1789,18 +1784,16 @@ c_ri:   inx                        ; (the next rung)
         cmp HI,x
         bcs c_ri
         stx ri
-        jsr rpatch
+        jsr rpv                    ; (and c_one's RVE, RVO)
         tya
         jmp c_rr
-c_ld:   stx c_vri+1
-        lda CE-1,x
-        sta ve
-        lda CO-1,x
-        sta vo
-        bvc c_r1
-        jmp zone1                  ; (a top not level)
 c_v1:   .byte $40                  ; (BIT: V)
-c_z1:    jmp zone1                  ; (back to c_r1)
+c_ld:   lda CE-1,x                 ; (fsplit's, split's: a rung's boxes alike)
+        sta RVE
+        lda CO-1,x
+        sta RVO
+        bvc c_r1
+c_z1:    jmp zone1                  ; (a top not level; back to c_r1)
 c_srx:  ldx ri                     ; (c_coly's)
         tya
         ora #3
@@ -1830,8 +1823,6 @@ rc_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
         jmp c_rd
 rc_r:   dex
         ldy mx
-        lda #$FF                   ; (c_one's ve, vo gone)
-        sta c_vri+1
         lda #0
         sta ve
         sta vo
@@ -1845,11 +1836,9 @@ c_rd:
 c_rr:   ora #3
         cmp LO,x
         bcs c_split                 ; (LO <= x4 + 3)
-o_nr:   ldx ri
-c_one:                             ; one box: ri - 1
-c_vri:  cpx #$FF                   ; (ve, vo its already: the last c_one's ri,
-        bne c_ld                   ; $FF if since a strip's start or a run
-c_on:   bvs c_z1                   ; with black; a split's comes with ri past)
+o_nr:                              ; one box: ri - 1 (RVE, RVO its already: set
+c_one:                             ; whenever ri changes, c_rix, c_ri; fe_r, fr
+c_on:   bvs c_z1                   ; only in a column rung ri is in)
 c_r1:    ldx mx
 c_r1x:  cpx flr1                   ; (zone1's: X = mx)
         bcs c_next
@@ -1875,10 +1864,12 @@ pp0:    sta $FF00,x
         ldx EINL-1,y
         stx pr1+1
 pp1:    sta $FF00,x
-pY_k:   lda ve
+pY_k:   lda #0                     ; (RVE: the even lines' byte, and RVO the
+RVE     = pY_k+1                   ; odd's: c_rix, c_ri, c_ld, fe_r, fr)
         ldy coff
 je:     jsr $FFFF
-        lda vo
+rvo:    lda #0
+RVO     = rvo+1
 jo:     jsr $FFFF                  ; (inline: on to c_next; fe_r's too)
 c_next:
 c_np:   jmp nearpost               ; (cols: LDA x4 / CLC, the next column's,
@@ -2081,8 +2072,6 @@ np_r:
 pB8:    lda BOTS,y
         tay
         iny
-        lda #$FF                   ; (c_one's ve, vo gone)
-        sta c_vri+1
         lda #0
         sta ve
         sta vo
@@ -2138,6 +2127,19 @@ np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; se
         cpx flr1
         bcc np_l
         jmp np_b
+
+; c_coly's tests for rung X (ri): its HI, and its LO's byte column (x4 a
+; multiple of 4: LO <= x4 + 3 iff LO & $FC <= x4).
+rpv:    lda CE-1,x                 ; (c_one's run2 bytes: box ri - 1's)
+        sta RVE
+        lda CO-1,x
+        sta RVO
+rpatch: lda HI,x
+        sta c_hi+1
+        lda LO,x
+        and #$FC
+        sta c_lo+1
+        rts
 
 ; The column's half of the screen: A (0 left, 1 right).
 sethalf:
@@ -2294,9 +2296,9 @@ fr:     stx bpos                   ; (C set) lines Y .. t-1, a run
         adc rsm
         sta fwu                    ; t
         lda BE,x
-        sta ve
+        sta RVE
         lda BO,x
-        sta vo
+        sta RVO
         tya
         sec
         adc rsm                    ; the line
@@ -2346,9 +2348,9 @@ ff_o:   lda BO,x
         bne ff_e
         beq ff_d
 fe_r:   lda BE,x                   ; the floor's run
-        sta ve
+        sta RVE
         lda BO,x
-        sta vo
+        sta RVO
         tya
         adc rsm                    ; (C set: fe_x's bcs)
         tax
@@ -2453,7 +2455,7 @@ z1_h:   lda LAHSB0,x               ; (zline; sethalf's, the screen and half's)
         ldy coff
         lda (zp_),y
         bcs z1_o
-        eor ve
+        eor RVE
         and msk
         eor (zp_),y
         sta (zp_),y
@@ -2461,7 +2463,7 @@ z1_h:   lda LAHSB0,x               ; (zline; sethalf's, the screen and half's)
         cpx mx
         bcc z1_m
         jmp c_r1x                  ; (X = mx: c_r1's run)
-z1_o:   eor vo
+z1_o:   eor RVO
         and msk
         eor (zp_),y
         sta (zp_),y

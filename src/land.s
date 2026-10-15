@@ -756,11 +756,13 @@ strips: ldx back                   ; this screen's TOPS, BOTS (a set of three)
         lda setTl,y
         sta tsp
         sta pT5+1
+        sta pT5c+1
         sta pT6+1
         sta pT6b+1
         lda setTh,y
         sta tsp+1
         sta pT5+2
+        sta pT5c+2
         sta pT6+2
         sta pT6b+2
         lda setBl,y
@@ -776,10 +778,12 @@ strips: ldx back                   ; this screen's TOPS, BOTS (a set of three)
         ldy cidx                   ; and this frame's: CURT, CURB's operands
         lda setTl,y                ; (each column's set by the strip it is first
         sta pT3+1                  ; in, CURB by the near strip; the rest by gone:
+        sta pT3c+1
         sta pT4+1                  ; each strip's columns are within the next's)
         sta pT4b+1
         lda setTh,y
         sta pT3+2
+        sta pT3c+2
         sta pT4+2
         sta pT4b+2
         lda setBl,y
@@ -1684,13 +1688,16 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         stx o_lv
         sty o_lv+1
         sta o_lv+2
-        lda #<c_nd
-        ldy #>c_nd
+        ldx #$A5                   ; c_np: LDA x4 / CLC (the next column's,
+        lda #x4                    ; inline), but in the near strip JMP nearpost
+        ldy #$18
         bit last
         bpl :+
+        ldx #$4C
         lda #<nearpost
         ldy #>nearpost
-:       sta c_np+1
+:       stx c_np
+        sta c_np+1
         sty c_np+2
         lda xlp                    ; record below xlp or from xrp on (strip 1: all,
         ldx ns                     ; to xr): phase's
@@ -1744,11 +1751,146 @@ ph_rec: cpx xr                     ; (at most xr)
 ph_r:   stx c_xe+1
         ldx #<record
         stx o_rec+1
-        stx c_rec+1
         ldx #>record
         stx o_rec+2
+        ldx #<recordc
+        stx c_rec+1
+        ldx #>recordc
         stx c_rec+2
         rts
+c_dbl:  lda x4
+        ora #3
+        cmp LO+2,x
+        bcs c_d3
+        bvs :+                     ; (two rungs: s2v, its top level; else split2)
+        jmp s2v
+:       jsr split2
+        jmp c_next
+c_d3:   bvs :+                     ; (three: never seen; slow reads ys)
+        lda mx                     ; (mn: mx, V clear)
+        sta mn
+        sta ys
+        sta ys+1
+        sta ys+2
+        sta ys+3
+:       jsr slow
+        jmp c_next
+
+; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
+; inline, Y = x4: o_rec's, one box, on to o_nr, c_coly's tests made, ri and
+; Y kept; recordc, c_rec's, likewise; the black above, rare: c_rd's tests).
+record: ldx DIV4,y                 ; (always the column's first strip this
+                                   ; frame: PINL, PINR widen to the near row)
+        lda mx                     ; the column's first strip this frame: its
+        bvc :+                     ; (mn: mx if V clear, its top level)
+        lda mn
+:
+pT3:    sta CURT,x                 ; highest line, and black from the land's
+pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
+                                   ; (the pixels above their top in its top zone
+                                   ; kept)
+        cmp mx
+        bcs o_nr                   ; (one box: o_rec's)
+        bcc rc_t
+c_ri:   inx                        ; (the next rung)
+        cmp HI,x
+        bcs c_ri
+        stx ri
+        jmp c_rr
+c_v1:   .byte $40                  ; (BIT: V)
+c_z1:    jmp zone1                  ; (back to c_r1)
+c_srx:  ldx ri                     ; (c_coly's)
+        tya
+        ora #3
+c_split: cmp LO+1,x
+        bcs c_dbl
+        bvs :+
+fsplit: cpx lastri                 ; (fsplit's test, inline: back to c_next)
+        bne :++
+        jmp fs_c
+:       jmp split
+:       jmp fs_new
+
+rc_t:   tax
+        inx                        ; one line: here (V kept: c_rr's)
+        cpx mx
+        bne rc_r
+        dex
+rc_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
+        sta zp_+1
+        txa
+        and #7
+        sta zp_
+        ldy coff
+        lda #0
+        sta (zp_),y
+        ldy x4
+        jmp c_rd
+rc_r:   dex
+        ldy mx
+        lda #0
+        sta ve
+        sta vo
+        jsr run
+        ldy x4
+c_rd:
+        ldx ri                     ; the rungs: past those wholly left
+        tya
+        cmp HI,x
+        bcs c_ri
+c_rr:   ora #3
+        cmp LO,x
+        bcs c_split                 ; (LO <= x4 + 3)
+o_nr:   ldx ri
+c_one:  lda CE-1,x                 ; one box: ri - 1
+        sta ve
+        lda CO-1,x
+        sta vo
+        bvs c_z1                   ; (a top not level)
+c_r1:    ldx mx
+        cpx flr1
+        bcs c_next
+        ldy flr1
+        jsr run2
+c_next:
+c_np:   jmp nearpost               ; (cols: LDA x4 / CLC, the next column's,
+                                   ; inline, but in the near strip; back to c_xe)
+c_nd1:  adc #4                     ; (c_np's LDA x4 / CLC: the next column)
+        sta x4
+c_xe:   cmp #0                     ; (phase: xlp, xrp or xr)
+        beq c_lim
+c_xt:   tay
+        asl a                      ; 8 * column
+        sta coff
+        beq c_nh
+c_coly:                            ; (V clear: the adc #4 above, or sethalf's
+        ldx ri                     ; last sbc) the rungs: past those wholly left
+        tya
+        cmp HI,x
+        bcs c_ri0
+c_rr0:  ora #3
+        cmp LO,x
+        bcs c_sp                   ; (LO <= x4 + 3: a rung in the column)
+                                   ; one box: no vertex of either row inside it
+                                   ; (rungs ri-1 and before: at or left of x4;
+                                   ; ri on: right of x4 + 3), so each row
+                                   ; monotonic across it: level if its ends are,
+                                   ; its highest and lowest at its ends
+ot0:    lda ROWA,y                 ; the top (cols: ot0, ot3, oz1-3 this strip's)
+ot3:    cmp ROWA+3,y
+        bne o_zt
+        sta mx                     ; (mn: mx, V clear; record's, c_dbl's)
+o_ft:
+ob0:    lda ROWB,y                 ; the floor (cols: ob0, ob3, obz)
+ob3:    cmp ROWB+3,y
+        bne o_zb
+o_lv:   tax                        ; (as c_lv, c_ra, c_rb)
+        inx
+        stx flr1
+o_rec:  jmp record                 ; (phase: or o_nr)
+c_nd:   lda x4                     ; the next column (nearpost's)
+        clc
+        jmp c_nd1
 c_lim:  cmp xr                     ; (the next phase, or the end)
         beq c_end
         jsr phase
@@ -1792,42 +1934,6 @@ c_ri0:  inx                        ; (the next rung)
         stx ri
         jmp c_rr0
 
-c_nd:                               ; the next column (c_np's, nearpost's)
-        lda x4
-        clc
-        adc #4
-        sta x4
-c_xe:   cmp #0                     ; (phase: xlp, xrp or xr)
-        beq c_lim
-c_xt:   tay
-        asl a                      ; 8 * column
-        sta coff
-        beq c_nh
-c_coly:                            ; (V clear: the adc #4 above, or sethalf's
-        ldx ri                     ; last sbc) the rungs: past those wholly left
-        tya
-        cmp HI,x
-        bcs c_ri0
-c_rr0:  ora #3
-        cmp LO,x
-        bcs c_sp                   ; (LO <= x4 + 3: a rung in the column)
-                                   ; one box: no vertex of either row inside it
-                                   ; (rungs ri-1 and before: at or left of x4;
-                                   ; ri on: right of x4 + 3), so each row
-                                   ; monotonic across it: level if its ends are,
-                                   ; its highest and lowest at its ends
-ot0:    lda ROWA,y                 ; the top (cols: ot0, ot3, oz1-3 this strip's)
-ot3:    cmp ROWA+3,y
-        bne o_zt
-        sta mx                     ; (mn: mx, V clear; record's, c_dbl's)
-o_ft:
-ob0:    lda ROWB,y                 ; the floor (cols: ob0, ob3, obz)
-ob3:    cmp ROWB+3,y
-        bne o_zb
-o_lv:   tax                        ; (as c_lv, c_ra, c_rb)
-        inx
-        stx flr1
-o_rec:  jmp record                 ; (phase: or o_nr)
 c_sp:                              ; a rung in the column: the top level?
 pt0:    lda ROWA,y
 pt1:    cmp ROWA+1,y
@@ -1848,7 +1954,7 @@ pb3:    cmp ROWB+3,y
 c_lv:   tax                        ; (level; cols: STA flr / STA flr1 in the near
         inx                        ; strip, its ground's from the floor's line on;
         stx flr1                   ; flr only nearpost's)
-c_rec:  jmp record                 ; a column new this frame (strip 1's, or
+c_rec:  jmp recordc                ; a column new this frame (strip 1's, or
                                    ; beyond the last strip's): record it (phase:
                                    ; or c_srx)
 c_zt:    sta ys                     ; (rare) each pixel's top (A: the first's), the
@@ -1902,100 +2008,6 @@ zb3:    cmp ROWB+3,y
         dec flr
 :       stx flr1
         jmp c_rec
-; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
-; inline: on to c_rd, Y = x4).
-record: ldx DIV4,y                 ; (always the column's first strip this
-                                   ; frame: PINL, PINR widen to the near row)
-        lda mx                     ; the column's first strip this frame: its
-        bvc :+                     ; (mn: mx if V clear, its top level)
-        lda mn
-:
-pT3:    sta CURT,x                 ; highest line, and black from the land's
-pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
-                                   ; (the pixels above their top in its top zone
-                                   ; kept)
-        cmp mx
-        bcs c_rd                   ; (Y = x4)
-        tax
-        inx                        ; one line: here (V kept: c_rr's)
-        cpx mx
-        bne rc_r
-        dex
-rc_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
-        sta zp_+1
-        txa
-        and #7
-        sta zp_
-        ldy coff
-        lda #0
-        sta (zp_),y
-        ldy x4
-        jmp c_rd
-rc_r:   dex
-        ldy mx
-        lda #0
-        sta ve
-        sta vo
-        jsr run
-        ldy x4
-c_rd:
-        ldx ri                     ; the rungs: past those wholly left
-        tya
-        cmp HI,x
-        bcs c_ri
-c_rr:   ora #3
-        cmp LO,x
-        bcs c_split                 ; (LO <= x4 + 3)
-o_nr:   ldx ri
-c_one:  lda CE-1,x                 ; one box: ri - 1
-        sta ve
-        lda CO-1,x
-        sta vo
-        bvs c_z1                   ; (a top not level)
-c_r1:    ldx mx
-        cpx flr1
-        bcs c_next
-        ldy flr1
-        jsr run2
-c_next:
-c_np:   jmp nearpost               ; (cols: c_nd but in the near strip; back to c_nd)
-c_ri:   inx                        ; (the next rung)
-        cmp HI,x
-        bcs c_ri
-        stx ri
-        jmp c_rr
-c_v1:   .byte $40                  ; (BIT: V)
-c_z1:    jmp zone1                  ; (back to c_r1)
-c_srx:  ldx ri                     ; (c_coly's)
-        tya
-        ora #3
-c_split: cmp LO+1,x
-        bcs c_dbl
-        bvs :+
-fsplit: cpx lastri                 ; (fsplit's test, inline: back to c_next)
-        bne :++
-        jmp fs_c
-:       jmp split
-:       jmp fs_new
-
-c_dbl:  lda x4
-        ora #3
-        cmp LO+2,x
-        bcs c_d3
-        bvs :+                     ; (two rungs: s2v, its top level; else split2)
-        jmp s2v
-:       jsr split2
-        jmp c_next
-c_d3:   bvs :+                     ; (three: never seen; slow reads ys)
-        lda mx                     ; (mn: mx, V clear)
-        sta mn
-        sta ys
-        sta ys+1
-        sta ys+2
-        sta ys+3
-:       jsr slow
-        jmp c_next
-
 ; The near strip's column, drawn (to the line before its floor if its bottom
 ; row is level there, else to the floor): below the near row black (the line
 ; at the floor, or the pixels at or below their bottom-row line, read-modify-
@@ -2051,8 +2063,8 @@ pB8:    lda BOTS,y
         sta ve
         sta vo
         jsr run
-        jmp c_nd                   ; (C clear: run keeps it)
-np_n:   lda x4                     ; (C set: c_nd's, inline)
+        jmp c_nd
+np_n:   lda x4                     ; (C set: + 4)
         adc #3
         sta x4
         jmp c_xe                   ; (V clear: the adc above)
@@ -2365,7 +2377,7 @@ ff_o:   lda BO,x
         iny
         cpy fwe
         bne ff_e
-ff_d:   jmp c_next
+        beq ff_d
 fe_r:   lda BE,x                   ; the floor's run
         sta ve
         lda BO,x
@@ -2376,7 +2388,7 @@ fe_r:   lda BE,x                   ; the floor's run
         tax
         ldy flr1
         jsr run2
-        jmp c_next
+ff_d:   jmp c_np                   ; (c_next; s2v's: s2ov)
 fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         lda CE-1,x                 ; 4 the left (Y: the two EORed)
         sta BE+4
@@ -2877,6 +2889,20 @@ je:     jsr $FFFF
         lda vo
 jo:     jmp $FFFF                  ; (its RTS returns from run2)
 
+; record's, c_rec's (a rung in the column): on to c_srx (c_coly's tests made,
+; ri and Y kept), or the black above (rare) as record's.
+recordc: ldx DIV4,y
+        lda mx
+        bvc :+
+        lda mn
+:
+pT3c:   sta CURT,x
+pT5c:   lda TOPS,x
+        cmp mx
+        bcc :+
+        jmp c_srx
+:       jmp rc_t
+
 ; ---------------------------------------------------------------- readout
 ; At each flip: the vertical syncs since the last (dvs, the last 8); the
 ; readout: 400 / their sum, frames a second, to a tenth (FPSL, FPSH: 4000 /
@@ -2979,7 +3005,7 @@ tcol:   .res 1
 ; (bank 4, its free space) A column two rungs split (ri, ri+1), its top level:
 ; fsplit's for ri+1 (boxes M, R), then box L over the pixels left of ri at
 ; each line (mktr's transitions, from TRL; bpos2 the LM mask; le, lo2 L's
-; bytes; c_np's way on kept in me, mo while fsplit's ends at s2ov).
+; bytes; fsplit's end, ff_d, at s2ov meanwhile).
         .segment "B4V1"
 s2v:    lda CE-1,x                 ; (X = ri) L's bytes
         sta le
@@ -2990,21 +3016,17 @@ s2v:    lda CE-1,x                 ; (X = ri) L's bytes
         sta bpos2
         lda #0
         sta kb
-        lda c_np+1                 ; fsplit's end here
-        sta me
-        lda c_np+2
-        sta mo
-        lda #<s2ov
-        sta c_np+1
+        lda #<s2ov                 ; fsplit's end here
+        sta ff_d+1
         lda #>s2ov
-        sta c_np+2
+        sta ff_d+2
         ldx ri
         inx
         jmp fsplit
-s2ov:   lda me                     ; (c_np's again)
-        sta c_np+1
-        lda mo
-        sta c_np+2
+s2ov:   lda #<c_np                 ; (ff_d's again)
+        sta ff_d+1
+        lda #>c_np
+        sta ff_d+2
         lda #0
         sta zp_
         ldx mx                     ; from mx

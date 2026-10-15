@@ -2410,6 +2410,16 @@ fe_r:   lda BE,x                   ; the floor's run
         ldy flr1
         jsr run2
 ff_d:   jmp c_np                   ; (c_next; s2v's: s2ov)
+fs_ee:  lda BE                     ; (fs_new's: the rung's two boxes' even
+        sta BE+1                   ; bytes alike)
+        sta BE+2
+        sta BE+3
+        jmp fs_co
+fs_oe:  lda BO                     ; (the odd alike)
+        sta BO+1
+        sta BO+2
+        sta BO+3
+        jmp fs_ln
 fs_ns:  lda CE-1,x                 ; (fsplit's, a new rung: its boxes the same, the
         cmp CE,x                   ; column one box: c_ld's, V clear)
         bne fs_new
@@ -2423,6 +2433,7 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         lda CE,x
         sta BE
         eor BE+4
+        beq fs_ee                  ; (the two boxes alike: BE+1..3 = BE)
         tay
         and #$88
         eor BE
@@ -2435,11 +2446,12 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         and #$EE
         eor BE
         sta BE+3
-        lda CO-1,x
+fs_co:  lda CO-1,x
         sta BO+4
         lda CO,x
         sta BO
         eor BO+4
+        beq fs_oe                  ; (alike: BO+1..3 = BO)
         tay
         and #$88
         eor BO
@@ -2452,7 +2464,7 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         and #$EE
         eor BO
         sta BO+3
-        lda BX,x
+fs_ln:  lda BX,x
         cmp TX,x
         bcs fs_nr
         lda RTPL,x                 ; leaning left: x4 + bpos - 1, bpos - 1 after

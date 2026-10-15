@@ -2249,8 +2249,10 @@ sh_2:   sta TPO0*256,x
         sta np_h+1
         sta np_h2+1
         sta rc_h+1
+        sta z1_h+1
         lda lahsh,y
         sta fs_h+2
+        sta z1_h+2
         sta fr_h+2
         sta np_h+2
         sta np_h2+2
@@ -2498,8 +2500,8 @@ fs_nj:  jmp fs_c                   ; (split's: sp_r)
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).
 zone1:  ldx mn                     ; (mn < mx: a top not level)
-@l:     cpx flr1
-        bcs @d
+z1_l:   cpx flr1
+        bcs z1_n                   ; (and mx: c_r1's run empty)
         lda #0                     ; (pmask)
         cpx ys+3
         rol a
@@ -2512,9 +2514,7 @@ zone1:  ldx mn                     ; (mn < mx: a top not level)
         tay
         lda MASKB,y
         sta msk
-        lda LAH,x                  ; (zline)
-        clc
-        adc scrh
+z1_h:   lda LAHSB0,x               ; (zline; sethalf's, the screen and half's)
         sta zp_+1
         txa
         and #7
@@ -2522,23 +2522,27 @@ zone1:  ldx mn                     ; (mn < mx: a top not level)
         lsr a                      ; (C: an odd line)
         ldy coff
         lda (zp_),y
-        bcs @o
+        bcs z1_o
         eor ve
         and msk
         eor (zp_),y
         sta (zp_),y
         inx
         cpx mx
-        bcc @l
-        bcs @d
-@o:     eor vo
+        bcc z1_l
+        bcs z1_d
+z1_o:   eor vo
         and msk
         eor (zp_),y
         sta (zp_),y
         inx
         cpx mx
-        bcc @l
-@d:     jmp c_r1
+        bcc z1_l
+z1_d:   cpx flr1                   ; (c_r1's, inline: X = mx)
+        bcs z1_n
+        ldy flr1
+        jsr run2
+z1_n:   jmp c_np
 
 ; msk: line X's pixels at or below their top.
 pmask:  lda #0

@@ -1199,7 +1199,7 @@ traceb: lda bota+1                 ; the row's page: jvb's store, and the
         sta tyv
         ldx #0
         beq t_seg
-        .res 32                    ; (padding: keeps the code after it in place)
+        .res 34                    ; (padding: keeps the code after it in place)
 t_end:  ldx #0                     ; (operand: the end + 1) the row's end: the
         jmp t_fl                   ; pending run to it, then t_fr's RTS returns
                                    ; to strips
@@ -1218,7 +1218,7 @@ t_nx:   inx                        ; (X = tj on every way here)
         cpx #NX+1
         bcs t_end
 t_seg:  lda BY+1,x                 ; segment X: (BX, BY) to (BX+1, BY+1); tyv
-        cmp BY,x                   ; = BY,x on every way here
+        cmp tyv                    ; = BY,x on every way here
         beq t_nx                   ; (level: the pending run goes on)
         stx tj
         lda BX+1,x
@@ -1227,7 +1227,7 @@ t_seg:  lda BY+1,x                 ; segment X: (BX, BY) to (BX+1, BY+1); tyv
         beq t_dx0
         sta terr                   ; dx
         lda BY+1,x
-        sbc BY,x                   ; dy (C set: dx > 0)
+        sbc tyv                    ; dy (C set: dx > 0)
         ldy #$E6                   ; the step: INC zp (falling, dy > 0) or DEC
         bcs :+                     ; zp (rising), t_inc's opcode
         eor #$FF                   ; |dy|

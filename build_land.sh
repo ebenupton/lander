@@ -21,7 +21,8 @@ open(d + '/TABLES', 'wb').write(img)
 PY
 python3 - $B <<'PY'                 # bank 5's and bank 7's code into their tables
 import sys
-for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES2', 'B5GAME', 0x2100), ('TABLES7', 'B7CODE', 0x3480)):
+for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES2', 'B5GAME', 0x2100), ('TABLES7', 'B7CODE', 0x3480),
+                    ('TABLES7', 'B7A', 0x00B0), ('TABLES7', 'B7B', 0x01B0), ('TABLES7', 'B7C', 0x2FB0), ('TABLES7', 'B7D', 0x30B0)):
     img = bytearray(open(f'{sys.argv[1]}/{t}', 'rb').read())
     code = open(f'{sys.argv[1]}/{c}', 'rb').read()
     assert not any(img[off:off + len(code)]), t + ': code over the tables'

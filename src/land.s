@@ -930,32 +930,17 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         asl a
         asl a
         asl a
-        adc np                     ; (C clear after: 16 ns + np < 256)
-        adc #$EF                   ; 16 (ns - 1) + np - 1: box np, down to 1
+        adc #$F0                   ; 16 (ns - 1): su_l7's Y
         tay
-        ldx np
-su_p:     lda PX,y
-        sta TX,x
-        lda PY,y
-        sta TY,x
-        lda PX+16,y
-        sta BX,x
-        lda PY+16,y
-        sta BY,x
-        cmp #YGND+1
-        bcs su_pc
-su_pb:    lda CLE,y                  ; (CLE, CLO + 16 o: pcol5's window)
-ldCLE   = * - 2
-        sta CE,x
-        lda CLO,y
-ldCLO   = * - 2
-        sta CO,x
-        dey
-        dex
-        bne su_p
-        beq su_m
-su_pc:    inc BCL                    ; (C set)
-        bcs su_pb
+        lda #BANK7                 ; (bank 7: su_l7, unrolled)
+        sta ROMCOPY
+        sta ROMSEL
+        jsr su_l7
+        lda #BANK
+        sta ROMCOPY
+        sta ROMSEL
+        bne su_m
+ldCLE:  .byte 0                    ; (pcol5's: 16 o, su_l7's CLE, CLO window)
 su_qc:    inc BCL
         bcs su_qb
         ; the sky (row 0 both, the top at YSKY) and the ground (row nr-1
@@ -1033,7 +1018,6 @@ su_bot:   lda ns                     ; the bottom row's line
         cmp nr
         beq :+
         jmp traceb
-        .res 4                     ; (the layout kept)
 :
         ldy xl                     ; the ground's: to each column's lowest land
 :       tya                        ; line last time or this (BOTS, CURB)
@@ -4026,6 +4010,62 @@ cyc:    sta cdy
         rts
 
 
+; (bank 7) setup's land strip, unrolled (np = NX): Y = 16 (ns - 1), rows ns-1
+; and ns (PX, PY) into TX..BY 1..np (BCL: a bottom point past YGND), then the
+; boxes CLE, CLO + 16 (ns - 1) + 16 o (ldCLE) into CE, CO 1..np.  In
+; five: B7CODE's end, then R7L, R7H, PINL7, PINR7's spare (di >= NDI = 176).
+        .assert NX = 11 && NDI = 176, error, "su_l7: unrolled for NX, NDI"
+.macro SUPX i
+        lda PX+i,y
+        sta TX+1+i
+        lda PY+i,y
+        sta TY+1+i
+        lda PX+16+i,y
+        sta BX+1+i
+        lda PY+16+i,y
+        sta BY+1+i
+        cmp #YGND+1
+        bcc :+
+        inc BCL
+:
+.endmacro
+.macro SUCL i
+        lda CLE+i,y
+        sta CE+1+i
+        lda CLO+i,y
+        sta CO+1+i
+.endmacro
+        .segment "B7CODE"
+su_l7:
+.repeat 8, i
+        SUPX i
+.endrep
+        jmp su_l7a
+        .segment "B7A"
+su_l7a: SUPX 8
+        SUPX 9
+        jmp su_l7b
+        .segment "B7B"
+su_l7b: SUPX 10
+        tya
+        clc
+        adc ldCLE
+        tay
+.repeat 3, i
+        SUCL i
+.endrep
+        jmp su_l7c
+        .segment "B7C"
+su_l7c:
+.repeat 6, i
+        SUCL i+3
+.endrep
+        jmp su_l7d
+        .segment "B7D"
+su_l7d: SUCL 9
+        SUCL 10
+        rts
+
 ; ---------------------------------------------------------------- the slow way
 ; (bank 4, its free space, in two: never seen)
         .segment "B4Z"
@@ -4237,8 +4277,6 @@ pcol5:  lda cxt                    ; a window of 10 rows (m: map row WK - m, by
         asl a
         asl a
         sta ldCLE
-        adc #<CLO                  ; (C clear; no carry)
-        sta ldCLO
         rts
 @f:     sta WX                     ; all anew: o 1, WK czt + ZB, rows 1..7
         lda czt

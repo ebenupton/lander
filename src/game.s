@@ -1293,6 +1293,12 @@ mpix:   lda mdl
         and #$F0                   ; magenta
         bne @w
 :       lda gt2                    ; the map's: MAPI + 16 line + byte
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta g1+1
+        lda gt2
         asl a
         asl a
         asl a
@@ -1301,11 +1307,7 @@ mpix:   lda mdl
         clc
         adc #<MAPI
         sta g1
-        lda gt2
-        lsr a
-        lsr a
-        lsr a
-        lsr a
+        lda g1+1
         adc #>MAPI
         sta g1+1
         ldy #0

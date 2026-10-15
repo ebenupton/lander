@@ -1962,11 +1962,11 @@ pt3:    cmp ROWA+3,y
 c_ft:                               ; the floor: level?
 pb0:    lda ROWB,y
 pb1:    cmp ROWB+1,y
-        bne c_zb
+        bne zb1c                   ; (into c_zb past the compares made: C kept)
 pb2:    cmp ROWB+2,y
-        bne c_zb
+        bne zb2c
 pb3:    cmp ROWB+3,y
-        bne c_zb
+        bne zb3c
 c_lv:   tax                        ; (level; cols: STA flr / STA flr1 in the near
         inx                        ; strip, its ground's from the floor's line on;
         stx flr1                   ; flr only nearpost's)
@@ -2018,15 +2018,15 @@ c_zt3:  sta ys                     ; (the first three level: on at zt3)
 
 c_zb:                               ; (rare) the lowest (A: the first's; cols:
 zb1:    cmp ROWB+1,y               ; zb1-3 this strip's)
-        bcs :+
+zb1c:   bcs :+
         lda ROWB+1,y
 :
 zb2:    cmp ROWB+2,y
-        bcs :+
+zb2c:   bcs :+
         lda ROWB+2,y
 :
 zb3:    cmp ROWB+3,y
-        bcs :+
+zb3c:   bcs :+
         lda ROWB+3,y
 :       sta flr                    ; (not level)
         tax

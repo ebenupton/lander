@@ -62,7 +62,7 @@ def mapimg():
 
 
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, '..', 'build', 'land')
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, '..', 'build')
     thx, thz, thy = tables()
     lines = ['; tools/gamegen.py: the game\'s tables (generated)']
 

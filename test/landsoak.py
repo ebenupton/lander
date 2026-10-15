@@ -30,7 +30,7 @@ import landgen as G   # noqa: E402
 import shipgen as SG  # noqa: E402
 import points as P    # noqa: E402
 
-B = os.path.join(ROOT, 'build', 'land')
+B = os.path.join(ROOT, 'build')
 RET = 0xFF00
 PIXM = [0x88, 0x44, 0x22, 0x11]
 DB = [G.dither_bytes(e) for e in range(35)]

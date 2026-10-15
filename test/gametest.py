@@ -12,7 +12,7 @@ from py65.devices.mpu6502 import MPU
 from py65.memory import ObservableMemory
 
 ROOT = os.path.join(os.path.dirname(__file__), '..')
-B = os.path.join(ROOT, 'build', 'land')
+B = os.path.join(ROOT, 'build')
 RET = 0xFF00
 KEYS = {'L': 0x61, 'R': 0x42, 'F': 0x46, 'B': 0x65, 'T': 0x62, 'H': 0x00, 'P': 0x43}
 

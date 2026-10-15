@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import shipgen as G   # noqa: E402
 import landgen as LG  # noqa: E402
 
-B = os.path.join(ROOT, 'build', 'land')
+B = os.path.join(ROOT, 'build')
 RET = 0xFF00
 PIXM = [0x88, 0x44, 0x22, 0x11]
 DB = [LG.dither_bytes(e) for e in range(35)]

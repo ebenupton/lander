@@ -2210,9 +2210,7 @@ sh_b:   ora #0                     ; t: the STAB (its ENTBt, EXHBt, LAHSBt):
         lda sht,y
         sta stbh
         clv                        ; (c_coly's)
-        lda enthl,y
-        sta r_eh1+1
-        lda enthh,y
+        lda enthh,y               ; (ENTBt's low bytes all ENTB0's)
         sta r_eh1+2
         lda exhl,y
         sta r_eh2+1
@@ -2234,17 +2232,9 @@ sh_2:   sta TPO0*256,x
         sta pp1+2
         sta jo+2
         sta sh_2+2
-        lda lahsl,y
-        sta fs_h+1
-        sta fr_h+1
-        sta np_h+1
-        sta np_h2+1
-        sta rc_h+1
-        sta z1_h+1
-        lda lahsh,y
+        lda lahsh,y               ; (LAHSBt's low bytes all LAHSB0's)
         sta fs_h+2
         sta z1_h+2
-        sta fr_h+2
         sta np_h+2
         sta np_h2+2
         sta rc_h+2
@@ -2255,9 +2245,9 @@ tpe:    .byte TPE0, TPE1, TPE2, TPE3 ; (tools/landgen.py's)
 tpo:    .byte TPO0, TPO1, TPO2, TPO3
 exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3)
 exhh:   .byte >(EXHB0), >(EXHB1), >(EXHB2), >(EXHB3)
-lahsl:  .byte <(LAHSB0), <(LAHSB1), <(LAHSB2), <(LAHSB3)
+        .assert <(LAHSB0) = <(LAHSB1) && <(LAHSB0) = <(LAHSB2) && <(LAHSB0) = <(LAHSB3), error, "LAHSB lows"
 lahsh:  .byte >(LAHSB0), >(LAHSB1), >(LAHSB2), >(LAHSB3)
-enthl:  .byte <(ENTB0), <(ENTB1), <(ENTB2), <(ENTB3)
+        .assert <(ENTB0) = <(ENTB1) && <(ENTB0) = <(ENTB2) && <(ENTB0) = <(ENTB3), error, "ENTB lows"
 enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3)
 
 ; A column a rung (X = ri) splits, its top level: from mx down to the floor,
@@ -2374,7 +2364,9 @@ fr:     stx bpos                   ; (C set) lines Y .. t-1, a run
         ldy fwu
         jsr run2
         ldy fwu
-fr_h:   lda LAHSB0,y               ; (sethalf) the walker from t
+        lda LAH,y                  ; the walker from t (rare: not sethalf's)
+        clc
+        adc scrh
         sta zp_+1
         lda RSMT,y
         sta rsm

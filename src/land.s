@@ -1046,13 +1046,7 @@ su_bot:   lda ns                     ; the bottom row's line
 ; The bottom row (BX, BY 0..np+1) into (bota): each segment as points.py's
 ; bresenham_ys, one y a pixel.  A shallow segment (|dy| < dx): the error kept
 ; in Y biased by 256 - 2dx, so the carry is the step; y in tyv.
-traceb: lda bota+1
-        sta tr_st+2
-        sta tg_st+2
-        sta fl_0+2
-        sta fl_1+2
-        sta fl_2+2
-        sta fl_3+2
+traceb: lda bota+1                  ; (the rare ways' stores: (bota),y)
         sta jvb+2
         clc                        ; the fills' entries: TENH4 or TENH5
         adc #>TENH4-4
@@ -1096,6 +1090,7 @@ traceb: lda bota+1
         sta tyv
         ldx #0
         beq t_seg
+        .res 18                    ; (keeps the code after in place)
 t_end:  ldx #0                     ; the row's end: the run pending, to the end
         jmp t_fl                   ; (back by t_fr's RTS)
 t_stj:  jmp t_steep                ; (in reach; Y: INC or DEC)
@@ -1236,22 +1231,18 @@ tx_h:   lda TENH4,y
         lda tyv
 tx_j:   jmp t_back
 t_flf:  ldy #1                     ; (longer)
-t_flo:  stx fe                     ; (longer: 4 at a time, from tcnt to fe)
-        ldx tcnt
-t_run:  lda tyv                    ; (bota) from X to (not including) fe (> X):
-fl_0:   sta ROWB,x                 ; A, 4 at a time (up to 3 more: the next run's,
-fl_1:   sta ROWB+1,x               ; or the next segment's, put right after)
-fl_2:   sta ROWB+2,x
-fl_3:   sta ROWB+3,x
-        inx
-        inx
-        inx
-        inx
-        cpx #4                     ; (wrapped: done)
-        bcc :+
-        cpx fe
-        bcc fl_0
-:       ldx fe
+t_flo:  stx fe                     ; (longer: from tcnt to fe, (bota) from tcnt
+        sty tdx2                   ; to (not including) fe; 0: the row's end)
+        ldy tcnt
+        lda tyv
+:       sta (bota),y
+        iny
+        cpy fe
+        bne :-
+        ldy tdx2
+        jmp t_fx
+        .res 10                    ; (keeps the code after in place)
+t_fx:   ldx fe
         clc                        ; (t_inc's)
 t_back:                            ; (the fills' way back: X the run's end)
 t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
@@ -1334,8 +1325,10 @@ t_gl:    inx
         pla
         jmp :-
 :       sta terr
+        txa
+        tay
         lda tyy
-tg_st:  sta ROWB,x
+        sta (bota),y
         cpx tx1
         bne t_gl
         beq t_ox
@@ -1404,8 +1397,12 @@ tr_l:   inx                        ; X: the pixel, Y: the biased error, C clear
         adc tdy2
         tay
         bcs tr_s
-tr_y:   lda tyv
-tr_st:  sta ROWB,x
+tr_y:   sty tyy
+        txa
+        tay
+        lda tyv
+        sta (bota),y
+        ldy tyy
         cpx tx1
         bne tr_l
         rts

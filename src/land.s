@@ -1516,8 +1516,7 @@ rg_rz:    cmp #1
         sta RTPH,x
         jmp rfastr                 ; (bank 4: a <= RFA, D < 16; else back,
 rg_lft:   sta LO,x                   ; leaning left: xb .. xt-1
-        eor #$FF                   ; RTP = alloc - LO - 1
-        clc
+        eor #$FF                   ; RTP = alloc - LO - 1 (C clear: bcc)
         adc alloc
         sta RTPL,x
         lda alloc+1

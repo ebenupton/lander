@@ -1,84 +1,132 @@
 #!/usr/bin/env python3
-"""Reference for the landscape: a Lander-style tile map, seen from an elevated camera
-with no yaw, projected into rows of points and filled a strip at a time (strip.py).
+"""The landscape: Lander's height map seen from a camera above and behind the ship,
+projected into rows of screen points that frame.py fills a strip at a time.  Every
+quantity is an integer computed as land.s computes it; tools/landgen.py tabulates
+the functions here for sideways RAM, and test/landsoak.py checks land.s's rows and
+pixels against project and frame.draw.
 
-Everything is integer, as the BBC will compute it:
-  - the map: MAP x MAP tiles (wrapping), each corner a height 0..HMAX (in 1/HSCALE
-    tile) from Lander's sum of sines, softened, and each tile a shade;
-  - the camera: (cx, cz) in 8.8 tiles, at height CAMH tiles, looking along +z;
-  - the grid: columns at whole tiles inside cx +- W, plus the two edges pinned at
-    exactly cx - W and cx + W; rows at whole tiles between cz + ZNEAR and cz + ZFAR,
-    plus those two pinned (virus's scheme: the landscape's outline on screen is then a
-    fixed trapezoid, no screen clipping); a pinned corner's height is interpolated;
-  - a row at depth d (8.8 tiles from the camera) has R = recip(d) = F / d pixels per
-    tile (8.8); a corner at x (8.8, from the camera) and height h projects to
-        sx = 128 + x * R          sy = HORIZON + (CAMH * HSCALE - h) * R / HSCALE
-    (each rounded as the 6502 does: see project());
-  - the strips: from the far row to the near one, each the band between a row and the
-    next nearer, filled as strip.py (dithers by tile colour).
+Coordinates and units:
+  - the map is MAP x MAP tiles and wraps; corner (x, z) has a height 0..HMAX in
+    height units, HSCALE to a tile (heightmap); tile (i, j) lies between corners i
+    and i + 1 across and j and j + 1 deep and has one colour (colour);
+  - a map position is in 8.8 fixed point tiles (256 to a tile): the camera is at
+    (cx, cz), xt = cx >> 8 its tile and fx = cx & 255 its fraction; its line of
+    sight is at map x (cx + 128) / 256 and runs along +z; it is CAMH height units
+    above the ground ZSHIP tiles ahead of it (ground), plus a raise e of 0..EMAX;
+  - a row is the corners at one map z, which is depth d = z * 256 - cz ahead of
+    the camera (8.8 tiles); it has R = recip(d) pixels a tile (8.8); a corner x
+    tiles across (8.8, from the line of sight) and h units high projects to
+        sx = XC + x R / 256                       (rounded)
+        sy = HORIZON + (CAMH + hg - h) R / (HSCALE 256) + ey    (rounded, as project)
+    with hg the ground's height under the ship and ey the raise's lines;
+  - the screen is 256 x 160 (points.W, H): x 0..255 left to right, y down.
 
-    python3 proto/land.py [frames]   renders a pan (land_NNN.png), checks every strip's
-                                     guarantees (strip.ok), and prints the statistics
+A frame's rows (project), far to near: the far clip plane at ZFCLIP tiles, the
+corner rows nearer than it, and the near clip plane at ZCLIP tiles; 11 points each
+(NX - 2 XSKIP), the end points on the x clip planes at -XCLIP and +XCLIP.  The
+rows between clip planes are at whole-tile depths, so the frame's set of depths is
+fixed by fz alone; each row traces to one y a pixel because its segments are
+shallow (the largest height step between adjacent corners on this map is 6 units
+against a corner gap of 16 pixels or more, and an end segment, cut short by its x
+clip plane, keeps its corners' slope); rung i joins point i of a row to point i of
+the next.  land.s relies on strip.py's guarantees holding for every
+consecutive pair of rows (main here and frame.py's report the strips failing them:
+none on this map), and draws nothing outside the strips.
+
+    python3 proto/land.py [frames]   pans 3/16 tile across and 5/16 deep a frame,
+                                     writes proto/land_000.png .. land_003.png (the
+                                     first four frames as the BBC shows them) and
+                                     prints the strips failing strip.ok
 """
-import sys
 import math
+import os
+import sys
+
 import numpy as np
 
 import points as P
 import strip as S
+import swatch35 as SW
 
-MAP = 64                  # tiles a side (the map wraps)
+# The map
+MAP = 64                  # tiles a side (wrapping): landgen's MAP table, 64 bytes a row
 HSCALE = 16               # height units a tile
-HMAX = int(__import__('os').environ.get('LAND_HMAX', 15))   # heights 0..HMAX (softened:
-                          # under a tile), sea level 0 (LAND_HMAX: the tests')
-SEA = 0                   # sea level: lower corners are flattened to it
-SEAS = -10 / 12            # the six-sine sum's sea level (39% of corners under it)
-# Lander's camera (Lander.arm): TILES_X = 13, TILES_Z = 11 corners (12 x 10 tiles),
-# the block's corners at z = 20 - fz - j (j 0..10, far to near) and x = -5.5 - fx + i
-# (i 0..12: landscapeOffset's -LANDSCAPE_X, less xCamera's fraction) tiles from the
-# camera (the ship's x: the screen's centre), so the block's edges average -6 and +6, fx, fz the camera's fractions of a tile (the
-# block of whole tiles slides, a tile at a time: no pinned edges, no slivers); its
-# projection on 320 x 256 (MODE 13): 160 + 256 x / z, 64 + 256 y / z.  Here: the
-# same, scaled to 256 wide (focal 204.8), the horizon moved up to fit 160 lines;
-# rows clipped at the screen's edges (the nearest overhang them, as in Lander)
-NX, NZ = 13, 11           # corners across and deep
-ZBACK = 20                # the back row's depth, tiles (fz = 0)
-XSKIP = 1                 # the corner columns not drawn either side (their tiles: the
-                          # left and right columns)
-XCLIP = 1152              # the clip planes in x, 8.8 tiles from the camera either side (4.5)
-ZCLIP = 10                # the near clip plane's depth, tiles (the ship's 15, less 5)
-                          # (always on)
-ZFCLIP = 16               # the far clip plane's depth, tiles (the near's, and 6)
-FON = True                # the far clip on (always)
-ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far three rows)
-CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height above the
-                          # ground at the ship (ZSHIP ahead, at the camera's x), height
-                          # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
-EMAX = 95                 # the camera's most above CAMH that LAND draws: every row below
-                          # the screen there for any ground (-16 + 81 + e > YGND); y's
-                          # held at 254 (past YGND: the bottom clip's; the near clip's + 1
-                          # within a byte)
-ZSHIP = 13                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID 15: here the clip planes' middle)
-PADN = 6                  # the landing pad: tiles 0..PADN-1 in x and z (Lander's: 8)
-PADH = 4                  # its height
-PADC = 19                 # its colour (swatch35: one of each ink, a grey)
-F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
-HORIZON = -16             # screen y of the horizon (above the screen: the far
-                          # row's highest over the lowest ground at YSKY + 1)
-XC = 128                  # screen x of the centre (Lander's 160 of 320)
-YLIM = 156                # the lowest a row's corner goes (proto/frame.py's YGND - 1)
-XL, XR = 4, 252           # the edges the rows are clipped to, either side of XC alike
-                          # (XR the last byte boundary: the land is drawn in x 4..251)
-# the palette (proto/swatch35.py's numbering): the user's picks
+HMAX = int(os.environ.get('LAND_HMAX', 15))     # heights 0..HMAX: the MAP byte's low
+                          # nibble, SYT7's 2 HMAX + 1 entries in a 32-byte row and
+                          # LERPQ7's differences -15..15 (LQOFF) all need HMAX <= 15
+                          # (LAND_HMAX in the environment overrides it; nothing in
+                          # the tree sets it)
+SEA = 0                   # sea level: corners under SEAS are flattened to it
+SEAS = -10 / 12           # the six-sine sum's sea level: 39% of corners are under it
+# The grid: Lander's 13 x 11 corners (12 x 10 tiles).  Corner i (0..12) of a row is
+# at (i - 5) * 256 - fx - 128 across (8.8 tiles from the line of sight) and corner
+# row j (0..10) at depth (ZBACK - j) * 256 - fz.
+NX, NZ = 13, 11           # corners across and deep (land.s: 16 bytes a row for PX, PY;
+                          # landgen's DI0 is the near row's least depth, from NZ)
+ZBACK = 20                # corner row 0's depth, tiles (at fz 0)
+XSKIP = 1                 # corner columns not drawn either side: columns 1..11 are
+                          # (11 points a row: land.s's np, tables.inc's NX)
+XCLIP = 1152              # the x clip planes, 8.8 tiles either side of the line of
+                          # sight (4.5): a row's end points are on them, between
+                          # corners 1 and 2 and corners 10 and 11 (PINL7, PINR7)
+ZCLIP = 10                # the near clip plane's depth, tiles: the last row is on it
+                          # (row j = ZBACK - ZCLIP replaced; land.s's RN, PXN7)
+ZFCLIP = 16               # the far clip plane's depth, tiles: the first row is on it
+                          # (corner row ZBACK - ZFCLIP at fz 0, else the row before
+                          # it replaced; PXF7)
+ZSKIP = 3                 # corner rows 0..ZSKIP-1 are never drawn: row ZSKIP is the
+                          # far clip's at fz not 0.  land.s's first row is ZB =
+                          # ZFCLIP or ZFCLIP + 1 from czs; its ZBACK - ZSKIP is the
+                          # far clip off, a case never taken, and its assert on nr
+assert ZSKIP == ZBACK - ZFCLIP - 1
+# The camera
+CAMH = int(os.environ.get('LAND_CAMH', 96))     # its height above the ground under the
+                          # ship, units (6 tiles; game.s raises it by CAME; LAND_CAMH
+                          # in the environment overrides it; nothing in the tree sets
+                          # it)
+EMAX = 95                 # the most the camera is raised (e, game.s's CAME): at EMAX
+                          # the far row's highest possible corner (ground 0, height
+                          # HMAX) is at line HORIZON + 81 + 95 = 160, past YGND, so
+                          # every row is below the screen whatever the ground
+ZSHIP = 13                # the ship's depth, tiles: the ground under it sets the
+                          # camera's height (ground, land.s's hgnd); the clip planes'
+                          # middle; game.s puts the camera ZSHIP behind the ship and
+                          # gamegen's SHYT uses recip(ZSHIP * 256)
+# The landing pad
+PADN = 6                  # tiles 0..PADN-1 across and deep (corners 0..PADN flat)
+PADH = 4                  # its height, units (game.s spawns the ship on it)
+PADC = 19                 # its colour: swatch35 entry 19, K1C1M1Y1, a grey (gamegen's
+                          # map marker)
+# The projection
+F256 = 65536              # the focal length, 8.8 pixels: 256 pixels (Lander's, there
+                          # on a 320-pixel screen: the view here is narrower)
+HORIZON = -16             # the horizon's screen line, above the screen: the far row
+                          # (depth 16 tiles, R 4096) puts its highest possible corner
+                          # (ground 0, height HMAX) at HORIZON + (CAMH - HMAX) = 65,
+                          # frame.py's YSKY + 1, so the sky strip is never empty;
+                          # game.s's ship line is HORIZON + SHYT
+XC = 128                  # the line of sight's screen x (Lander's 160 of 320)
+YLIM = 156                # unused: nothing in the tree reads it and tables.inc does
+                          # not carry it
+XL, XR = 4, 252           # the screen edges rows are clipped to (clip) and frame.py's
+                          # margins stop at: the land is drawn in x 4..251.  With
+                          # these constants no row reaches them (the near row's ends
+                          # are at 13 and 243)
+# The palette: swatch35 entries, yellows and greens for land, cyans for sea
 LAND = [3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
 SEAC = [0, 2, 15, 17]
-STEPS = 16                # camera positions a tile (coarse panning: few distinct depths)
+STEPS = 16                # camera positions a tile: a step is 256 / STEPS in 8.8
+                          # (land.s's cxs, czs are sixteenths)
 
 
 def heightmap():
-    """Lander's altitude formula (six sines; the sum spans +-5 tiles there), the
-    corners below SEAS at sea level (0), the rest scaled to 1..HMAX (softened).  Also
-    each tile's base (Lander's: bits 2 and 3 of the raw altitude, i.e. a hash)."""
+    """The map: (h, base), each a (MAP, MAP) int array indexed [z, x].
+
+    h is Lander's altitude formula, six sines in x and z summing to +-9.6: a corner
+    under SEAS is SEA (0), the rest are 1..HMAX by linear scaling of the sum above
+    SEAS, rounded; then corners 0..PADN both ways are PADH, the landing pad.  base is
+    Lander's tile hash, bits 2 and 3 of its 24-bit altitude (s + 10) / 20 * 2^24;
+    nothing in the build uses it (the tools unpack and drop it)."""
     s = np.zeros((MAP, MAP))
     base = np.zeros((MAP, MAP), dtype=int)
     t = 2 * math.pi / MAP
@@ -87,54 +135,31 @@ def heightmap():
             a, b = x * t, z * t
             s[z, x] = (2 * math.sin(a - 2 * b) + 2 * math.sin(4 * a + 3 * b) + 2 * math.sin(3 * b - 5 * a)
                        + 2 * math.sin(7 * a + 5 * b) + math.sin(5 * a + 11 * b) + math.sin(10 * a + 7 * b))
-            raw = int((s[z, x] + 10) / 20 * (1 << 24))      # Lander's altitude, finely
+            raw = int((s[z, x] + 10) / 20 * (1 << 24))
             base[z, x] = (raw >> 2) & 3
     land = s >= SEAS
     h = np.where(land, 1 + np.round((s - SEAS) / (s.max() - SEAS) * (HMAX - 1)), 0).astype(int)
-    h[:PADN + 1, :PADN + 1] = PADH        # the landing pad: flat (0 <= x, z < PADN)
+    h[:PADN + 1, :PADN + 1] = PADH
     return h, base
 
 
-def lander_rgb(base, bright):
-    """Lander's tile colour: red = bit 2, green = bit 3 (+4), blue 0, plus the
-    brightness in all three, each to 15 (0-1 here)."""
-    r, g, b = (base & 1) * 4, (base >> 1) * 4 + 4, 0
-    return tuple(min(15, c + bright) / 15 for c in (r, g, b))
-
-
-def nearest(rgb, choices):
-    import swatch35 as SW
-    def avg(i):
-        cl = SW.cell(*SW.ALL[i])
-        return [sum(SW.PHYS[v][ch] for v in cl.values()) / 4 / 255 for ch in range(3)]
-    return min(choices, key=lambda i: sum((a - b) ** 2 for a, b in zip(avg(i), rgb)))
-
-
-LANDTAB = [[nearest(lander_rgb(bs, br), LAND) for br in range(16)] for bs in range(4)]
-
-
 def recip(d):
-    """F / d, d in 8.8 tiles: pixels a tile, 8.8 (as a table lookup would give it)."""
+    """Pixels a tile at depth d (8.8 tiles): F256 * 256 / d rounded to the nearest,
+    8.8 (landgen's R7L, R7H by depth)."""
     return (F256 * 256 + d // 2) // d
 
 
 def lerp(a, b, f):
-    """a to b by f/256 (f a multiple of 256/STEPS), rounded as the BBC's table."""
+    """a + (b - a) f / 256, rounded half up: the interpolation land.s does by its
+    LERPQ7 table (lerp(0, b - a, f) by f a multiple of 16, -15 <= b - a <= 15)."""
     return a + (((b - a) * f + 128) >> 8)
 
 
-def corner(hm, x, z):
-    """The height at (x, z), 8.8 tiles: across then down between the map corners
-    (only the pinned edges have fractions)."""
-    xi, xf, zi, zf = x >> 8, x & 255, z >> 8, z & 255
-    g = lambda i, j: int(hm[0][j % MAP, i % MAP])
-    return lerp(lerp(g(xi, zi), g(xi + 1, zi), xf), lerp(g(xi, zi + 1), g(xi + 1, zi + 1), xf), zf)
-
-
 def clip(row):
-    """The row's points clipped to the screen (x XL..XR): the points beyond an edge
-    moved onto it, at the row's y where it crosses it (rounded), so the strips' end
-    rungs there are vertical, along the edge."""
+    """The row's points ((sx, sy, h), x non-decreasing) clipped to x XL..XR: the
+    points left of XL all become (XL, y) with y the row's at x = XL (rounded) and
+    likewise at XR, so a strip's rungs there are vertical, on the edge, and the
+    moved points make zero-length segments (strip.ok allows them)."""
     pts = [list(p) for p in row]
     k = 0
     while pts[k][0] < XL:
@@ -156,9 +181,9 @@ def clip(row):
 
 
 def ground(hm, cx, cz):
-    """The ground's height under the ship: ZSHIP tiles ahead of the camera, at its x
-    (x + 128: corner i's x is (xt - 5 + i) - cx - 0.5 tiles), between the four corners
-    round it (lerp: across, then down)."""
+    """The ground's height under the ship: at map position (cx + 128, cz + ZSHIP *
+    256), on the line of sight ZSHIP tiles ahead, lerped across then down between
+    the four corners round it (land.s's hgnd)."""
     x, z = cx + 128, cz + ZSHIP * 256
     xi, xf, zi, zf = x >> 8, x & 255, z >> 8, z & 255
     g = lambda i, j: int(hm[0][j % MAP, i % MAP])
@@ -166,34 +191,44 @@ def ground(hm, cx, cz):
 
 
 def project(hm, cx, cz, e=0):
-    """The rows, far to near, each (its tile z, [(sx, sy, height)] across); and the
-    columns' tile x (each point's: box i is tile xs[i]).  Camera (cx, cz) in 8.8
-    tiles.  Clipped in x at -XCLIP and +XCLIP tiles from the camera: a row's points
-    the edge there (its height between corners 1 and 2, or 10 and 11, by fx, as
-    lerp), corners 2..10 between (at fx 0, corner 10 is on the right edge: the edge
-    repeats it).  Clipped in z at ZCLIP (near: its row between the corner rows
-    either side, by 1 - fz, a line or more below the row before) and, if FON, at
-    ZFCLIP (far: likewise, a line or more above the row after; at fz 0 a corner row
-    is on it).  e: the camera that much higher (height units, 0..EMAX: the ship's
-    camera), each row's y's lower by (e (r >> 5) + 64) >> 7."""
+    """The frame's rows for the camera at (cx, cz), 8.8 tiles, raised e units
+    (0..EMAX).  Returns (xs, rows): xs the map x of the 11 drawn columns, xt - 4 ..
+    xt + 6; rows, far to near, each (z, points) with z the row's map z and points
+    eleven (sx, sy, h), screen x and y and the height.  Box i of the strip between
+    two rows is tile (xs[i], the nearer row's z).
+
+    The rows are corner rows j from the far clip's to ZBACK - ZCLIP, 8 of them when
+    fz is not 0 and 7 when it is:
+      - the last is on the near clip plane: R = recip(ZCLIP * 256) and its heights
+        lerped from the corner row before to its own by 1 - fz;
+      - when fz is not 0 the first is on the far clip plane: R = recip(ZFCLIP *
+        256) and its heights lerped from its own corner row to the next by 1 - fz;
+        at fz 0 corner row ZBACK - ZFCLIP is on the plane as it stands;
+      - a row's end points are on the x clip planes, -XCLIP and +XCLIP, with
+        heights lerped between corners 1 and 2, and 10 and 11, by fx (at fx 0 the
+        ends coincide with corners 1 and 10); corners 2..10 lie between.
+    Each y is rounded (half up) as the formula above with ey = (e (R >> 5) + 64) >> 7
+    (land.s's eyrow) and held at 254 at most; the row is clipped to XL..XR; then the near
+    clip's row is held a line or more below the row before it (255 at most) and the
+    far clip's row a line or more above the row after it, so those rungs go down
+    however the heights are interpolated."""
     xt, zt, fx, fz = cx >> 8, cz >> 8, cx & 255, cz & 255
-    xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]      # corners 1..11
-    hg = ground(hm, cx, cz)               # (the camera: CAMH above it)
+    xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]
+    hg = ground(hm, cx, cz)
     rows = []
-    jc = ZBACK - ZCLIP                    # (the corner row the near clip replaces)
-    jp = ZBACK - ZFCLIP                   # (the corner row on the far clip plane at fz 0)
-    jf = (jp - 1 if fz else jp) if FON else ZSKIP   # (the first: the far clip's, from it
-                                                    # and the next, at fz not 0)
+    jc = ZBACK - ZCLIP                    # the corner row the near clip plane replaces
+    jp = ZBACK - ZFCLIP                   # the corner row on the far clip plane at fz 0
+    jf = jp - 1 if fz else jp             # the first row
     for j in range(jf, jc + 1):
         z = zt + ZBACK - j
         r = recip((z << 8) - cz)
         hs = [int(hm[0][z % MAP, x % MAP]) for x in xs]
-        if j == jc:                       # on the near clip plane: from the row
-            r = recip(ZCLIP << 8)         # before by 1 - fz
+        if j == jc:
+            r = recip(ZCLIP << 8)
             hp = [int(hm[0][(z + 1) % MAP, x % MAP]) for x in xs]
             hs = [lerp(a, b, 256 - fz) for a, b in zip(hp, hs)]
-        elif FON and fz and j == jf:      # on the far clip plane: to the row after by
-            r = recip(ZFCLIP << 8)        # 1 - fz
+        elif fz and j == jf:
+            r = recip(ZFCLIP << 8)
             hn = [int(hm[0][(z - 1) % MAP, x % MAP]) for x in xs]
             hs = [lerp(a, b, 256 - fz) for a, b in zip(hs, hn)]
         pts = [(-XCLIP, lerp(hs[0], hs[1], fx))]
@@ -206,30 +241,37 @@ def project(hm, cx, cz, e=0):
             sy = HORIZON + (((CAMH + hg - h) * r + HSCALE * 128) // (HSCALE * 256)) + ey
             row.append((sx, min(254, sy), h))
         row = clip(row)
-        if j == jc:                       # (at least a line below the row before: the
-            row = [(x, min(255, max(y, py + 1)), h) # strip between can be thin)
+        if j == jc:
+            row = [(x, min(255, max(y, py + 1)), h)
                    for (x, y, h), (_, py, _) in zip(row, rows[-1][1])]
-        if FON and fz and j == jf + 1:    # (the far clip's: a line or more above this)
+        if fz and j == jf + 1:
             rows[0] = (rows[0][0], [(x, min(y, ny - 1), h)
                                     for (x, y, h), (_, ny, _) in zip(rows[0][1], row)])
         rows.append((z, row))
     return xs, rows
 
 
-TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC's map: 4 bits a tile)
-
-
-TILERND2 = np.random.default_rng(54321).integers(0, 16, (MAP, MAP))  # (a second pick)
-LIGHT = 0.5               # the lighting's weight against the random pick (gentle: half),
-LIGHTL = 0.65             # and the light/dark axis's (from the left, as the ship's)
-SLOPE1 = 6                # a slope (sixteenths a tile) that takes the light from middling
-                          # to the dark or light end
+# The tiles' colours.  Each tile has two 4-bit random picks; TILERND is also the
+# MAP byte's high nibble (landgen).  A land tile's colour is the LAND entry nearest
+# a target on two axes, each a weighted mean of a pick and the lighting:
+#   yellow:  LIGHT  of 1 - its mean height (yellow low, green high), the rest TILERND
+#   light:   LIGHTL of how its left corners stand above its right (lit from the
+#            left: the mean of its left corners' heights less its right's, in
+#            units, dark at +SLOPE1 / 2 and above, light at -SLOPE1 / 2 and below),
+#            the rest TILERND2
+# both spread evenly by rank over the map's land tiles so the whole palette is used.
+# The 6502 sees only the result, bank 5's CMAPE, CMAPO (landgen.build2).
+TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))
+TILERND2 = np.random.default_rng(54321).integers(0, 16, (MAP, MAP))
+LIGHT = 0.5
+LIGHTL = 0.65
+SLOPE1 = 6
 
 
 def _land_axes():
-    """Each land colour's place on two axes, as ranks 0..1 among them: yellow (its
-    average red over red and green: yellow 1, green 0) and light (its luminance)."""
-    import swatch35 as SW
+    """Each LAND entry's place on the two axes as ranks 0..1 among them: yellow (its
+    mean red over red plus green) and light (its luminance), from its dither's
+    average colour."""
     def avg(e):
         cl = SW.cell(*SW.ALL[e])
         return [sum(SW.PHYS[v][ch] for v in cl.values()) / 4 for ch in range(3)]
@@ -243,16 +285,16 @@ LANDAX = _land_axes()
 
 
 def _targets(hm):
-    """Each land tile's targets on the two axes (the docstring of colour), each
-    spread evenly over 0..1 by rank across the map's land tiles (so the palette is
-    all used); None for sea."""
-    h, base = hm
+    """{(i, j): (yellow, light)} for every land tile (one with a corner above SEA),
+    each axis the weighted mean above, then replaced by its rank among the land
+    tiles scaled to 0..1 (ties broken by position)."""
+    h, _ = hm
     g = lambda x, z: int(h[z % MAP, x % MAP])
     raw = {}
     for j in range(MAP):
         for i in range(MAP):
             if all(g(i + dx, j + dz) == SEA for dx in (0, 1) for dz in (0, 1)):
-                continue                  # (sea: all four corners at sea level)
+                continue
             hs = (g(i, j), g(i + 1, j), g(i, j + 1), g(i + 1, j + 1))
             alt = min(1.0, max(0.0, (sum(hs) / 4 - SEA) / (HMAX - SEA)))
             slope = ((hs[0] + hs[2]) - (hs[1] + hs[3])) / 2
@@ -268,17 +310,14 @@ def _targets(hm):
     return out
 
 
-_TGT = {}
+_TGT = {}                 # _targets of the last map seen, by id(hm[0])
 
 
 def colour(hm, i, j, row, nrows):
-    """A tile's palette entry (swatch35 numbering), fixed per tile (the BBC's map
-    holds it).  Sea (all four corners at sea level: flat): a random pick from the
-    sea set.  Land: lit, gently -- the land colour nearest a target on two axes,
-    each half a random pick (TILERND, TILERND2) and half the lighting: yellow low
-    down, green high up (its corners' mean height); darker where it slopes down to
-    the right, lighter down to the left (its left corners' heights less its right's);
-    each axis spread evenly by rank over the map's land tiles."""
+    """Tile (i, j)'s palette entry (swatch35 numbering), fixed per tile: PADC on the
+    landing pad; for a sea tile (all four corners at SEA) the SEAC entry picked by
+    TILERND; for a land tile the LAND entry nearest its _targets point in the plane
+    of LANDAX.  row and nrows are accepted and ignored."""
     key = id(hm[0])
     if key not in _TGT:
         _TGT.clear()
@@ -293,7 +332,9 @@ def colour(hm, i, j, row, nrows):
 
 
 def frame(hm, cx, cz):
-    """The frame (palette entry + 1 by pixel, 0 black) and the strips' guarantees."""
+    """The land strips alone on black: (img, bad, n) with img (H, W) uint8, palette
+    entry + 1 by pixel and 0 black; bad the strips failing strip.ok, which are not
+    drawn; n the strips.  No sky, ground or margins (frame.py adds those)."""
     xs, rows = project(hm, cx, cz)
     img = np.zeros((P.H, P.W), dtype=np.uint8)
     bad = 0
@@ -310,9 +351,9 @@ def frame(hm, cx, cz):
 
 
 def render(img, scale=4):
-    """img (swatch35 entry + 1 by pixel, 0 black) as the BBC shows it: each pixel its
-    dither's ink (MODE 1's pixels are near enough square)."""
-    import swatch35 as SW
+    """img (palette entry + 1 by pixel, 0 black) as the BBC shows it, a PIL image
+    scale times larger: each pixel the ink its entry's dither puts at (x & 1, y & 1)
+    (MODE 1's pixels are near enough square)."""
     out = np.zeros((P.H, P.W, 3), dtype=np.uint8)
     cells = [None] + [SW.cell(*t) for t in SW.ALL]
     for y in range(P.H):
@@ -321,8 +362,7 @@ def render(img, scale=4):
             if e:
                 out[y, x] = SW.PHYS[cells[e][(x & 1, y & 1)]]
     from PIL import Image
-    im = Image.fromarray(out).resize((P.W * scale, P.H * scale), Image.NEAREST)
-    return im
+    return Image.fromarray(out).resize((P.W * scale, P.H * scale), Image.NEAREST)
 
 
 def main():
@@ -334,13 +374,10 @@ def main():
         img, b, n = frame(hm, cx, cz)
         bad += b
         if f < 4:
-            render(img).save(f'land_{f:03d}.png')
+            render(img).save(os.path.join(P.DIR, f'land_{f:03d}.png'))
         cx += 256 // STEPS * 3
         cz += 256 // STEPS * 5
     print(f'{frames} frames, {bad} strips failing the guarantees')
-    print('land colour by base (rows) and brightness 0..15:')
-    for r in LANDTAB:
-        print('  ', r)
 
 
 if __name__ == '__main__':

@@ -1,49 +1,83 @@
 #!/usr/bin/env python3
-"""The whole frame as the BBC draws it, into a double buffer: land.py's strips, each
-strip widened by a black margin box at both ends (to a byte boundary M or more pixels
-out), a black sky strip above the
-far row (from a flat row at YSKY) and a black ground strip below the near row (to a
-flat row at YGND), so a frame overwrites everything the frame before last left in its
-buffer, and the bottom edge is exact.  Nothing outside those strips is ever drawn.
+"""A frame as the BBC draws it: land.py's rows made into strips with black margins,
+a sky strip above and a ground strip below, each filled by strip.py.
 
-    python3 proto/frame.py [frames] [M]   pans at random, a step a frame, through both
-                                          buffers; checks each drawn buffer against the
-                                          frame alone on black, and every strip's
-                                          guarantees; frame_NNN.png
+The strips, top to bottom (strips_of): the sky, from a flat row at line YSKY down to
+the far row; the land, one between each pair of consecutive rows; the ground, from
+the near row down to a row whose every point is at YGND (the screen's last line) or
+a line below the near row's point above it, whichever is lower: flat at YGND unless
+the near row passes it.  Every strip gets a margin box at each
+end: its rows are extended flat to a byte boundary M or more pixels beyond the
+bottom row's end points (the bottom row being the wider), within XL..XR, and the
+boxes there are black.  Since consecutive strips share a row, the sky row is flat
+and the ground row is on or past the screen's last line, the strips tile the land's
+extent without gaps and nothing outside them is touched (strip.py).
+
+The screen is double buffered and a frame is drawn over what the frame before last
+left in its buffer.  The margins are what make that safe in this model: a frame's
+strips cover everything a frame two steps of the pan away drew, which main checks
+by drawing into two buffers in turn and comparing each with the frame drawn alone
+on black.  land.s draws the same strips with margins only to the byte boundary and
+instead blacks what the same screen's last frame drew outside them, from its TOPS
+and BOTS records: above each column's new top (record), below its new bottom
+(nearpost) and the columns the land has left (gone); on black the two agree, which
+is what test/landsoak.py compares byte for byte.
+
+A strip wholly below the screen (every point past YGND: the camera raised, the
+rows held at 254) is dropped before it is counted or drawn: it has no pixel on the
+screen, and with both rows held at 254 its rungs do not go down, so it would fail
+strip.ok.  YSKY and YGND are tables.inc's; lines YSKY..YGND are the 96 the land can
+occupy.
+
+    python3 proto/frame.py [frames] [M]   pans at random, STEP sixteenths of a tile
+                                          at most each way a frame, jumping every 40
+                                          frames; counts the strips failing strip.ok
+                                          and the frames whose buffer differs from
+                                          the frame alone; writes proto/frame_000.png
+                                          and frame_001.png.  A jump leaves the old
+                                          camera's land in both buffers wherever the
+                                          new strips do not reach, and it stays until
+                                          the pan covers it, so the frames counted
+                                          wrong after a jump (the default 300 frames
+                                          count 56, all after the jump at frame 240)
+                                          are not the margins failing: with the
+                                          buffers cleared at each jump none is wrong
 """
+import os
 import sys
+
 import numpy as np
 
 import land as L
 import points as P
 import strip as S
 
-STEP = 1                  # the most steps a frame the pan moves
-M = 8                    # the margin boxes' width, pixels
-YSKY, YGND = 64, 159      # the sky's and the ground's flat rows (YGND: the screen's last)
-BLACK = 34                # swatch35's K4
+STEP = 1                  # main's pan: the most sixteenths of a tile a frame, each way
+M = 8                     # the margin boxes' least width, pixels
+YSKY, YGND = 64, 159      # the sky strip's top line and the ground strip's bottom
+BLACK = 34                # swatch35's K4, the margins' and sky's entry (drawn as 0)
 
 
 def strips_of(hm, cx, cz, m=M, e=0):
-    """The frame's strips, top to bottom, each (top points, bottom points, box colours):
-    the sky, land.py's, the ground.  Each strip gets its own margin points: a vertical
-    rung either side, on a byte boundary (so no column has its pixels split by one), m
-    or more pixels beyond the strip's bottom row (the wider), each row extended flat to
-    them; the margin boxes black."""
+    """The frame's strips, top to bottom, each (top points, bottom points, box
+    entries) for strip.py: the sky, the land strips, the ground, with the margins
+    above (m the least margin).  Each row has 13 points: the margin points and
+    land.project's 11; the entries are BLACK, the 10 tiles' (land.colour: box i is
+    tile (xs[i], the nearer row's z)) or BLACK for the sky and ground, and BLACK.
+    Camera (cx, cz) in 8.8 tiles, raised e."""
     xs, rows = L.project(hm, cx, cz, e)
     pts = [[(sx, sy) for sx, sy, _ in row] for _, row in rows]
     n = len(xs) - 1
     cols = [[L.colour(hm, x, rows[k + 1][0], 0, 0) for x in xs[:-1]]
             for k in range(len(rows) - 1)]
     sky = [(x, YSKY) for x, _ in pts[0]]
-    gnd = [(x, max(YGND, y + 1)) for x, y in pts[-1]]      # (a line or more below: past
-                                                           # the screen's bottom, clipped)
+    gnd = [(x, max(YGND, y + 1)) for x, y in pts[-1]]
     pairs = [(sky, pts[0], [BLACK] * n)] + list(zip(pts, pts[1:], cols)) + [(pts[-1], gnd, [BLACK] * n)]
     out = []
     for t, b, c in pairs:
-        if min(y for _, y in t + b) > YGND:      # (wholly below the screen: the camera
-            continue                             # raised, y's held at 254)
-        xl = max(L.XL, (b[0][0] - m) & ~3)       # (within the clip)
+        if min(y for _, y in t + b) > YGND:
+            continue
+        xl = max(L.XL, (b[0][0] - m) & ~3)
         xr = min(L.XR, (b[-1][0] + m + 3) & ~3)
         out.append(([(xl, t[0][1])] + t + [(xr, t[-1][1])],
                     [(xl, b[0][1])] + b + [(xr, b[-1][1])],
@@ -52,7 +86,8 @@ def strips_of(hm, cx, cz, m=M, e=0):
 
 
 def draw(img, hm, cx, cz, m=M, e=0):
-    """Draw the frame over img (palette entry + 1 by pixel, black 0); returns the strips failing the guarantees."""
+    """Draw the frame over img ((H, W) uint8: palette entry + 1 by pixel, 0 black),
+    every strip whether or not it passes strip.ok.  Returns the strips failing it."""
     bad = 0
     for t, b, c in strips_of(hm, cx, cz, m, e):
         if not S.ok(t, b):
@@ -71,7 +106,7 @@ def main():
     cx, cz = 40 << 8, 30 << 8
     bad = wrong = 0
     for f in range(frames):
-        if f % 40 == 0:                       # and now and then a jump
+        if f % 40 == 0:
             cx, cz = int(rng.integers(0, 1024)) * 16, int(rng.integers(0, 1024)) * 16
         else:
             cx += 16 * int(rng.integers(-STEP, STEP + 1))
@@ -80,10 +115,12 @@ def main():
         bad += draw(buf, hm, cx, cz, m)
         ref = np.zeros_like(buf)
         draw(ref, hm, cx, cz, m)
-        if f % 40 > 1 and not (buf == ref).all():
-            wrong += 1
+        if f % 40 > 1 and not (buf == ref).all():      # (the two frames after a jump
+            wrong += 1                                 # draw over the old camera's
+                                                       # land; what they leave of it
+                                                       # can count later, see above)
         if f < 2:
-            L.render(buf).save(f'frame_{f:03d}.png')
+            L.render(buf).save(os.path.join(P.DIR, f'frame_{f:03d}.png'))
     print(f'{frames} frames, margin {m}: {bad} strips failing the guarantees, '
           f'{wrong} frames wrong in their buffer')
 

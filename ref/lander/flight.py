@@ -1,96 +1,102 @@
 #!/usr/bin/env python3
-"""
-Lander (Archimedes, 1987) flight model -- integer reference implementation.
+"""Lander's flight model, transcribed from Lander.arm (Mark Moxon's reconstruction
+of David Braben's Lander, Acorn Archimedes, 1987: https://lander.bbcelite.com,
+github.com/markmoxon/lander-source-code-acorn-archimedes).
 
-Faithful re-implementation of the player-ship physics from Mark Moxon's
-reconstructed source (https://lander.bbcelite.com/, Lander.arm):
+step() is one main-loop iteration of the player's ship:
+    MoveAndDrawPlayer part 1   mouse -> polar -> damped pitch and direction -> matrix
+    MoveAndDrawPlayer part 2   drag, thrust, integration, gravity
+    MoveAndDrawPlayer part 3   object collision; LandOnLaunchpad
+    DrawObject part 2          the crash test (a vertex on or below its shadow)
+    DrawFuelLevel              the fuel burn
+with GetMouseInPolarCoordinates, CalculateRotationMatrix, MultiplyVectorByMatrix
+and GetDotProduct (the shift-and-add multiply), GetLandscapeAltitude,
+GetLandscapeBelowVertex, ProjectVertexOntoScreen (its main case), and the initial
+values from StartNewGame, PlacePlayerOnLaunchpad and PrintCurrentScore (gravity
+by score).  Bullets, exhaust particles and the object map are not transcribed.
 
-  MoveAndDrawPlayer parts 1-3  .../source/main/subroutine/moveanddrawplayer_part_1_of_5.html (..part_3_of_5)
-  GetMouseInPolarCoordinates   .../source/main/subroutine/getmouseinpolarcoordinates_part_1_of_2.html
-  CalculateRotationMatrix      .../source/main/subroutine/calculaterotationmatrix.html
-  GetLandscapeAltitude         .../source/main/subroutine/getlandscapealtitude.html
-  LandOnLaunchpad              .../source/main/subroutine/landonlaunchpad.html
-  DrawObject part 2 (crash)    .../source/main/subroutine/drawobject_part_2_of_5.html
-  DrawFuelLevel (fuel burn)    .../source/main/subroutine/drawfuellevel.html
-  StartNewGame / PlacePlayerOnLaunchpad / PrintCurrentScore (initial values,
-  gravity levels)
+Units are Lander's, 32-bit two's complement:
+    position     TILE_SIZE = 2^24 a tile; x right, y down (altitude is -y), z into
+                 the screen; the launchpad is 0 <= x, z < 8 tiles
+    velocity     the same, a main-loop iteration (a frame)
+    angle        2^32 a circle (2^30 = 90 degrees); the sine table has 1024 entries
+    unit vector  2^31 = 1.0 (sinTable[n] = (2^31 - 1) sin(2 pi n / 1024))
+Lander's multiplies keep only bits 30..23 of one operand; mul_lander() reproduces
+them.  The tables are generated from the formulas in Lander.arm's comments; they
+differ from its EQUDs by at most 3 (sine) and 1 (arctan, square root) in 2^31.
 
-All quantities are 32-bit two's-complement as on the ARM:
-  * position:   1 tile = 2^24.  x right, y DOWN (smaller y = higher), z into
-                the screen.  The launchpad occupies 0 <= x,z < 8 tiles.
-  * velocity:   same units, per main-loop iteration ("frame").
-  * angles:     full circle = 2^32 (so 2^30 = 90 degrees).
-  * unit vecs:  1.0 = 2^31 (sine table entries are (2^31-1)*sin).
-The ARM multiplies used by Lander (shift-and-add) only use 8 bits of one
-operand; mul_lander() reproduces that exactly.
-
-step(state, inputs) advances one frame and returns a list of events.
+The game: src/game.s follows this model with the constants scaled for one step a
+frame at 10 frames a second (see its header).  Nothing imports this file; run it
+for the self-test.
 """
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-# ---------------------------------------------------------------- constants
+from ship import VERTICES as SHIP_VERTICES
+
+# Lander.arm's configuration constants.
 TILE_SIZE = 0x01000000
 LAUNCHPAD_ALTITUDE = 0x03500000
 SEA_LEVEL = 0x05500000
-LANDING_SPEED = 0x00200000          # |vx|+|vy|+|vz| must be below this
-UNDERCARRIAGE_Y = 0x00640000        # centre of ship -> bottom (0.39 tiles)
+LANDING_SPEED = 0x00200000          # |vx| + |vy| + |vz| must be below this to land
+UNDERCARRIAGE_Y = 0x00640000        # ship's centre to its bottom: 0.390625 tiles
 LAUNCHPAD_Y = LAUNCHPAD_ALTITUDE - UNDERCARRIAGE_Y
 LAUNCHPAD_SIZE = TILE_SIZE * 8
 HIGHEST_ALTITUDE = TILE_SIZE * 52   # engines cut when y < -this
-SAFE_HEIGHT = TILE_SIZE * 3 // 2    # object-collision check band
+SAFE_HEIGHT = TILE_SIZE * 3 // 2    # objects are checked for within this of the ground
 LAND_MID_HEIGHT = TILE_SIZE * 5
 TILES_Z = 11
-CAMERA_PLAYER_Z = (TILES_Z - 6) * TILE_SIZE      # 5 tiles
+CAMERA_PLAYER_Z = (TILES_Z - 6) * TILE_SIZE                # 5 tiles
 LANDSCAPE_Z = TILE_SIZE * (TILES_Z - 1) + 10 * TILE_SIZE   # 20 tiles
-LANDSCAPE_Z_MID = LANDSCAPE_Z - CAMERA_PLAYER_Z  # 15 tiles: ship depth
+LANDSCAPE_Z_MID = LANDSCAPE_Z - CAMERA_PLAYER_Z            # 15 tiles: the ship's depth
 
-GRAVITY_LEVELS = (0x30000, 0x50000, 0x70000)  # score <1024, >=1024, >=1488
-INITIAL_FUEL = 3413
-FUEL_REFUEL_STEP = 0x20             # per frame while sat on the pad
-FUEL_REFUEL_LIMIT = 0x1400          # store only if result < this
-ANGLE_STEP_CAP = 0x30000000         # max |target - current| used per frame
+GRAVITY_LEVELS = (0x30000, 0x50000, 0x70000)  # score < 1024, >= 1024, >= 1488
+INITIAL_FUEL = 3413                 # initialFuelLevel
+FUEL_REFUEL_STEP = 0x20             # a frame, sat on the pad
+FUEL_REFUEL_LIMIT = 0x1400          # stored only while the result is below this
+ANGLE_STEP_CAP = 0x30000000         # the attitude error used a frame: 67.5 degrees
 
-BTN_FIRE, BTN_HOVER, BTN_THRUST = 1, 2, 4   # OS_Mouse %lmr: r=1 m=2 l=4
+BTN_FIRE, BTN_HOVER, BTN_THRUST = 1, 2, 4   # OS_Mouse buttons %lmr
 
 M32 = 0xFFFFFFFF
 
 
 def s32(v):
+    """The 32-bit word v as a signed integer."""
     v &= M32
     return v - (1 << 32) if v & 0x80000000 else v
 
 
 def asr(v, n):
-    return s32(v) >> n          # Python >> on ints is arithmetic
+    """v ASR n."""
+    return s32(v) >> n
 
 
-# ------------------------------------------------------------------- tables
-# Generated with the formulas documented in Lander.arm. These match the
-# hard-coded EQUD tables to within 3 LSB (of 2^31) -- checked against source.
+# sinTable, arctanTable and squareRootTable, from the formulas in their headers.
 SIN = [int((2**31 - 1) * math.sin(2 * math.pi * i / 1024)) for i in range(1024)]
 ATAN = [int((2**31 - 1) / math.pi * math.atan(i / 128)) for i in range(128)]
 SQRT = [int((2**31 - 1) * math.sqrt(i / 1024)) for i in range(1024)]
 
 
 def sin32(angle):
-    """LDR Rx, [sinTable, angle LSR #20] with bits 20,21 cleared."""
+    """sinTable[angle >> 22]: Lander's LDR by angle LSR #20 with bits 20 and 21
+    cleared."""
     return SIN[(angle & M32) >> 22]
 
 
 def cos32(angle):
+    """sin32 of the angle plus a quarter turn."""
     return sin32(angle + 0x40000000)
 
 
-# --------------------------------------------------------- Lander multiply
 def mul_lander(a, b):
-    """Exact model of Lander's shift-and-add multiply (CalculateRotationMatrix
-    rmat1..4, GetDotProduct dotp1..3): result ~= a*b / 2^31, but only bits
-    30..23 of |a| are used (8-bit multiplier), |b| is full precision."""
+    """Lander's shift-and-add multiply (CalculateRotationMatrix rmat1..4,
+    GetDotProduct dotp1..3): a * b / 2^31 with the sign of a * b, |a| truncated to
+    its bits 30..23 (eight bits) and |b| at full precision."""
     neg = (s32(a) < 0) != (s32(b) < 0)
     A = abs(s32(a)) & M32
     B = abs(s32(b)) & M32
-    carry = (A >> 30) & 1                     # MOVS R2, R2, LSL #2
+    carry = (A >> 30) & 1                     # MOVS R2, R2, LSL #2: C = bit 30
     r2 = ((A << 2) & M32) & 0xFE000000 | 0x01000000
     r3 = (B << 1) & M32
     acc = 0
@@ -107,8 +113,8 @@ def mul_lander(a, b):
 
 
 def _square_lander(x):
-    """GetMouseInPolarCoordinates pole5/pole6: x*x / 2^32 using the top 8
-    bits (31..24) of x as the multiplier."""
+    """GetMouseInPolarCoordinates pole5 and pole6: x * x / 2^32 for x >= 0, the
+    multiplier truncated to bits 31..24 of x."""
     carry = (x >> 31) & 1
     r3 = ((x << 1) & M32) & 0xFE000000 | 0x01000000
     r0, acc = x, 0
@@ -124,16 +130,20 @@ def _square_lander(x):
 
 
 def _div8(n, d):
-    """8-bit restoring division n/d for n <= d: floor(256 n / d), max 255."""
+    """GetMouseInPolarCoordinates pole1 and pole3: the eight-step restoring
+    division of n by d, n <= d: floor(256 n / d), 255 at most."""
     if d == 0:
         return 255
     return min(255, (n << 8) // d)
 
 
 def mouse_polar(mx, my):
-    """GetMouseInPolarCoordinates. mx,my = scaled mouse coords (<<22).
-    Returns (distance, angle) with angle = atan2(my, mx) (2^32 = circle) and
-    distance = r/2 (same scale as inputs)."""
+    """GetMouseInPolarCoordinates: (distance, angle) of the scaled mouse offset
+    (mx, my), each a count << 22.  The angle is atan2(my, mx) with 2^32 a circle:
+    the smaller magnitude over the larger through _div8, arctanTable[q >> 1], and
+    the octant folded back in units of 2^29 (45 degrees).  The distance is
+    squareRootTable[(mx^2 + my^2) / 2^54], about half the offset's length in the
+    inputs' scale; it is zero while the offset is under 32 counts."""
     q = 0
     if s32(mx) < 0:
         q ^= 3
@@ -158,29 +168,33 @@ def mouse_polar(mx, my):
 
 
 def rotation_matrix(a, b):
-    """CalculateRotationMatrix(a = shipPitch, b = shipDirection).
-    Returns dict of the nine entries (1.0 = 2^31):
-       nose = (cos a cos b,  sin a, -cos a sin b)
-       roof = (-sin a cos b, cos a,  sin a sin b)   <- exhaust/thrust axis
-       side = (sin b,        0,      cos b)"""
+    """CalculateRotationMatrix(a = shipPitch, b = shipDirection): the nine entries
+    (1.0 = 2^31) by Lander's names,
+        nose = ( cos a cos b,  sin a, -cos a sin b)    model +x
+        roof = (-sin a cos b,  cos a,  sin a sin b)    model +y: the thrust axis
+        side = ( sin b,        0,      cos b)          model +z
+    the products by mul_lander with Lander's choice of truncated operand."""
     sa, sb, ca, cb = sin32(a), sin32(b), cos32(a), cos32(b)
     return dict(
-        xNose=mul_lander(ca, cb), yNose=sa, zNose=-mul_lander(ca, sb),
+        xNose=mul_lander(ca, cb), yNose=sa, zNose=-mul_lander(sb, ca),
         xRoof=-mul_lander(sa, cb), yRoof=ca, zRoof=mul_lander(sa, sb),
         xSide=sb, ySide=0, zSide=cb)
 
 
 def rotate(m, v):
-    """MultiplyVectorByMatrix: matrix entries are the 8-bit-truncated operand."""
+    """MultiplyVectorByMatrix: v.x nose + v.y roof + v.z side, each product by
+    mul_lander with the matrix entry as the truncated operand."""
     x, y, z = v
     return (s32(mul_lander(m['xNose'], x) + mul_lander(m['xRoof'], y) + mul_lander(m['xSide'], z)),
             s32(mul_lander(m['yNose'], x) + mul_lander(m['yRoof'], y) + mul_lander(m['ySide'], z)),
             s32(mul_lander(m['zNose'], x) + mul_lander(m['zRoof'], y) + mul_lander(m['zSide'], z)))
 
 
-# ---------------------------------------------------------------- landscape
 def landscape_altitude(x, z):
-    """GetLandscapeAltitude: y of the ground (bigger = lower), 32-bit coords."""
+    """GetLandscapeAltitude: the ground's y at (x, z), LAND_MID_HEIGHT less six
+    sines of the coordinates (four scaled 1/128, two 1/256: +-5 tiles in all),
+    no lower than SEA_LEVEL (y is down), and LAUNCHPAD_ALTITUDE over the pad
+    (0 <= x, z < 8 tiles, unsigned)."""
     x, z = s32(x), s32(z)
     r0 = asr(sin32(x - 2 * z), 7)
     r0 += asr(sin32(4 * x + 3 * z), 7)
@@ -196,34 +210,23 @@ def landscape_altitude(x, z):
     return alt
 
 
-# ------------------------------------------------- crash test via shadows
 def _project_y(y, z):
-    """ProjectVertexOntoScreen main case (|y| <= z): 64 +/- floor(256|y|/z)."""
+    """ProjectVertexOntoScreen's screen row for a camera-relative (y, z) with
+    |y| <= z: 64 +- floor(256 |y| / z)."""
     q = ((abs(y) << 9) // z) >> 1
     return 64 + q if y >= 0 else 64 - q
 
 
-def _ship_vertices():
-    try:
-        from ship import VERTICES          # same directory
-        return VERTICES
-    except ImportError:                     # fallback copy (tiles * 2^24)
-        return [(0x01000000, 0x500000, 0x800000), (0x01000000, 0x500000, -0x800000),
-                (0, 0xA0000, -0x1333333), (-0xE66666, 0x500000, 0),
-                (0, 0xA0000, 0x1333333), (-0x199999, -0x780000, 0),
-                (0x555555, 0x500000, 0x400000), (0x555555, 0x500000, -0x400000),
-                (-0x333333, 0x500000, 0)]
-
-
-SHIP_VERTICES = _ship_vertices()
-
-
 def vertex_below_shadow(state, m):
-    """DrawObject part 2: crashedFlag is set if any vertex projects on or
-    below (screen y >=) its shadow, i.e. the vertex is at/under the ground
-    to within one screen pixel at the ship's depth (~0.06 tile)."""
-    y_cam = min(state.y, 0)                   # yCamera
-    y_draw = max(state.y, 0)                  # y passed to DrawObject
+    """DrawObject part 2's crash test.  The ship is drawn at camera-relative
+    (0, max(y, 0), LANDSCAPE_Z_MID) with the camera's y at min(y, 0); each vertex
+    is projected, and so is the point on the ground below it
+    (GetLandscapeBelowVertex).  crashedFlag is set if any vertex's screen row is
+    at or below its shadow's: the vertex is on or under the ground to within a
+    pixel row (about 0.06 tiles at the ship's depth).  Both rows are within the
+    screen here, so Lander's unsigned compare is an ordinary one."""
+    y_cam = min(state.y, 0)
+    y_draw = max(state.y, 0)
     for v in SHIP_VERTICES:
         rx, ry, rz = rotate(m, v)
         zrel = LANDSCAPE_Z_MID + rz
@@ -234,38 +237,46 @@ def vertex_below_shadow(state, m):
     return False
 
 
-# --------------------------------------------------------------- the model
 @dataclass
 class Ship:
+    """The player's state: xPlayer.. zVelocity, shipPitch, shipDirection,
+    fuelLevel, gravity and the last roof vector (xExhaust), with the start values
+    of PlacePlayerOnLaunchpad and StartNewGame."""
     x: int = LAUNCHPAD_SIZE // 2
     y: int = LAUNCHPAD_Y
     z: int = LAUNCHPAD_SIZE // 2
     vx: int = 0
     vy: int = 0
     vz: int = 0
-    pitch: int = 1                 # shipPitch (angle a)
-    direction: int = 0             # shipDirection (angle b)
+    pitch: int = 1
+    direction: int = 0
     fuel: int = INITIAL_FUEL
     gravity: int = GRAVITY_LEVELS[0]
-    exhaust: tuple = (0, 0, 0)     # roof vector of last frame (for particles)
+    exhaust: tuple = (0, 0, 0)
     alive: bool = True
     landed: bool = False
 
 
 @dataclass
 class Inputs:
-    mouse_x: int = 511             # OS_Mouse coords; reset to (511,511)
-    mouse_y: int = 511             # RISC OS y increases UP the screen
-    buttons: int = 0               # BTN_THRUST | BTN_HOVER | BTN_FIRE
+    """OS_Mouse: the pointer (y up the screen; ResetMousePosition puts it at
+    (511, 511)) and the buttons, BTN_THRUST (left), BTN_HOVER (middle),
+    BTN_FIRE (right)."""
+    mouse_x: int = 511
+    mouse_y: int = 511
+    buttons: int = 0
 
 
 def object_at(tile_x, tile_z):
-    """Object map hook (objectMap[z][x]); 1..11 = solid object. None here."""
+    """objectMap[tile_z][tile_x]: 1..11 is an object the ship can hit.  The map is
+    not transcribed; every tile is empty (&FF)."""
     return 0xFF
 
 
 def step(s: Ship, inp: Inputs):
-    """One main-loop iteration of the player. Returns list of event strings."""
+    """One main-loop iteration of the player's ship.  Returns the events:
+    'landed', or one of 'crash:object', 'crash:ground', 'crash:vertex', after
+    which s.alive is False and further steps do nothing."""
     ev = []
     if not s.alive:
         return ev
@@ -273,18 +284,23 @@ def step(s: Ship, inp: Inputs):
     if s.fuel == 0:
         burn = 0
 
-    # ---- part 1: mouse -> polar -> damped pitch/direction -> matrix
+    # MoveAndDrawPlayer part 1.  The mouse x is capped to 0..1023 (unsigned) and
+    # offset to -512..511; y is reversed, so my > 0 is the mouse pulled towards
+    # the player.  The polar distance, capped below &40000000 and doubled, is the
+    # target pitch; the angle is the target direction.  Each moves halfway to its
+    # target, the error first capped at ANGLE_STEP_CAP either way (the negative
+    # cap is -&30000001).
     mx = inp.mouse_x & M32
-    if mx >= 1024:                                  # unsigned cap 0..1023
+    if mx >= 1024:
         mx = 1023
     mx = s32(mx - 512)
-    my = s32(1024 - inp.mouse_y - 512)              # +ve = mouse moved down
+    my = s32(512 - inp.mouse_y)
     dist, ang = mouse_polar(s32(mx << 22), s32(my << 22))
     if (dist & M32) >= 0x40000000:
         dist = 0x3FFFFFFF
-    dist <<= 1                                      # 0 .. &7FFFFFFE
+    dist <<= 1
 
-    r4 = s32(s.direction - ang)                     # shortest way round
+    r4 = s32(s.direction - ang)                     # wraps: the shorter way round
     if r4 >= 0:
         r4 = min(r4, ANGLE_STEP_CAP)
     elif r4 < -ANGLE_STEP_CAP:
@@ -292,39 +308,50 @@ def step(s: Ship, inp: Inputs):
     r5 = s32(s.pitch - dist)
     if r5 > 0:
         r5 = min(r5, ANGLE_STEP_CAP)
-    elif r5 < -ANGLE_STEP_CAP:
+    elif r5 == 0 or r5 < -ANGLE_STEP_CAP:
+        # BLE then CMN/MVNLO: a zero error takes the negative path and fails the
+        # carry test, so it is replaced by the negative cap and the pitch kicks
+        # by +&18000001.  At rest the pitch is 1 and the target 0, so this does
+        # not arise there.
         r5 = -ANGLE_STEP_CAP - 1
-    s.pitch = s32(s.pitch - (r5 >> 1))              # halfway to target
+    s.pitch = s32(s.pitch - (r5 >> 1))
     s.direction = s32(s.direction - (r4 >> 1))
     m = rotation_matrix(s.pitch, s.direction)
 
-    # ---- part 2: velocity / position
-    if s.y < -HIGHEST_ALTITUDE:                     # too high: engines cut
+    # MoveAndDrawPlayer part 2.  Per axis: drag v -= v >> 6; full thrust (left
+    # button) v -= roof >> 11; the position moves; hover (middle) v -= roof >> 13,
+    # after the move; then gravity on vy.  Above HIGHEST_ALTITUDE both thrust bits
+    # are cleared from the burn rate first.
+    if s.y < -HIGHEST_ALTITUDE:
         burn &= ~(BTN_THRUST | BTN_HOVER)
     ex, ey, ez = m['xRoof'], m['yRoof'], m['zRoof']
-    full = burn & BTN_THRUST
-    vx = s.vx - asr(s.vx, 6)                        # friction 1/64
+    vx = s.vx - asr(s.vx, 6)
     vy = s.vy - asr(s.vy, 6)
     vz = s.vz - asr(s.vz, 6)
-    if full:                                        # full thrust = roof/2048
+    if burn & BTN_THRUST:
         vx -= asr(ex, 11); vy -= asr(ey, 11); vz -= asr(ez, 11)
     s.x = s32(s.x + vx); s.y = s32(s.y + vy); s.z = s32(s.z + vz)
-    if burn & BTN_HOVER:                            # hover = roof/8192, AFTER
-        vx -= asr(ex, 13); vy -= asr(ey, 13); vz -= asr(ez, 13)  # the move
-    vy += s.gravity                                 # gravity (y is down)
+    if burn & BTN_HOVER:
+        vx -= asr(ex, 13); vy -= asr(ey, 13); vz -= asr(ez, 13)
+    vy += s.gravity
     s.vx, s.vy, s.vz = s32(vx), s32(vy), s32(vz)
     s.exhaust = (ex, ey, ez)
 
-    # ---- part 3: ground / object / launchpad
+    # MoveAndDrawPlayer part 3.  safe_y is the ground under the ship less the
+    # undercarriage.  Within SAFE_HEIGHT above it (an unsigned compare, so only
+    # from above) an object on the ship's tile is a crash.  Below it,
+    # LandOnLaunchpad: off the pad is a crash; on it and slow enough the ship is
+    # set down (y = LAUNCHPAD_Y, velocity zero, refuelled); on it and too fast
+    # nothing happens until a vertex reaches the pad.
     s.landed = False
     safe_y = landscape_altitude(s.x, s.z) - UNDERCARRIAGE_Y
-    if ((safe_y - s.y) & M32) < SAFE_HEIGHT:        # unsigned, as in source
+    if ((safe_y - s.y) & M32) < SAFE_HEIGHT:
         o = object_at((s.x & M32) >> 24, (s.z & M32) >> 24)
         if 0 < o < 12:
             s.alive = False
             ev.append('crash:object')
             return ev
-    if s.y > safe_y:                                # LandOnLaunchpad
+    if s.y > safe_y:
         if (s.x & M32) >= LAUNCHPAD_SIZE or (s.z & M32) >= LAUNCHPAD_SIZE:
             s.alive = False
             ev.append('crash:ground')
@@ -336,20 +363,20 @@ def step(s: Ship, inp: Inputs):
                 s.fuel += FUEL_REFUEL_STEP
             s.landed = True
             ev.append('landed')
-        # too fast over the pad: no action here; the shadow test below
-        # catches the ship once a vertex reaches the pad surface
     if vertex_below_shadow(s, m):
         s.alive = False
         ev.append('crash:vertex')
         return ev
 
-    # ---- DrawFuelLevel (later in the same main-loop iteration)
-    s.fuel = max(0, s.fuel - burn)   # NB subtracts the whole byte, incl. fire
+    # DrawFuelLevel, later in the same iteration: the whole burn-rate byte is
+    # subtracted, so the fire button costs 1 a frame too.
+    s.fuel = max(0, s.fuel - burn)
     return ev
 
 
 def gravity_for_score(score):
-    """PrintCurrentScore: gravity rises with score."""
+    """PrintCurrentScore's gravity: &30000, &50000 from a score of 1024, &70000
+    from 1488."""
     if score >= 1488:
         return GRAVITY_LEVELS[2]
     if score >= 1024:
@@ -357,228 +384,54 @@ def gravity_for_score(score):
     return GRAVITY_LEVELS[0]
 
 
-# --------------------------------------------------------------------- demo
-def _t(v):
-    return v / TILE_SIZE
-
-
-def autopilot(s, frame):
-    """Toy controller for the demo: hop up, drift off the pad, fly back, land.
-    Mouse y: RISC OS y grows UP; moving the mouse up makes the ship fly into
-    the screen (+z), right makes it fly right (+x)."""
-    if frame < 8:                        # short burst of full thrust
-        return Inputs(511, 511, BTN_THRUST)
-    if frame < 60:                       # tilt towards +x and hover
-        return Inputs(511 + 50, 511, BTN_HOVER)
-    tx = tz = LAUNCHPAD_SIZE // 2
-    ex = (tx - s.x) / TILE_SIZE - 15 * s.vx / TILE_SIZE
-    ez = (tz - s.z) / TILE_SIZE - 15 * s.vz / TILE_SIZE
-    # NB: offsets under ~32 counts give zero pitch (sqrt-table dead zone)
-    def off(e):
-        return 0 if abs(e) < 0.15 else int(math.copysign(min(110, 35 + 25 * abs(e)), e))
-    mx, my = 511 + off(ex), 511 + off(ez)
-    height = (LAUNCHPAD_Y - s.y) / TILE_SIZE       # tiles above resting y
-    near = abs((tx - s.x) / TILE_SIZE) < 1 and abs((tz - s.z) / TILE_SIZE) < 1
-    target = 0.0 if near else 3.0                  # hold 3 tiles up until over pad
-    want_vy = max(-0.05, min(0.06, 0.04 * (height - target) + 0.01))   # +ve = down
-    vy = s.vy / TILE_SIZE
-    if vy > want_vy + 0.02:
-        b = BTN_THRUST
-    elif vy > want_vy:
-        b = BTN_HOVER
-    else:
-        b = 0
-    return Inputs(mx, my, b)
-
-
-def demo(frames=700, every=20):
-    s = Ship()
-    print("frame   x(t)    y(t)  z(t)   vx      vy      vz    pitch  dir  "
-          "fuel  ground  event")
-    for f in range(frames):
-        inp = autopilot(s, f)
-        ev = step(s, inp)
-        if f % every == 0 or ev and ev != ['landed'] or (ev and f > 100):
-            g = landscape_altitude(s.x, s.z)
-            print("%4d %7.3f %7.3f %6.3f %+7.4f %+7.4f %+7.4f %6.1f %5.1f %5d %6.2f  %s"
-                  % (f, _t(s.x), _t(s.y), _t(s.z), _t(s.vx), _t(s.vy), _t(s.vz),
-                     s.pitch * 360 / 2**32, s.direction * 360 / 2**32, s.fuel,
-                     _t(g), ' '.join(ev)))
-        if not s.alive or (ev == ['landed'] and f > 100):
-            break
-    return s
-
-
 def selftest():
-    # multiply: 0.5 * 0.5 = 0.25 (8-bit multiplier is exact here)
+    """Checks of the transcription's arithmetic and of the model's behaviour at
+    rest, in free fall and arriving at the ground."""
     assert mul_lander(1 << 30, 1 << 30) == 1 << 29
-    # polar: mouse straight right 256 counts -> angle 0, distance r/2
-    d, a = mouse_polar(256 << 22, 0)
+    d, a = mouse_polar(256 << 22, 0)                # mouse right: angle 0, r/2
     assert a == 0 and abs(d - (1 << 29)) < (1 << 22), (d, a)
-    d, a = mouse_polar(0, 256 << 22)           # mouse down -> 90 degrees
+    d, a = mouse_polar(0, 256 << 22)                # mouse pulled back: 90 degrees
     assert abs(a - (1 << 30)) < (1 << 24), a
-    d, a = mouse_polar(-100 << 22, -100 << 22)  # up-left -> 225 degrees
+    d, a = mouse_polar(-100 << 22, -100 << 22)      # up and left: 225 degrees
     assert abs((a & M32) - 5 * (1 << 29)) < (1 << 25), a
-    # matrix at a=b=0 ~ identity; products lose ~1/256 (8-bit multiplier)
-    m = rotation_matrix(0, 0)
+    m = rotation_matrix(0, 0)                       # identity to 8 bits
     assert m['yRoof'] > 0x7FFFFF00 and m['xNose'] == 0x7F7FFFFC
-    # pad altitude and resting position
     assert landscape_altitude(LAUNCHPAD_SIZE // 2, LAUNCHPAD_SIZE // 2) == LAUNCHPAD_ALTITUDE
+
+    # At rest on the pad: gravity sinks the ship a step and LandOnLaunchpad
+    # restores it, so 'landed' fires on alternate frames.
     s = Ship()
     n = 0
-    for _ in range(50):                        # sitting on pad stays put:
-        ev = step(s, Inputs())                 # gravity pushes it under the
-        assert s.alive, ev                     # pad every other frame and
-        n += 'landed' in ev                    # LandOnLaunchpad snaps it back
+    for _ in range(50):
+        ev = step(s, Inputs())
+        assert s.alive, ev
+        n += 'landed' in ev
     assert n >= 24 and abs(s.y - LAUNCHPAD_Y) <= GRAVITY_LEVELS[0], (n, s.y)
-    # free fall from rest tends to terminal velocity 64*g under 1/64 drag
-    # (y is a 32-bit value: the world is only +/-128 tiles high)
+
+    # Free fall tends to 64 g a frame under the 1/64 drag.
     s = Ship(y=-120 * TILE_SIZE, x=-100 * TILE_SIZE)
     vmax = 0
-    for _ in range(300):
+    for i in range(300):
         step(s, Inputs())
         if not s.alive:
             break
         vmax = s.vy
-    vterm = vmax
-    # too-fast arrival over the pad: LandOnLaunchpad declines, then the
-    # vertex/shadow test fires; any arrival off the pad is a ground crash
+    assert abs(vmax - 64 * GRAVITY_LEVELS[0]) < GRAVITY_LEVELS[0] * 4, vmax
+
+    # Too fast over the pad: LandOnLaunchpad declines and the vertex test fires.
     s = Ship(y=0, vy=TILE_SIZE // 4)
     evs = []
     while s.alive:
         evs += step(s, Inputs())
     assert evs[-1] == 'crash:vertex', evs
+    # Off the pad: any arrival is a crash.
     s = Ship(x=20 * TILE_SIZE, y=0, vy=TILE_SIZE // 64)
     evs = []
     while s.alive:
         evs += step(s, Inputs())
     assert evs[-1] in ('crash:ground', 'crash:vertex'), evs
-    print("crash tests:", evs[-1], "(off pad)")
-    print("selftest ok; fall speed after %d frames %.3f tiles/frame "
-          "(terminal 64*g = %.3f)" % (_, _t(vterm), _t(GRAVITY_LEVELS[0] * 64)))
-
-
-# ================================================== 6502-friendly variant
-# A sketch of the same model in 8/16/24-bit quantities (see NOTES.md):
-#   angles      bytes, 256 = full circle (Lander: 2^32)
-#   unit vecs   signed bytes, 127 ~ 1.0   (Lander: 2^31)
-#   velocity    signed 16-bit, 1 = 2^-15 tile/frame  (= Lander >> 9)
-#   position    24-bit, 1 = 2^-15 tile (8 bits tile + 15 bits fraction... we
-#               keep 2^15/tile so x,z wrap at 512 tiles; y range +/-256 tiles)
-#   input       a "virtual mouse" (sx, sy) in signed bytes nudged by keys,
-#               1 unit = 4 Lander mouse counts, so pitch(byte) = |(sx,sy)|
-# Only the roof (thrust) vector is needed for physics: 2 multiplies/frame.
-LITE_TILE = 1 << 15
-LITE_G = GRAVITY_LEVELS[0] >> 9          # 384
-LITE_FULL_SHIFT = 4                      # 127 << 4 = 2032 ~ 2^20 >> 9 = 2048
-LITE_HOVER_SHIFT = 2                     # 127 << 2 = 508  ~ 2^18 >> 9 = 512
-LITE_LANDING = LANDING_SPEED >> 9        # 4096
-LITE_UNDERCARRIAGE = UNDERCARRIAGE_Y >> 9
-SIN8 = [int(round(127 * math.sin(2 * math.pi * i / 256))) for i in range(256)]
-
-
-def atan2_8(y, x):
-    """256-unit atan2; on a 6502 = octant fold + 32-entry table of atan(n/32)."""
-    return int(round(math.atan2(y, x) * 128 / math.pi)) & 255
-
-
-def mul8(a, b):
-    """signed 8x8 -> (a*b) >> 7, i.e. a quarter-square table multiply."""
-    return (a * b) >> 7
-
-
-@dataclass
-class LiteShip:
-    x: int = 4 * LITE_TILE
-    y: int = LAUNCHPAD_Y >> 9
-    z: int = 4 * LITE_TILE
-    vx: int = 0
-    vy: int = 0
-    vz: int = 0
-    pitch: int = 0                 # 0..127 (0..180 degrees)
-    direction: int = 0             # 0..255
-    fuel: int = INITIAL_FUEL
-    alive: bool = True
-
-
-def step_lite(s, sx, sy, buttons, ground_y):
-    """sx, sy: virtual-mouse offset (sy > 0 = 'mouse pulled back' = towards
-    the viewer); ground_y(x, z) -> ground y in lite units (y down)."""
-    ev = []
-    burn = buttons & 7 if s.fuel else 0
-    # orientation: target from the virtual mouse, then halve the error
-    tdir = atan2_8(sy, sx)
-    tpitch = min(127, int(math.isqrt(sx * sx + sy * sy)))   # table on a 6502
-    ddir = ((s.direction - tdir + 128) & 255) - 128          # shortest way
-    ddir = max(-48, min(48, ddir))                            # 0x30000000 cap
-    dp = max(-48, min(48, s.pitch - tpitch))
-    s.direction = (s.direction - (ddir >> 1)) & 255
-    s.pitch -= dp >> 1
-    sa, ca = SIN8[s.pitch & 255], SIN8[(s.pitch + 64) & 255]
-    sb, cb = SIN8[s.direction], SIN8[(s.direction + 64) & 255]
-    ex, ey, ez = -mul8(sa, cb), ca, mul8(sa, sb)               # roof vector
-    if s.y < -(HIGHEST_ALTITUDE >> 9):
-        burn &= ~(BTN_THRUST | BTN_HOVER)
-    vx, vy, vz = s.vx - (s.vx >> 6), s.vy - (s.vy >> 6), s.vz - (s.vz >> 6)
-    if burn & BTN_THRUST:
-        vx -= ex << LITE_FULL_SHIFT; vy -= ey << LITE_FULL_SHIFT; vz -= ez << LITE_FULL_SHIFT
-    s.x += vx; s.y += vy; s.z += vz
-    if burn & BTN_HOVER:
-        vx -= ex << LITE_HOVER_SHIFT; vy -= ey << LITE_HOVER_SHIFT; vz -= ez << LITE_HOVER_SHIFT
-    vy += LITE_G
-    s.vx, s.vy, s.vz = vx, vy, vz
-    # landing / crash: centre test + lowest-vertex test. The y row of the
-    # rotation matrix is (sin a, cos a, 0), so a vertex's height offset is
-    # sin(a)*vx + cos(a)*vy -- two multiplies, and only for the 4 lowest
-    # vertices (0, 1, 3, 5 cover every pitch/direction).
-    g = ground_y(s.x, s.z)
-    on_pad = 0 <= s.x < 8 * LITE_TILE and 0 <= s.z < 8 * LITE_TILE
-    if s.y + LITE_UNDERCARRIAGE > g:
-        if not on_pad:
-            s.alive = False
-            return ev + ['crash:ground']
-        if abs(s.vx) + abs(s.vy) + abs(s.vz) < LITE_LANDING:
-            s.y = g - LITE_UNDERCARRIAGE
-            s.vx = s.vy = s.vz = 0
-            s.fuel = min(FUEL_REFUEL_LIMIT - 1, s.fuel + FUEL_REFUEL_STEP)
-            ev.append('landed')
-    low = max(mul8(sa, v[0] >> 17) + mul8(ca, v[1] >> 17)
-              for v in (SHIP_VERTICES[i] for i in (0, 1, 3, 5)))  # 2^-7 tile
-    if s.y + (low << 8) >= g:
-        s.alive = False
-        return ev + ['crash:vertex']
-    s.fuel = max(0, s.fuel - burn)
-    return ev
-
-
-def compare_demo(frames=160, every=20):
-    """Run the full model (mouse) and the lite model (virtual mouse) on the
-    same scripted input and print both trajectories (tiles)."""
-    full, lite = Ship(), LiteShip()
-
-    def script(f):          # (sx, sy, buttons): hop, tilt right, tilt back
-        if f < 10:
-            return 0, 0, BTN_THRUST
-        if f < 70:
-            return 20, 0, BTN_HOVER
-        if f < 110:
-            return -14, 14, BTN_HOVER | (BTN_THRUST if f % 4 == 0 else 0)
-        return 0, 0, BTN_HOVER
-
-    print("\nfull model vs 6502-lite model, same input (tiles)")
-    print("frame   full x     y      z    |  lite x     y      z")
-    for f in range(frames):
-        sx, sy, b = script(f)
-        step(full, Inputs(512 + 4 * sx, 512 - 4 * sy, b))
-        step_lite(lite, sx, sy, b,
-                  lambda x, z: landscape_altitude(x << 9, z << 9) >> 9)
-        if f % every == 0 or f == frames - 1:
-            print("%4d  %7.3f %7.3f %6.3f | %7.3f %7.3f %6.3f" % (
-                f, _t(full.x), _t(full.y), _t(full.z),
-                lite.x / LITE_TILE, lite.y / LITE_TILE, lite.z / LITE_TILE))
+    print("selftest ok")
 
 
 if __name__ == '__main__':
     selftest()
-    demo()
-    compare_demo()

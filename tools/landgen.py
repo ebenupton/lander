@@ -1,40 +1,104 @@
 #!/usr/bin/env python3
-"""The landscape's tables, for sideways RAM, from proto/land.py and proto/frame.py:
+"""The landscape renderer's sideways RAM tables (src/land.s), from proto/land.py's model.
 
-    python3 tools/landgen.py OUTDIR   -> OUTDIR/TABLES (bank 4, 16K, loaded to $8000)
-                                         OUTDIR/TABLES2 (bank 5: the tiles' colours)
-                                         OUTDIR/TABLES7 (bank 7: the projection)
-                                         OUTDIR/tables.inc (their addresses, constants)
+    python3 tools/landgen.py OUTDIR  ->  OUTDIR/TABLES      bank 4 (16K, at $8000)
+                                         OUTDIR/TABLES2     bank 5: the tiles' colours
+                                         OUTDIR/TABLES7     bank 7: the projection
+                                         OUTDIR/tables.inc  the addresses and constants
 
-Bank 7, by a row's depth index di = d/16 - DI0 (d its depth, 8.8 tiles: (20 - j)*256
-- 16*czs, so di 0..NDI-1) and r = land.recip(d) (pixels a tile, 8.8):
-  R7L, R7H + di           r
-  SYT7 + di*32 + v        screen y of a corner of height h, the ground under the ship
-                          hg: v = h - hg + HMAX (0..2 HMAX)
-  B1T + di*32 + 2*cxs    the row's second drawn corner's B = x * 256 (XC on:
-                          corner i's x is (B1 + (i-1)*r) >> 8; corners 1..NX-2:
-                          B1 + (i-1)*r < 65536, no carry out): first the carries
-                          out of its low byte (bit k-1: (B1 + (k-1) r) & 255 + (r & 255)
-                          > 255), then its high byte (corner 1's x: corner i's
-                          is corner i-1's + (r >> 8) + bit i-2)
-  SYL7, SYH7 + di         di*32's low byte, and SYT7 + di*32's page
-  LQLO, LQHI + q          LERPQ7 + q*32
-  PXF7, PXN7 + 11*cxs + i the far and near clips' rows' x's (their di fixed: by
-                          cxs alone; never clipped)
-  PINL7, PINR7 + di       the x clip planes' x (-XCLIP, +XCLIP: the rows' ends)
-  CLP7 + di               1 if they are past the screen's clip (XL, XR): clipped
-  LERPQ7 + q*32 + d + 15  land.lerp(0, d, 16 q) - 1: the ends', clips' and ground's
-                          heights (added with C set: after (b + 16) - a - 1)
-Bank 4:
-  MAP + z*64 + x          a tile corner's height (bits 0-3) and its tile's colour pick
-                          (bits 4-7: LANDT or SEAT gives the palette entry)
-  MRL, MRH + z            map row z's address
-  DE, DO + palette entry  a dither's bytes on even and odd lines (swatch35 numbering)
-  DQT, DRT + a*64 + D    D div a, 2 (D mod a) (a 1..31, D 0..63); DVH, DVR, DVL + a:
-                          its row's pages and offset
-  FPSL, FPSH + s          4000 / s: the readout's frames a second (tenths), s the
-                          vertical syncs of the last 8 frames
-  run2's store tables (TPE, TPO pages, from R2OFF), EIN, RSMT: by line, YSKY..YGND+2
+Every table is a 16K image's bytes at its bank address; build.sh then merges land.s's
+bank code segments into the space the tables leave.  Also imported by tools/shipgen.py
+and the tests for dither_bytes.
+
+Bank 4 (TABLES), by address:
+  MAP + 64 z + x          corner (x, z)'s height, 0..HMAX, in bits 0-3 (land.heightmap);
+                          bits 4-7 a random nibble (land.TILERND) that nothing reads.  land.s
+                          reads a row through MRL, MRH and masks to the height.
+  TPE[t], TPO[t] pages    run2's store tables, by t = 2 screen + half (the screens at
+                          $3000, $5800; a half the left or right 32 of a row's 64 byte
+                          columns): at page*256 + R2OFF + 3 k the entry for even line YSKY
+                          + 2 k (TPE) or odd line YSKY + 1 + 2 k (TPO), k 0..R2N-1: STA
+                          addr,Y with addr the line's screen address ($3000 + $2800 screen
+                          + $100 half + $200 (y >> 3) + (y & 7); Y = (8 column) & 255, the
+                          column's byte in the half); at page*256 + 255 (k = R2N) an RTS,
+                          the slot after the last line's (YGND+1's in TPE, YGND+2's in
+                          TPO).  Entered at line X's entry it stores to every line of X's
+                          parity up to an RTS the code plants at line Y's.  The first
+                          R2OFF bytes of each page are free (build.sh's code segments,
+                          TL6, TL7).
+  RSMT + y                (y & ~7) - 1: the line before y's character row (fsplit's);
+                          y YSKY..YGND+2.
+  TBLK4, TBLK5            traceb's fills into ROWA ($0400) and ROWB ($0500): TNB stores
+                          STA page*256-k,X for k = TNB down to 1 (3 bytes each), then a
+                          JMP whose operand (t_back) land.s's init writes.  Entered at its
+                          n'th store from the end it fills X-n .. X-1.
+  TENL, TENH4, TENH5 + n  the entry for n stores, n 0..TNB: TBLK + 3 (TNB - n), its low
+                          byte and its page (TBLK4's, TBLK5's).
+  DE, DO + e              dither e's bytes on even and odd lines (dither_bytes), e 0..34;
+  LANDT, SEAT + r         land.LAND[r mod 10], land.SEAC[r mod 4], r 0..15.  Nothing reads
+                          these four: the tiles' colours are bank 5's.
+  FPSL, FPSH + s          (4000 + s/2) / s (0 at s 0): the readout's frames a second in
+                          tenths, s the vertical syncs of the last 8 frames.
+  DQT, DRT + 64 a + D     D div a, and 2 (D mod a); a 1..31, D 0..63 (row 0 free: TR5, TL5).
+  DVH, DVR, DVL + a       DQT's and DRT's row a: its page in each, and 64 a's low byte
+                          (ORed with D).
+  MRL, MRH + z            MAP + 64 z, low byte and page; z 0..63.
+  CLMP1 + d               d + 1 as a signed byte, clamped to 0..4 (a rung's position in
+                          its byte column: d = TX - x4 - 1).
+  DIV4 + x                x >> 2: pixel x's byte column.
+  TRk, TLk                the rungs' fast way: a rung of a pixels (a <= RFA) spanning D
+                          lines (D < 16) from its top line yt; at + 16 (RFA - a) + D the
+                          transition of its k'th pixel (k < a), lines below yt:
+                          ceil(D (2 j - 1) / (2 a)), j = k + 1 leaning right (TRk) or a - k
+                          leaning left (TLk).  TRk and TLk hold 16 (RFA - k) bytes, in gaps
+                          between the tables.
+  EIN + y                 R2OFF + 3 ((y + 1) / 2 - YSKY / 2), y YSKY-1..YGND+2: the entry
+                          offset of the first even line at or after y (EIN - 1 + y: the
+                          first odd).  Nothing reads it: land.s's init computes the same
+                          into EINL in low RAM.
+
+Bank 5 (TABLES2):
+  CMAPE, CMAPO + 64 z + x tile (x, z)'s colour (land.colour: sea if its four corners are
+                          at sea level, the pad PADC, else land, lit) as its dither's even
+                          and odd bytes (pcol5's: the strips' boxes' bytes).
+
+Bank 7 (TABLES7), by a row's depth index di.  Corner row j (0..NZ-1, far to near: map
+row czt + ZBACK - j) is at depth d = 256 (ZBACK - j) - 16 czs, 8.8 tiles; di = d/16 - DI0,
+DI0 the nearest (j NZ-1, czs 15), NDI of them; r = land.recip(d), pixels a tile, 8.8.
+  R7L, R7H + di           r's low and high bytes.
+  SYT7 + 32 di + v        screen y of a corner at height h = v - HMAX + hg, hg the ground
+                          under the ship, v 0..2 HMAX: HORIZON + ((CAMH + hg - h) r + 2048)
+                          / 4096 (land.project's sy, the camera at CAMH; raised, EYV is
+                          added).  land.s points syp at SYT7 + 32 di + HMAX - hg and
+                          indexes by h.
+  SYL7, SYH7 + di         32 di's low byte, and SYT7 + 32 di's page.
+  B1T + 32 di + 2 cxs     the row's x's.  Corner i (0..NX-1) is at map column cxt - 4 + i;
+                          corners 1..NX-2 are drawn, 0 and NX-1 replaced by the clip
+                          planes' points.  B_i = B_1 + (i - 1) r is 256 times corner i's
+                          screen x (B_0 = 256 XC + ((dx0 r + 32768) >> 8), dx0 = -1152 -
+                          16 cxs: corner 0's x from the camera, 8.8 tiles; B_1 = B_0 + r).
+                          Byte 1: B_1 >> 8, corner 1's x.  Byte 0: bit k set if B_{k+1}'s
+                          low byte carries when r's is added, so corner k+2's x is corner
+                          k+1's + (r >> 8) + bit k, k 0..NX-4.  B_1 + (i - 1) r < 65536
+                          for i to NX-2 (asserted: no carry out of the high byte).
+  PINL7, PINR7 + di       x of the clip planes XCLIP tiles left and right of the camera:
+                          XC + ((-+XCLIP r + 32768) >> 16); corners 0 and NX-1's.
+  CLP7 + di               1 if that row overhangs the screen (PINL7 < XL or PINR7 > XR):
+                          exactly di < NCLP (asserted).  Nothing reads it; NCLP is in a
+                          land.s assert.
+  LERPQ7 + 32 q + d + LQOFF  land.lerp(0, d, 16 q) - 1, q 0..15, d -15..15: adding a with
+                          C set to the entry at d = b - a gives lerp(a, b, 16 q); land.s
+                          indexes by (b | 16) - a - 1 (b < 16).  The edges' heights (q cxs),
+                          the clip rows' (16 - czs), the ground's (hgnd).
+  LQLO, LQHI + q          LERPQ7 + 32 q, low byte and page.
+  PXF7, PXN7 + 11 cxs + i the x's of the far clip plane's row (di 16 ZFCLIP - DI0) and the
+                          near's (16 ZCLIP - DI0), fixed but for cxs: PINL7, corners 1..NX-2
+                          by B1T, PINR7; i 0..NX-1.  Neither overhangs the screen (asserted).
+
+tables.inc: every address above, then TNB, HMAX, NDI, NX (the drawn corners: land.NX less
+2 XSKIP), XSKIP, NZ, ZBACK, ZSKIP, ZCLIP, ZFCLIP, DI0, NCLP, XL, XR, LQOFF, ZSHIP, CAMH,
+EMAX, PADN, PADH, HORIZON, YSKY, YGND, R2OFF, RFA, EYS (255 less the greatest SYT7 entry:
+the least camera raise EYV at which a corner's y could pass 254, satrow's), TPE0-3, TPO0-3.
 """
 import os
 import sys
@@ -55,30 +119,28 @@ ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, DE=0xA300, DO=0xA340,
             TR6=0xBDD0, TR7=0x9FD1, TR8=0xA2F0,
             TL0=0xBB63, TL1=0xA200, TL2=0xA280, TL3=0x9E83, TL4=0xA3A0, TL5=0xAE00,
             TL6=0x9300, TL7=0x9330, TL8=0xA3F0)
-# rungs' fast way (a <= RFA, D < 16): TRk, TLk by X = 16 (RFA - a) + D, k < a: the
-# transition of the pixel stored at k (leaning right: pixel k + 1 from xt; left: a - k)
-RFA = 9
-# run2's store tables: by t (2 screen + half), the even lines' on page TPE[t], the odd
-# lines' on TPO[t], from R2OFF, the end line's slot (an RTS) at $FF
-TPE = (0x90, 0x91, 0x92, 0x93)
-TPO = (0xB6, 0xB7, 0xB8, 0xB9)
-R2N = (YGND + 1 - YSKY) // 2                # each table's lines
-R2OFF = 255 - 3 * R2N
-TNB = 128
-DI0 = (L.ZBACK - L.NZ + 1) * 16 - 15        # the least depth / 16: the near row, fz 15
-NDI = L.ZBACK * 16 - DI0 + 1
-NCLP = 4                                    # the rows clipr clips: di < NCLP (CLP7)
-NXD = L.NX - 2 * L.XSKIP                    # the corners drawn a row
+ADDR2 = dict(CMAPE=0x8000, CMAPO=0x9000)
 ADDR7 = dict(R7L=0x8000, R7H=0x8100, SYT7=0x8200, B1T=0x9800,
              CLP7=0xAE00, PINL7=0xAF00, PINR7=0xB000, LERPQ7=0xB100, SYL7=0xB300, SYH7=0xB3B0,
              LQLO=0xB460, LQHI=0xB470, PXF7=0xBEA0, PXN7=0xBF50)
-LQOFF = 15                                  # LERPQ7's d offset (d -15..15)
+RFA = 9                                     # the rungs' fast way: rungs of up to RFA pixels
+TPE = (0x90, 0x91, 0x92, 0x93)              # run2's store-table pages: the even lines' by t,
+TPO = (0xB6, 0xB7, 0xB8, 0xB9)              # and the odd lines'
+R2N = (YGND + 1 - YSKY) // 2                # lines in each
+R2OFF = 255 - 3 * R2N                       # the first entry's offset: the RTS at 255
+TNB = 128                                   # traceb's longest fill
+DI0 = (L.ZBACK - L.NZ + 1) * 16 - 15        # the nearest row's d/16
+NDI = L.ZBACK * 16 - DI0 + 1                # depth indices: to the farthest (j 0, czs 0)
+NCLP = 4                                    # the rows that overhang the screen: di < NCLP
+NXD = L.NX - 2 * L.XSKIP                    # the corners drawn in a row (tables.inc's NX)
+LQOFF = 15                                  # LERPQ7's offset for d = -15
 assert YSKY % 2 == 0 and YGND % 2 == 1 and R2OFF > 0 and NDI <= 176
 
 
 def dither_bytes(entry):
-    """MODE 1 bytes (even line, odd line) of swatch35's entry: pixel p's colour at
-    (p & 1, line & 1); logical colour bits at 7-p and 3-p."""
+    """The MODE 1 bytes (even line, odd line) of swatch35 dither `entry`: pixel p (0..3)
+    takes the cell's ink at (p & 1, line & 1); its colour's high bit is bit 7 - p of the
+    byte, its low bit 3 - p."""
     cl = SW.cell(*SW.ALL[entry])
     out = []
     for row in range(2):
@@ -91,6 +153,7 @@ def dither_bytes(entry):
 
 
 def build():
+    """Bank 4's image (TABLES): the module docstring's tables, at ADDR."""
     img = bytearray(0x4000)
 
     def put(name, off, val):
@@ -110,7 +173,7 @@ def build():
     for a in range(1, 32):
         for d in range(64):
             put('DQT', a * 64 + d, d // a)
-            put('DRT', a * 64 + d, 2 * (d % a))    # 2r: r2 directly
+            put('DRT', a * 64 + d, 2 * (d % a))
         put('DVH', a, (ADDR['DQT'] + a * 64) >> 8)
         put('DVR', a, (ADDR['DRT'] + a * 64) >> 8)
         put('DVL', a, (a * 64) & 255)
@@ -118,43 +181,38 @@ def build():
         put('MRL', z, (ADDR['MAP'] + z * 64) & 255)
         put('MRH', z, (ADDR['MAP'] + z * 64) >> 8)
     for s in range(256):
-        f = (4000 + s // 2) // s if s else 0       # frames a second, tenths, over 8 frames
+        f = (4000 + s // 2) // s if s else 0
         put('FPSL', s, f)
         put('FPSH', s, f >> 8)
-    for d in range(256):                    # fsplit's: d + 1 (signed) clamped to 0..4
+    for d in range(256):
         v = (d + 1) & 255
         put('CLMP1', d, 0 if v >= 128 else min(v, 4))
-    for d in range(256):                    # record's, nearpost's: x4's column
+    for d in range(256):
         put('DIV4', d, d >> 2)
     for blk, pg, enh in (('TBLK4', 4, 'TENH4'), ('TBLK5', 5, 'TENH5')):
-        # traceb's fills: STA page*256-k,X for k = TNB..1, then JMP (init: t_back);
-        # entered at L stores before the JMP: X - L .. X - 1
         for k in range(TNB, 0, -1):
             a = pg * 256 - k
             o = 3 * (TNB - k)
-            put(blk, o, 0x9D)
+            put(blk, o, 0x9D)                           # STA abs,X
             put(blk, o + 1, a & 255)
             put(blk, o + 2, a >> 8)
-        put(blk, 3 * TNB, 0x4C)
+        put(blk, 3 * TNB, 0x4C)                         # JMP (operand: land.s's init)
         for n in range(TNB + 1):
             e = ADDR[blk] + 3 * (TNB - n)
             put('TENL', n, e & 255)
             put(enh, n, e >> 8)
-    for y in range(YSKY, YGND + 3):         # fsplit's: each line's row's first line - 1
+    for y in range(YSKY, YGND + 3):
         put('RSMT', y, (y & 0xF8) - 1)
-    # run2's: STA addr(y),Y for the even lines YSKY..YGND-1, then YGND+1's slot (RTS);
-    # the odd lines YSKY+1..YGND, then YGND+2's; EIN by line y: the low byte of the
-    # first even line's at or after y (EIN - 1 by y: the first odd line's at or after y)
     for t in range(4):
         for y in range(YSKY, YGND + 1):
             a = 0x3000 + 0x2800 * (t >> 1) + 256 * (t & 1) + 512 * (y >> 3) + (y & 7)
             pg = TPE[t] if y % 2 == 0 else TPO[t]
             o = pg * 256 + R2OFF + 3 * ((y - YSKY) // 2) - BASE
             assert not any(img[o:o + 3])
-            img[o:o + 3] = bytes([0x99, a & 255, a >> 8])
+            img[o:o + 3] = bytes([0x99, a & 255, a >> 8])    # STA abs,Y
         for pg in (TPE[t], TPO[t]):
             assert not img[pg * 256 + 255 - BASE]
-            img[pg * 256 + 255 - BASE] = 0x60
+            img[pg * 256 + 255 - BASE] = 0x60               # RTS
     for y in range(YSKY - 1, YGND + 3):
         put('EIN', y, R2OFF + 3 * ((y + 1) // 2 - YSKY // 2))
     for k in range(RFA):
@@ -170,8 +228,7 @@ def build():
 
 
 def build2():
-    """Bank 5: each tile's colour (land.colour: the sea set if both its front
-    corners are at sea level), as its dither's bytes: CMAPE, CMAPO + z*64 + x."""
+    """Bank 5's image (TABLES2): CMAPE, CMAPO, each tile's colour as its dither's bytes."""
     img = bytearray(0x4000)
     hm = L.heightmap()
     for z in range(L.MAP):
@@ -182,11 +239,8 @@ def build2():
     return img
 
 
-ADDR2 = dict(CMAPE=0x8000, CMAPO=0x9000)
-
-
 def build7():
-    """Bank 7: the projection, by depth index (the docstring's)."""
+    """Bank 7's image (TABLES7): the projection by depth index, at ADDR7."""
     img = bytearray(0x4000)
 
     def put(name, off, val):
@@ -198,29 +252,29 @@ def build7():
         r = L.recip(d)
         put('R7L', di, r)
         put('R7H', di, r >> 8)
-        for v in range(2 * L.HMAX + 1):     # (a height h less the ground's hg, + HMAX)
+        for v in range(2 * L.HMAX + 1):
             put('SYT7', di * 32 + v, L.HORIZON + (((L.CAMH - (v - L.HMAX)) * r + L.HSCALE * 128) // (L.HSCALE * 256)))
         put('SYL7', di, di * 32)
         put('SYH7', di, (ADDR7['SYT7'] + di * 32) >> 8)
         for cxs in range(16):
-            dx0 = (L.XSKIP - 5) * 256 - cxs * 16 - 128        # (the first drawn corner)
+            dx0 = (L.XSKIP - 5) * 256 - cxs * 16 - 128
             b0 = ((dx0 * r + 32768) >> 8) + L.XC * 256
-            b1 = (b0 + r) & 0xFFFF                            # (the second's)
-            assert all(b1 + (i - 1) * r < 65536 for i in range(1, L.NX - 2 * L.XSKIP - 1))
+            b1 = (b0 + r) & 0xFFFF
+            assert all(b1 + (i - 1) * r < 65536 for i in range(1, NXD - 1))
             cm = sum((((b1 & 255) + (k - 1) * (r & 255)) & 255) + (r & 255) > 255 and 1 << (k - 1) or 0
-                     for k in range(1, L.NX - 2 * L.XSKIP - 2))   # (B's carries: corners 2..)
+                     for k in range(1, NXD - 2))
             assert all(((b1 >> 8) + (i - 1) * (r >> 8) + bin(cm & ((1 << (i - 1)) - 1)).count('1')) == (b1 + (i - 1) * r) >> 8
-                       for i in range(1, L.NX - 2 * L.XSKIP - 1))
+                       for i in range(1, NXD - 1))
             b1s[di, cxs] = b1
             put('B1T', di * 32 + 2 * cxs, cm)
             put('B1T', di * 32 + 2 * cxs + 1, b1 >> 8)
-        pl = L.XC + ((-L.XCLIP * r + 32768) >> 16)      # the edges' x (clip planes)
+        pl = L.XC + ((-L.XCLIP * r + 32768) >> 16)
         pr = L.XC + ((L.XCLIP * r + 32768) >> 16)
         put('PINL7', di, pl)
         put('PINR7', di, pr)
         put('CLP7', di, 1 if pl < L.XL or pr > L.XR else 0)
         for row, dic in (('PXF7', L.ZFCLIP * 16 - DI0), ('PXN7', L.ZCLIP * 16 - DI0)):
-            if di == dic:                   # (the clips' rows: x by cxs alone)
+            if di == dic:
                 assert not (pl < L.XL or pr > L.XR)
                 for cxs in range(16):
                     b1 = b1s[di, cxs]
@@ -229,29 +283,30 @@ def build7():
                         put(row, 11 * cxs + i, x)
     clp = [img[ADDR7['CLP7'] - BASE + di] for di in range(NDI)]
     assert clp == [1] * NCLP + [0] * (NDI - NCLP), 'CLP7: di < NCLP'
-    for q in range(16):                     # LERPQ7 + q*32 + d + 15: land.lerp(0, d, 16 q)
-        put('LQLO', q, ADDR7['LERPQ7'] + 32 * q)            # (row q's address)
+    for q in range(16):
+        put('LQLO', q, ADDR7['LERPQ7'] + 32 * q)
         put('LQHI', q, (ADDR7['LERPQ7'] + 32 * q) >> 8)
         for d in range(-15, 16):
-            put('LERPQ7', q * 32 + d + LQOFF, L.lerp(0, d, 16 * q) - 1)   # (- 1: added with C set)
+            put('LERPQ7', q * 32 + d + LQOFF, L.lerp(0, d, 16 * q) - 1)
     return img
 
 
 def main():
+    """Write the three images and tables.inc to the directory named on the command line."""
     out = sys.argv[1]
     open(os.path.join(out, 'TABLES'), 'wb').write(build())
     open(os.path.join(out, 'TABLES2'), 'wb').write(build2())
     open(os.path.join(out, 'TABLES7'), 'wb').write(build7())
-    # (EYS: the least EYV some corner's y could pass 254 at: satrow's, then)
     EYS = 255 - max(L.HORIZON + (((L.CAMH + L.HMAX) * L.recip((DI0 + di) * 16) + L.HSCALE * 128)
                                   // (L.HSCALE * 256)) for di in range(NDI))
     with open(os.path.join(out, 'tables.inc'), 'w') as f:
         f.write('; tools/landgen.py\n')
         for k, v in list(ADDR.items()) + list(ADDR2.items()) + list(ADDR7.items()):
             f.write(f'{k:8s}= ${v:04X}\n')
-        consts = dict(TNB=TNB, MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34,
-                      NX=L.NX - 2 * L.XSKIP, XSKIP=L.XSKIP, NZ=L.NZ, ZBACK=L.ZBACK, ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=DI0, NCLP=NCLP, XC=L.XC, XL=L.XL, XR=L.XR, YLIM=L.YLIM, LQOFF=LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH, EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON,
-                      YSKY=YSKY, YGND=YGND, R2OFF=R2OFF, RFA=RFA, EYS=EYS,
+        consts = dict(TNB=TNB, HMAX=L.HMAX, NDI=NDI, NX=NXD, XSKIP=L.XSKIP, NZ=L.NZ, ZBACK=L.ZBACK,
+                      ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=DI0, NCLP=NCLP, XL=L.XL, XR=L.XR,
+                      LQOFF=LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH, EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH,
+                      HORIZON=L.HORIZON, YSKY=YSKY, YGND=YGND, R2OFF=R2OFF, RFA=RFA, EYS=EYS,
                       TPE0=TPE[0], TPE1=TPE[1], TPE2=TPE[2], TPE3=TPE[3],
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])
         for k, v in consts.items():

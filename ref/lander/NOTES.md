@@ -1,132 +1,211 @@
-# Lander (Archimedes) flight model and ship, reverse-engineered for a BBC port
+# Lander reference
 
-Source: Mark Moxon's annotated reconstruction of David Braben's *Lander* (1987):
-- site: https://lander.bbcelite.com/ (routine pages are under `https://lander.bbcelite.com/source/main/subroutine/<name>.html` and `.../variable/<name>.html`)
-- repo: https://github.com/markmoxon/lander-source-code-acorn-archimedes, file `1-source-files/main-sources/Lander.arm`
+Reference material from *Lander* (David Braben, Acorn Archimedes, 1987), as
+reconstructed and annotated by Mark Moxon:
 
-Every number below was copied from `Lander.arm`. Anything I worked out myself rather than read off the source is marked **(inferred)**.
+- site: https://lander.bbcelite.com (routine pages at
+  `/source/main/subroutine/<name>.html`, variables at `/source/main/variable/<name>.html`)
+- source: https://github.com/markmoxon/lander-source-code-acorn-archimedes,
+  `1-source-files/main-sources/Lander.arm`
 
-Files in this directory:
+Routine and constant names below are `Lander.arm`'s; every figure is from it.
 
-| file | what it is |
+| file | contents |
 |---|---|
-| `flight.py` | Integer reference model. `step(Ship, Inputs)` copies MoveAndDrawPlayer parts 1–3, LandOnLaunchpad, the crash test in DrawObject and the fuel burn, with Lander's 8-bit-operand multiply. It also has `step_lite()`, a 6502-friendly variant. Running it does a self-test, a 450-frame take-off, fly-around and landing, and a side-by-side run of the full and lite models. |
-| `ship.py` | The `objectPlayer` blueprint, verbatim, plus Lander's shading rule and a PIL renderer. Running it writes `ship.json` and `ship.png`. |
-| `ship.json` | Raw blueprint (hex and signed ints), values converted to tiles and unit normals, and the face list. |
-| `ship.png` | Six perspective views with Lander's back-face test, blueprint-order fill and shading (hidden edges drawn dim), plus top and side orthographic wireframes. |
+| `ship.py` | The `objectPlayer` blueprint (vertices, faces, normals, colours), Lander's rotation matrix, back-face test and shading rule, and a PIL render. `tools/shipgen.py` imports it. Run, it prints the blueprint checks and writes `ship.png`. |
+| `flight.py` | The flight model transcribed: `step()` is one main-loop iteration of the player's ship, in Lander's 32-bit arithmetic with its truncated multiply and its tables. Nothing imports it; run, it self-tests. |
+| `ship.png` | `ship.py`'s output: six perspective views as `DrawObject` would draw them, with the edges and vertex numbers over them, and top and side wireframes. |
 
-The earlier BBC attempt (github.com/ebenupton/virus) does **not** use Lander's ship or flight model. It has its own 6-vertex, 5-face (quad) ship and keyboard yaw/roll on Z/X/K/M. Thrust is 3×gravity (`GRAVITY_ACCEL=7`, `THRUST_ACCEL=21`, 16-bit velocities) with the same `v -= v>>6` drag. Its fixed-point layout and quarter-square multiplies are worth reusing, but the model below is the authentic one.
+## 1. Units
 
----
+| quantity | format |
+|---|---|
+| position | signed 32-bit, `TILE_SIZE` = &01000000 (2^24) a tile, so x and z wrap at 256 tiles. x right, **y down** (altitude is −y), z into the screen. |
+| velocity | the same, per main-loop iteration (a frame). |
+| angle | 32-bit, 2^32 a circle (2^30 = 90°). `sinTable` has 1024 entries, indexed by `angle >> 22`. |
+| unit vector | 2^31 = 1.0: `sinTable[n] = (2^31 − 1) sin(2πn/1024)`, `arctanTable[n] = ((2^31 − 1)/π) atan(n/128)` (128 entries), `squareRootTable[n] = (2^31 − 1) √(n/1024)` (1024 entries). |
+| fuel | an integer; the bar is `fuel >> 4` pixels long on three rows (`DrawFuelLevel`). |
 
-## 1. Coordinates and number formats
+Multiplication (`CalculateRotationMatrix` rmat1–4, `GetDotProduct` dotp1–3) is
+shift-and-add over bits 30..23 of one operand only, the other at full
+precision: every rotation-matrix product and every matrix × vector product is
+8 × 32 bits. cos 0 · cos 0 comes out as &7F7FFFFC. `flight.mul_lander` reproduces
+it, with Lander's choice of truncated operand.
 
-| quantity | format | source |
-|---|---|---|
-| position | signed 32-bit. **1 tile = `TILE_SIZE` = &01000000 (2^24)**, so the world wraps every 256 tiles in x and z. y covers only ±128 tiles. | config vars at top of Lander.arm |
-| axes | x right, **y down** (smaller y = higher), z into the screen | GetLandscapeAltitude header |
-| velocity | same units, per main-loop iteration ("frame") | MoveAndDrawPlayer pt 2 |
-| angles | 32-bit, **full circle = 2^32**. The sine table is indexed by `angle >> 22` (1024 entries). | CalculateRotationMatrix, `sinTable` |
-| unit vectors and matrix entries | **1.0 = 2^31** (`sinTable[n] = (2^31-1)·sin(2πn/1024)`) | `sinTable` |
-| fuel | integer. Start 3413, refuel cap &1400 (5120). Bar length is `fuel>>4` pixels. | `initialFuelLevel`, LandOnLaunchpad, DrawFuelLevel |
+The main loop (`MainLoop`) runs `MoveAndDrawPlayer`, the particles, the objects,
+the landscape, the score and fuel bar, then `SwitchScreenBank`, which waits for
+vsync (OS_Byte 19). The constants are per iteration; the rate is whatever the
+drawing allows, 50 Hz at most.
 
-Lander's multiplies (`CalculateRotationMatrix` rmat1–4, `GetDotProduct` dotp1–3) are shift-and-add over **only bits 30..23 of the first operand**. In practice every rotation-matrix product and every matrix×vector product is an **8-bit × 32-bit** multiply. `mul_lander()` in flight.py reproduces this exactly. For example, cos0·cos0 comes out as &7F7FFFFC, which is 255/256. So Lander already works at 8-bit angular precision, which is good news for a 6502.
+## 2. Camera and landscape
 
-## 2. Flight model, one main-loop iteration
+Constants (`Lander.arm`, configuration): `TILES_X` = 13 and `TILES_Z` = 11 tile
+corners (12 × 10 tiles); `LANDSCAPE_X` = 5.5 tiles; `LANDSCAPE_Z` = 20 tiles;
+`CAMERA_PLAYER_Z` = 5 tiles; `LANDSCAPE_Z_FRONT` = 10 tiles; `LANDSCAPE_Z_MID`
+= 15 tiles; `LAND_MID_HEIGHT` = 5 tiles; `SEA_LEVEL` = &05500000 (5.3125 tiles);
+`LAUNCHPAD_ALTITUDE` = &03500000 (3.3125 tiles); `LAUNCHPAD_SIZE` = 8 tiles.
 
-Sources: MoveAndDrawPlayer parts 1–5 (`/source/main/subroutine/moveanddrawplayer_part_1_of_5.html` and so on), GetMouseInPolarCoordinates parts 1–2, CalculateRotationMatrix, LandOnLaunchpad, DrawObject part 2, DrawFuelLevel, StartNewGame, PlacePlayerOnLaunchpad, PrintCurrentScore. There is also the deep dive https://lander.bbcelite.com/deep_dives/flying_by_mouse.html.
+**Camera** (`MoveAndDrawPlayer` part 3): `xCamera = xPlayer`,
+`yCamera = min(yPlayer, 0)`, `zCamera = zPlayer + CAMERA_PLAYER_Z`. It looks
+along +z, level. The camera follows the ship up but not down: below y = 0 the
+ship drops down the screen instead.
 
-### 2.1 Input → orientation (part 1, "flying by mouse")
+**Landscape block** (`DrawLandscapeAndBuffers`): corner (i, j), i = 0..12
+across and j = 0..10 from the back row, is projected at camera-relative
+(i − 5.5 − fx, altitude − yCamera, 20 − j − fz) tiles, fx and fz the fractions
+of `xCamera` and `zCamera` within their tiles; its world position is
+(⌊xCamera⌋ − 5.5 + i, ⌊zCamera⌋ − j) tiles. The block therefore slides a whole
+tile at a time, and the eye is 15 tiles behind the ship (`zPlayer − 15`), with
+the block from 10 − fz to 20 − fz tiles in front of it and the ship in the
+middle of it. The player's ship is drawn at camera-relative
+(0, max(yPlayer, 0), `LANDSCAPE_Z_MID`) with the player's rotation matrix
+(`MoveAndDrawPlayer` part 3).
 
-1. `OS_Mouse` returns x, y and buttons `%lmr`. The button byte is stored directly as `fuelBurnRate`: left = 4 (full thrust), middle = 2 (hover), right = 1 (fire). If `fuelLevel == 0` then `fuelBurnRate = 0`.
-2. `mx = min(x, 1023) - 512` (an unsigned cap, so it also catches negative values). `my = 512 - y`, so positive means the mouse was moved *down*, towards the player. y is not capped.
-3. Both values are scaled `<< 22`, so 512 counts becomes 2^31.
-4. **GetMouseInPolarCoordinates**:
-   - The angle is `atan2(my, mx)`. It uses an 8-bit restoring divide of the smaller value by the larger, then a 128-entry `arctanTable` (`((2^31-1)/π)·atan(n/128)`), then octant folding in units of 2^29 (45°).
-   - The distance is `sqrt(mx²+my²)/2`. The squares use the same 8-bit multiply (top byte only), and the square root comes from a 1024-entry `squareRootTable` (`(2^31-1)·sqrt(n/1024)`) indexed by `sum >> 22`.
-5. The distance is capped below &40000000, then `<< 1`. The result is the **target pitch**: 1 mouse count gives 180/512 ≈ 0.35° of pitch, and 512 counts gives 180°. The angle is the **target direction**.
-6. Damping and rate limit: `err = current − target`. For direction this is 32-bit wraparound, so it takes the shortest way round. `err` is clamped to ±&30000000 (67.5°; the negative clamp is −&30000001), then `current −= err >> 1`. So each frame the ship moves halfway to the mouse, by at most 33.75°.
+**Projection** (`ProjectVertexOntoScreen`, MODE 13, 320 × 256):
+x′ = 160 + 256 x/z, y′ = 64 + 256 y/z, the quotients truncated to whole pixels
+and the signs applied; the vanishing point is row 64. A vertex with z negative
+is not projected.
+
+**Altitude** (`GetLandscapeAltitude`), the coordinates taken as angles (the
+landscape repeats every 256 tiles):
+
+```
+y = LAND_MID_HEIGHT − [sin(x − 2z) + sin(4x + 3z) + sin(3z − 5x) + sin(7x + 5z)] / 128
+                    − [sin(5x + 11z) + sin(10x + 7z)] / 256
+```
+
+with the sines at the 2^31 scale, so each of the first four spans ±1 tile and
+the last two ±0.5: ±5 tiles about 5. Then y is clamped to `SEA_LEVEL` (ground
+lower than the sea is raised to it), and over the pad, 0 ≤ x, z < 8 tiles
+(unsigned), it is `LAUNCHPAD_ALTITUDE`.
+
+**Tile colour** (`GetLandscapeTileColour`), from the corner's altitude word:
+red 4 if bit 2 is set, else 0; green 4, plus 4 if bit 3 is set; blue 0. The pad
+is grey (4, 4, 4); a tile whose corner and the corner before it are both at
+`SEA_LEVEL` is blue (0, 0, 4). A brightness is added to all three channels and
+each clipped at 15: the corner row (0 at the back, 10 nearest) plus
+max(0, previous corner's altitude − this one's) >> 22, the previous corner being
+the one before it in the row's left-to-right sweep (a tile of rise gives 4).
+
+## 3. Flight model, one main-loop iteration
+
+Transcribed in `flight.step`.
+
+### 3.1 Mouse to attitude (`MoveAndDrawPlayer` part 1)
+
+1. `OS_Mouse` returns x, y and the buttons %lmr, stored as `fuelBurnRate`: left
+   = 4 (full thrust), middle = 2 (hover), right = 1 (fire). If `fuelLevel` is 0
+   the burn rate is 0.
+2. `mx = min(x, 1023) − 512` (an unsigned cap); `my = 512 − y`, positive when
+   the mouse is pulled towards the player (RISC OS y increases up the screen).
+   Both are scaled `<< 22`. `ResetMousePosition` puts the pointer at (511, 511),
+   so at rest (mx, my) = (−1, 1).
+3. `GetMouseInPolarCoordinates`: the angle is atan2(my, mx) (the smaller
+   magnitude over the larger by an 8-bit restoring division, `arctanTable`, and
+   the octant folded back in units of 2^29); the distance is
+   `squareRootTable[(mx² + my²) / 2^54]`, about half the offset. With an
+   offset of r counts the index is ⌊r²/1024⌋: the distance is 0 under 32 counts.
+4. The distance, capped below &40000000 and doubled, is the **target pitch**:
+   11.25° √⌊r²/1024⌋, so 11.25° at 32 counts, 22.5° at 64, 180° at 512. The
+   angle is the **target direction**; at rest it is 135.2°.
+5. Damping: err = current − target (the direction's wraps, so it takes the
+   shorter way round). err > 0 is capped at &30000000 (67.5°); err <
+   −&30000000 becomes −&30000001; then current −= err >> 1. Each angle moves
+   halfway to its target, 33.75° a frame at most. For the pitch, err = 0 also
+   takes the negative path (`BLE`, then `CMN`/`MVNLO` with no carry) and becomes
+   −&30000001: a pitch that exactly reaches its target kicks up 33.75° for a
+   frame and then settles from above. At rest the pitch is 1 and the target 0.
+6. Start values (`PlacePlayerOnLaunchpad`): `shipPitch` = 1, `shipDirection`
+   = 0, position (4 tiles, `LAUNCHPAD_Y`, 4 tiles), velocity 0.
 7. `CalculateRotationMatrix(a = shipPitch, b = shipDirection)`:
+
    ```
-   nose = ( cos a cos b,   sin a,  -cos a sin b)   model +x  (the gun fires along this)
-   roof = (-sin a cos b,   cos a,   sin a sin b)   model +y  (points out of the floor = exhaust)
+   nose = ( cos a cos b,   sin a,  −cos a sin b)   model +x: the gun fires along it
+   roof = (−sin a cos b,   cos a,   sin a sin b)   model +y: out through the floor; the thrust axis
    side = ( sin b,         0,       cos b      )   model +z
    ```
-   The matrix is stored row-wise (`xNose xRoof xSide / yNose … / zNose …`), so world = vx·nose + vy·roof + vz·side. A positive pitch tips the roof towards −x′, so thrust pushes the ship *towards* the mouse offset. Mouse right flies right (+x), mouse up flies into the screen (+z), and mouse back flies towards the viewer. Note that **ySide = 0**, so the y row is `(sin a, cos a, 0)`.
 
-**Quirks (inferred from the code, and reproduced by flight.py):**
-- **Pitch is quantised.** The square-root index is `(mx²+my²)/2^32 >> 22`, so the pitch target takes only the values 11.25°·√n. There is a **dead zone of about 32 mouse counts** where the pitch target is 0. The demo trajectory shows this: pitch settles at 15.9°, 19.5° or 22.5°, never at values in between.
-- At the reset position (511, 511), `(mx, my) = (−1, +1)`, so the target direction is 135°. This has no visible effect because the pitch is about 0.
-- The start values are `shipPitch = 1` and `shipDirection = 0` (PlacePlayerOnLaunchpad).
+   stored row-wise (`xNoseV xRoofV xSideV / yNoseV … / zNoseV …`), so a model
+   point rotates to vx·nose + vy·roof + vz·side. Thrust is along −roof: a
+   positive pitch at b = 0 tips the roof towards −x, so thrust pushes the ship
+   towards the mouse offset. Mouse right flies +x, mouse up (away from the
+   player) flies +z into the screen, mouse down flies −z.
 
-### 2.2 Thrust, drag, gravity, integration (part 2)
+### 3.2 Motion (`MoveAndDrawPlayer` part 2)
 
-Order matters. For each axis:
+In this order, each axis:
+
 ```
-if y < -HIGHEST_ALTITUDE:  fuelBurnRate &= ~%110        # engines cut above 52 tiles
-v  = v - (v ASR 6)                                       # drag: 1/64 per frame
-if burn & 4:  v -= roof ASR 11                           # FULL thrust ≈ 2^20 = 1/16 tile/f²
-pos += v                                                 # integrate
-if burn & 2:  v -= roof ASR 13                           # HOVER ≈ 2^18, applied AFTER the move
-vy += gravity                                            # +&30000 (y is down)
+if y < −HIGHEST_ALTITUDE:  fuelBurnRate &= ~%110    # above 52 tiles the engines cut
+v −= v ASR 6                                         # drag
+if burn & 4:  v −= roof ASR 11                       # full thrust
+pos += v
+if burn & 2:  v −= roof ASR 13                       # hover, after the move
+vy += gravity
 ```
-The exhaust vector saved for particles is `roof`. Both thrust bits can be on together (left and middle buttons), giving 1.25× full thrust.
 
-| constant | value | in tiles/frame or frame² | note |
+The roof vector is kept as `xExhaust` for the exhaust particles. Both thrust
+bits can be set at once.
+
+| constant | value | tiles/frame or tiles/frame² |
+|---|---|---|
+| gravity (`StartNewGame`) | &30000 | 0.0117 |
+| gravity from a score of 1024 (`PrintCurrentScore`) | &50000 | 0.0195 |
+| gravity from a score of 1488 | &70000 | 0.0273 |
+| full thrust | roof >> 11, up to 2^20 | 0.0625 (5.33 g at &30000) |
+| hover | roof >> 13, up to 2^18 | 0.0156 (1.33 g at &30000) |
+| drag | v >> 6 a frame | terminal fall 64 g: 0.75 tiles/frame at &30000 |
+| `HIGHEST_ALTITUDE` | 52 tiles | |
+
+The score starts at 500 (`initialScore`) and each bullet costs 1
+(`MoveAndDrawPlayer` part 5).
+
+### 3.3 Ground, landing, crash (`MoveAndDrawPlayer` part 3, `LandOnLaunchpad`, `DrawObject` part 2)
+
+```
+safe_y = GetLandscapeAltitude(x, z) − UNDERCARRIAGE_Y       # &640000 = 0.390625 tiles
+if (safe_y − y) < SAFE_HEIGHT, unsigned:                     # within 1.5 tiles above it
+    if objectMap[z >> 24][x >> 24] in 1..11:  crash
+if y > safe_y:                                               # LandOnLaunchpad
+    if x >= 8 tiles or z >= 8 tiles, unsigned:  crash        # off the pad
+    if |vx| + |vy| + |vz| < LANDING_SPEED:                   # &200000 = 1/8 tile/frame
+        y = LAUNCHPAD_Y; v = 0                               # &2EC0000 = 2.921875 tiles
+        if fuel + &20 < &1400:  fuel += &20
+    # else nothing: the ship sinks on until a vertex reaches the pad
+DrawObject: for each of the 9 vertices, project it and the ground point below it;
+    if the vertex's screen row >= its shadow's:  crash
+```
+
+- The vertex test works on pixel rows at the ship's depth of 15 tiles, so a
+  vertex within about 0.06 tiles of the ground counts, and the ground is
+  sampled under each vertex: a tilted ship can touch a slope with a wingtip.
+- At rest on the pad gravity sinks the ship a step and `LandOnLaunchpad` puts
+  it back, on alternate frames; so a parked ship refuels 32 every other frame,
+  to a level below &1400 (5120).
+- Fuel (`DrawFuelLevel`, later in the iteration): `fuel = max(0, fuel −
+  fuelBurnRate)`, the whole byte, so 4 a frame on full thrust, 2 hovering, 6
+  with both, and 1 for the fire button. The start level is 3413
+  (`initialFuelLevel`).
+
+## 4. Ship blueprint (`objectPlayer`)
+
+Header: 9 vertices, 9 faces, flags %11 (bit 0: rotates, bit 1: casts a shadow,
+as `MultiplyVectorByMatrix` and `DrawObject` read them). Coordinates in
+tiles (raw / 2^24, y down); normals / 2^31; colours &rgb.
+
+| v | x | y | z |
 |---|---|---|---|
-| gravity, level 1 | **&30000** | 0.01172 | StartNewGame |
-| gravity, score ≥ 1024 | **&50000** | 0.01953 | PrintCurrentScore |
-| gravity, score ≥ 1488 | **&70000** | 0.02734 | PrintCurrentScore |
-| full thrust | roof>>11, max ≈ **&FFFFF** | 0.0625 (5.33 g at level 1) | |
-| hover | roof>>13, max ≈ **&3FFFF** | 0.0156 (1.33 g at level 1) | hover only *holds height* at level 1. At &50000 and &70000 it can't. **(inferred)** |
-| drag | v ASR 6 | | terminal fall speed 64·g = 0.75 tiles/frame |
-| HIGHEST_ALTITUDE | 52 tiles (y < −&34000000) | | thrust and hover are cut above this |
+| 0 | 1.0 | 0.3125 | 0.5 |
+| 1 | 1.0 | 0.3125 | −0.5 |
+| 2 | 0 | 0.0391 | −1.2 |
+| 3 | −0.9 | 0.3125 | 0 |
+| 4 | 0 | 0.0391 | 1.2 |
+| 5 | −0.1 | −0.46875 | 0 |
+| 6 | 0.3333 | 0.3125 | 0.25 |
+| 7 | 0.3333 | 0.3125 | −0.25 |
+| 8 | −0.2 | 0.3125 | 0 |
 
-Fuel (DrawFuelLevel, called later in the same main-loop iteration): `fuel = max(0, fuel − fuelBurnRate)`. That burns 4 per frame on full thrust, 2 on hover, and 6 with both. Note that **the code subtracts the whole byte, so holding fire costs 1 per frame**. The commentary and the deep dive say bit 0 is ignored, but the instruction is `SUBS R1, R1, R2` on the unmasked `LDRB`. I've followed the code, but **this is uncertain**. The deep dive may describe intent, or something I haven't found may mask it. Also, when fuel = 0 the burn rate is forced to 0, so you can't fire either.
-
-### 2.3 Ground, landing, crash (part 3, LandOnLaunchpad, DrawObject part 2)
-
-```
-safe_y = GetLandscapeAltitude(x, z) - UNDERCARRIAGE_Y                     # &640000 = 0.39 tiles
-if 0 <= (safe_y - y) < SAFE_HEIGHT (1.5 tiles, unsigned compare):
-    if objectMap[z>>24][x>>24] in 1..11:  crash                        # trees, buildings, rockets
-if y > safe_y:                                                          # LandOnLaunchpad
-    if x >= 8 tiles or z >= 8 tiles (unsigned):  crash                  # not over the pad
-    if |vx|+|vy|+|vz| < LANDING_SPEED (&200000 = 1/8 tile/frame):
-        y = LAUNCHPAD_Y (&3500000-&640000); v = 0
-        if fuel+&20 < &1400: fuel += &20                                # refuel 32/frame
-    # else: nothing happens yet ...
-DrawObject: for each of the 9 ship vertices, project the vertex and the ground point below it.
-    if screen_y(vertex) >= screen_y(shadow): crash                     # vertex at or under the ground
-```
-- The launchpad is `0 ≤ x, z < LAUNCHPAD_SIZE` (8 tiles) at `LAUNCHPAD_ALTITUDE` = &03500000. Sea level is &05500000. Ground is `LAND_MID_HEIGHT` (5 tiles) minus a 6-term sine sum/256 (GetLandscapeAltitude). It is implemented in flight.py.
-- A landing that is too fast over the pad is *not* an immediate crash. The ship keeps sinking until a vertex reaches the pad, and then the vertex/shadow test kills it. That test works on **projected pixel rows**: `64 ± floor(256·y/z)` at the ship's depth of z = 15 tiles. So in effect it is "vertex within one pixel (~0.06 tile) of the ground", and it samples the ground under *each* vertex. A tilted ship can therefore clip a hillside with a wingtip.
-- Sitting on the pad: gravity is added after the move, so the ship alternately sinks by one gravity step and gets snapped back. "landed" fires every other frame.
-- Bullets (part 5): fire along nose/256 plus the ship velocity, and each one costs 1 point of score (`currentScore` starts at 500). These are out of scope here.
-
-### 2.4 Frame rate
-
-The main loop waits for vsync in SwitchScreenBank (`OS_Byte 19`), so all the per-frame constants are **per main-loop iteration at ≤50 Hz**. The source doesn't fix the actual frame rate on period hardware (my guess is 25–50 Hz, depending on scene complexity). Choose the BBC rate first, then rescale: if the BBC runs at half Lander's rate, double gravity and thrust (per frame²), use `v>>5` for drag, and double LANDING_SPEED.
-
-## 3. Ship blueprint (`objectPlayer`)
-
-Source: https://lander.bbcelite.com/source/main/variable/objectplayer.html and the deep dives `object_blueprints.html` and `drawing_3d_objects.html`. The header is `9, 9, offset, flags=%11` (rotates, has shadow).
-
-**9 vertices, 9 triangular faces.** Coordinates are in tiles (raw ÷ 2^24, y down), and also given in **1/64 tile**, a suggested byte format for the BBC.
-
-| v | x | y | z | ×64 |
-|---|---|---|---|---|
-| 0 | 1.0 | 0.3125 | 0.5 | 64, 20, 32 |
-| 1 | 1.0 | 0.3125 | −0.5 | 64, 20, −32 |
-| 2 | 0 | 0.0391 | −1.2 | 0, 2.5, −76.8 |
-| 3 | −0.9 | 0.3125 | 0 | −57.6, 20, 0 |
-| 4 | 0 | 0.0391 | 1.2 | 0, 2.5, 76.8 |
-| 5 | −0.1 | −0.46875 | 0 | −6.4, −30, 0 (apex, top) |
-| 6 | 0.3333 | 0.3125 | 0.25 | 21.3, 20, 16 |
-| 7 | 0.3333 | 0.3125 | −0.25 | 21.3, 20, −16 |
-| 8 | −0.2 | 0.3125 | 0 | −12.8, 20, 0 |
-
-| face | verts | normal (÷2^31) | colour &rgb |
+| face | vertices | normal | colour |
 |---|---|---|---|
 | 0 | 0 1 5 | 0.543, −0.764, 0 | &080 |
 | 1 | 1 2 5 | 0.422, −0.783, −0.296 | &040 |
@@ -135,66 +214,60 @@ Source: https://lander.bbcelite.com/source/main/variable/objectplayer.html and t
 | 4 | 3 4 5 | −0.616, −0.631, 0.318 | &040 |
 | 5 | 1 2 3 | −0.067, 0.900, −0.255 | &088 |
 | 6 | 0 3 4 | −0.067, 0.900, 0.255 | &088 |
-| 7 | 0 1 3 | 0, 0.9375, 0 | &044 (floor) |
-| 8 | 6 7 8 | 0, 0.9375, 0 | &C80 (orange exhaust plate, coplanar with face 7 and drawn after it) |
+| 7 | 0 1 3 | 0, 0.9375, 0 | &044 (the floor) |
+| 8 | 6 7 8 | 0, 0.9375, 0 | &C80 (the exhaust plate, in the floor's plane, drawn after it) |
 
-Checks done by `ship.py`:
-- Every normal has length exactly **0.9375** (15/16, i.e. &78000000).
-- Every normal points outward from the centroid.
-- Every normal is exactly parallel to its face's cross product. Winding is *not* consistent: faces 0–4 are wound one way and faces 5–8 the other. So Lander culls by the stored normals and never by winding. Use the normals.
+A low five-sided pyramid: the wide edge 0–1 at +x (the nose), the point 3 at
+−x, wingtips 2 and 4 at z = ∓1.2, the apex 5 on top, the floor flat at
+y = 0.3125. On the pad the floor is 0.078 tiles above the surface
+(`UNDERCARRIAGE_Y` = 0.390625).
 
-Shape: the ship is a low five-sided pyramid. The wide edge v0–v1 is at +x, the point v3 is at −x, there are wingtips at z = ±1.2, the apex v5 is on top, and the floor is flat at y = +0.3125. The gun fires along +x (the nose vector). On the pad, the floor sits 0.078 tiles above the pad surface, because UNDERCARRIAGE_Y (0.39) is greater than the floor depth (0.3125).
+`ship.check_data` confirms: every normal has length 15/16 (0.9375) and points
+outward; each is exactly parallel to its face's edge cross product, against
+the winding for faces 0–4 and with it for 5–8, so Lander culls by the stored
+normals, never the winding.
 
-### How Lander draws it (DrawObject parts 1–5)
+**Drawing** (`DrawObject`): each vertex is rotated (`MultiplyVectorByMatrix`,
+the matrix entries the truncated operands), offset by the object's position and
+projected; the ground point below it is projected too (`GetLandscapeBelowVertex`,
+the shadow points, which also serve the crash test). Then for each face in
+blueprint order: the normal is rotated; if its y < 0 (the face looks up) and the
+flags' bit 1 is set, a black shadow triangle is drawn on the shadow points; the
+face is culled if its rotated normal dotted with the object's position vector
+is ≥ 0 (the object's centre, not the face's: an approximation that suits a small
+convex object); otherwise shaded and filled. Nothing is sorted within an object;
+the object as a whole goes into the graphics buffer for its depth.
 
-1. **Transform.** Each vertex goes through MultiplyVectorByMatrix (9 dot products using the 8-bit multiply), then gets the object position added, then ProjectVertexOntoScreen (`x′ = 160 + 256·x/z`, `y′ = 64 + 256·y/z` on the 320×256 screen, worked out with normalising shifts and restoring division). The ship is always drawn at camera-relative `(0, max(yPlayer, 0), 15 tiles)`, so it stays in the centre of the screen and only drops when it is below y = 0. The camera follows `(x, min(y, 0), z + 5 tiles)`.
-2. **Shadow points.** Every vertex is also projected at the ground altitude below it, and these points are used for the crash test.
-3. **Back-face cull.** Rotate the face normal, then take `dot(object-centre vector, normal) < 0`. This uses the object *centre*, not the face, which is an approximation that suits small convex objects.
-4. **Shadow.** If the rotated normal has y < 0 (it faces up), the face is drawn as a black triangle using the shadow points, one depth bucket further back.
-5. **Shading.** `b = ((&80000000 − ny_rot) mod 2^32) >> 28`, plus 1 if `nx_rot < 0` (the light is above and slightly left), then `b = max(0, b − 5)`. Add b to each 4-bit channel of &rgb, clip at 15, and pack into a VIDC 256-colour byte. The source comment says "0 to 8" and "0..3", but by my arithmetic the range is 0..11 (up to 10 for these normals). **(inferred, and differs from the commentary.)**
-6. **Depth sorting.** There is none inside an object. Visible faces are drawn in **blueprint order** (so face 8 lands on top of face 7). The whole object goes into one of the per-tile-row graphics buffers chosen by `zObject` (the "depth-sorting with the graphics buffers" deep dive), and the buffers are drawn back to front interleaved with the landscape rows.
+**Shading**: brightness = ((&80000000 − ny) mod 2^32) >> 28, +1 if nx < 0,
+−5, floored at 0, from the rotated normal (nx, ny): 0..11, brightest facing up
+and a step brighter facing left. It is added to each 4-bit channel of &rgb,
+clipped at 15, and packed into a VIDC 256-colour byte.
 
-## 4. Recommendations for the BBC port
+## 5. What this game takes
 
-**Model size.** 9 vertices, 9 faces. Usually 4–6 faces are visible. The underside (faces 5–8) shows whenever the ship tilts its floor towards the camera, i.e. when it thrusts into the screen. From the object-centre test, face 7 is visible when cos a·y_draw + 15·sin a·sin b < 0. **(inferred)**
-
-**Suggested fixed point formats (all 6502-native):**
-- Angles: bytes, 256 to the circle. Pitch 0..127 covers 0..180°.
-- sin and cos: signed bytes ±127. This loses nothing, because Lander's own multiply keeps only 8 bits.
-- Matrix: 8 signed bytes. ySide = 0, and yNose and yRoof are just sin and cos. Only the four cross terms need multiplies (quarter-square 8×8).
-- Vertices: signed bytes at **1 tile = 64**. The largest value is ±77, so there is headroom. The 1/3- and 1/5-tile values round to 21 and 13.
-- Normals: signed bytes. Lander's normals are exactly 120/128, so they fit a byte with room to spare.
-- Position: 24-bit per axis at 2^15 per tile. Velocity: signed 16-bit at 2^−15 tile per frame (Lander >> 9). Then gravity is 384, full thrust is roof·16 (2032), hover is roof·4 (508), LANDING_SPEED is 4096, and drag is `v − (v>>6)`. `step_lite()` in flight.py implements exactly this. Over 160 frames it stays within about 1 tile of the full 32-bit model (see `compare_demo`).
-
-**Input.** Keep Lander's feel with a **virtual mouse**. Keys nudge a signed-byte offset (sx, sy) and centre it on release (or not, to taste). Then:
-- `target_dir = atan2(sy, sx)`: octant fold plus a 32-entry atan table.
-- `target_pitch = |(sx, sy)|`: a 16×16 table or the `max + min/2` approximation.
-- Apply the same "halve the error, cap at 48/256" damping.
-
-Separate rotate and tilt keys would be simpler, but they lose Lander's characteristic control. Thrust, hover and fire map to three keys.
-
-**Physics per frame.** Two 8×8 multiplies (sin a·cos b and sin a·sin b) give the roof vector. Three 16-bit drag subtractions, three thrust adds and three 24-bit position adds are fine. Allow about **0.6k cycles**.
-
-**Crash test.**
-- Replace the 9 per-vertex ground samples with one ground sample under the ship's centre (from bandfill's height field), plus a lowest-vertex test. The vertex height offset is `sin a·vx + cos a·vy`, two multiplies, for vertices 0, 1, 3 and 5 only.
-- Landing: centre below `ground − undercarriage`, over the pad, and `|vx|+|vy|+|vz| < LANDING_SPEED`.
-
-**Draw cost, rough estimate for a 2 MHz 6502** (the quarter-square 8×8 signed multiply is about 50 cycles):
-- Matrix: 4 multiplies, about 0.3k cycles.
-- Vertex rotation: 9 vertices × 8 multiplies, minus the zero terms, is about 60 multiplies plus 16-bit adds. About **4k cycles**.
-- Projection: the ship's depth is fixed at about 15 tiles ± 1.2, so weak perspective (scale by 1/15, optionally with a `1 − rz/15` correction from a small table) costs about 9 × 2 multiplies. About 1k cycles. A true 1/z per vertex via a reciprocal table is about 1.5k.
-- Back-face test: with the view vector (0, ≈0, 1), visibility is just the sign of the rotated normal's z, which is 3 multiplies per face. About 1.4k cycles. Shading needs the rotated normal's y as well (another 3 multiplies), about 1.4k cycles.
-- Fill: the ship is roughly 30 × 15 MODE 1 pixels on bandfill's 256-wide screen (Lander's 256-pixel focal length at 15 tiles gives about 17 px per tile at 320 wide, so about 14 px per tile at 256 wide). With 4–6 small triangles, budget about **3–5k cycles** with a simple byte-span filler. Map the 0..11 brightness to bandfill's 2×2 CMY/black dithers.
-- **Total: about 10–13k cycles per frame**, which is about 25–30% of a 50 Hz frame (40k cycles).
-- Cheaper alternative: precompute the projected 9 vertices (2 bytes each) plus a visible-face mask and a shade per face for each of 32 directions × 16 pitches. That is 512 orientations × about 24 bytes, roughly **12 KB**, which fits the 32 KB sideways RAM budget. The transform then drops to almost nothing, and the per-frame ship cost becomes fill only (about 4–6k).
-- A ground shadow can use the same projected points with y replaced by the single ground height under the ship. That is cheap, and it gives the important visual cue for altitude.
-
-## 5. Uncertainties and things to check
-
-- **Fuel cost of firing.** The code subtracts it (1 per frame); the commentary says it doesn't. See 2.2.
-- **Brightness range.** I get 0..11 from the code; the commentary says 0..8 then 0..3. See the shading step in section 3.
-- **Frame rate.** This is not knowable from the source. All constants are per main-loop iteration.
-- **Lookup tables.** flight.py generates the tables from Moxon's formulas. They differ from the hard-coded EQUDs by ≤3 LSB in 2^31 (checked against the source), so they are not bit-exact.
-- **Projection in the crash test.** `_project_y` models only the main branch of ProjectVertexOntoScreen (|y| ≤ z), which always applies at the ship's depth. Negative screen rows are not handled (they would be compared unsigned in the original).
-- **Object map.** The object collision path is coded, but `object_at()` returns "no object". The landscape is implemented; objects are not.
-- **Mouse units.** It's unclear whether OS_Mouse counts are per mickey or OS units in Lander's mode. The "32-count dead zone" is in whatever units OS_Mouse returns, centred on (511, 511).
+- `tools/shipgen.py` imports `ship.py`'s `VERTICES`, `FACES`, `TILE`, `ONE`,
+  `rotation_matrix`, `mat_vec` and `lander_brightness`: the ship is rotated by
+  Lander's matrix for every (pitch, direction) the BBC draws, culled by its
+  normals against the fixed view vector, shaded by Lander's rule, and projected
+  in parallel at 14 pixels a tile (its header).
+- `src/game.s` follows section 3 with one step a frame at 10 frames a second,
+  each step taken as 1.25 of Lander's (its header): gravity, full thrust along
+  the roof vector, the 1/64 drag, the fuel burn and the refuel rate are 1.25
+  times Lander's per step with the velocities kept in Lander's units, so
+  `LANDING_SPEED` is unchanged; the refuel limit &1400 (5120) is the tank's
+  size and the ship starts full (`initialFuelLevel`, 3413, is defined and
+  unused); hover is coded (`HOVS`) but no key produces it; the undercarriage is
+  a quarter tile (`UNDER`, Lander's 0.39 scaled to the drawn ship); the engines
+  cut once the land has left the screen (`HIGHEST_ALTITUDE` in effect). Its
+  pad is 6 tiles (`PADN`) for Lander's 8, the ship 13 tiles from the camera
+  (`ZSHIP`) for Lander's 15, the camera a fixed height above the ground under
+  the ship, raised with the ship (`CAME`) rather than following `min(y, 0)`,
+  and the attitude comes from keys in fixed steps (32 directions, 13 pitches
+  10° apart) rather than the mouse.
+- `proto/land.py` and `src/land.s` take section 2's block: 13 × 11 corners with
+  the back row at 20 − fz and corners at i − 5.5 − fx, projected with Lander's
+  256-pixel focal length onto a 256-pixel-wide screen (a narrower view, the line
+  of sight at x = 128, the horizon above the screen), and the six-sine altitude
+  formula, rescaled to 16 height units a tile over a 64-tile wrapping map with
+  its own sea level. The tile colours are the game's own (`land.colour`), not
+  Lander's rule.

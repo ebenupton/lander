@@ -1,10 +1,27 @@
 #!/usr/bin/env python3
-"""Run LAND's bank 6 `shipdraw` (build/land/SHIPB at $8000) in py65 for every orientation
-(and a few centres) over a random screen, and check every byte against
-tools/shipgen.py's reference: the ship's pixels in their dithers, every other pixel
-untouched.  Prints the cycles (as test/shiptest.py does for SHIP, the demo).
+"""Bank 6's `shipdraw` run in py65 for every orientation, each drawing checked
+byte for byte against tools/shipgen.py's rasteriser.
 
     python3 test/shipbtest.py [centres]
+
+    centres  the centres drawn at (default 4): the first of (128, 98),
+             (127, 99), (17, 87), (238, 124), (19, 86), (236, 125), then
+             random ones in x 17..238, y 86..125 for any beyond six.  Fewer
+             than six: screen 0 ($3000) only; six or more: both screens.
+
+The machine: build/SHIPB at $8000 on a plain py65 memory (no bank switching:
+nothing else is loaded), LAND's `scrb` (zero page, from build/labels.txt)
+set to the screen's high byte.  For each screen, centre, pitch (0..NPITCH-1)
+and direction (0..NDIR-1): the screen's 10K filled with random bytes; shk,
+shp, shx, shy written (bank 6's, from build/shipb_labels.txt); `shipdraw`
+called.  Checked: every byte of the screen equals the random fill with the
+ship's pixels (shipgen.draw: palette entry + 1) replaced by their dither
+bytes, so each pixel outside the ship is untouched; and the box bxl, bxr, byt,
+byb equals the ship's pixel extent.  The first five failures are described
+(the differing bytes' lines and columns).
+
+Prints "<drawings> drawings, <failed> failed" and shipdraw's cycles (mean,
+min, max: the call's, as if by JSR); exit status 1 if any drawing failed.
 """
 import os
 import random
@@ -19,12 +36,14 @@ import shipgen as G   # noqa: E402
 import landgen as LG  # noqa: E402
 
 B = os.path.join(ROOT, 'build')
-RET = 0xFF00
-PIXM = [0x88, 0x44, 0x22, 0x11]
-DB = [LG.dither_bytes(e) for e in range(35)]
+RET = 0xFF00                                     # where a call returns to
+PIXM = [0x88, 0x44, 0x22, 0x11]                  # a MODE 1 byte's pixel p
+DB = [LG.dither_bytes(e) for e in range(35)]     # each dither: even, odd line bytes
+FIXED = [(128, 98), (127, 99), (17, 87), (238, 124), (19, 86), (236, 125)]
 
 
 def labels(f):
+    """ld65's label file in build/ (lines "al <hex> .<name>"): {name: address}."""
     out = {}
     for ln in open(os.path.join(B, f)):
         _, a, name = ln.split()
@@ -33,6 +52,8 @@ def labels(f):
 
 
 def call(mpu, addr):
+    """Run the routine at addr as if by JSR (a return to RET pushed) until it
+    returns; its cycles, the JSR's 6 included.  Raises after 200K cycles."""
     mpu.memory[0x1FF], mpu.memory[0x1FE] = (RET - 1) >> 8, (RET - 1) & 0xFF
     mpu.sp = 0xFD
     mpu.pc = addr
@@ -52,8 +73,7 @@ def main():
     code = open(os.path.join(B, 'SHIPB'), 'rb').read()
     mem[0x8000:0x8000 + len(code)] = list(code)
     rng = random.Random(1)
-    cens = [(128, 98), (127, 99), (17, 87), (238, 124), (19, 86), (236, 125)] + \
-           [(rng.randint(17, 238), rng.randint(86, 125)) for _ in range(max(0, ncen - 6))]
+    cens = FIXED + [(rng.randint(17, 238), rng.randint(86, 125)) for _ in range(max(0, ncen - 6))]
     cyc, bad, n = [], 0, 0
     for scr0 in (0x3000, 0x5800):
         for cx, cy in cens[:max(ncen, 1)]:
@@ -89,6 +109,7 @@ def main():
             break
     print(f'{n} drawings, {bad} failed')
     print(f'shipdraw: mean {sum(cyc) / len(cyc):.0f}, min {min(cyc)}, max {max(cyc)} cycles')
+    sys.exit(1 if bad else 0)
 
 
 if __name__ == '__main__':

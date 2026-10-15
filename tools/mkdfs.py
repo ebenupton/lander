@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
-"""Build an Acorn DFS single-sided disc image (.ssd), or the sector table of one.
+"""Write an Acorn DFS single-sided disc image (.ssd), or the sector table of one.
 
-`build` writes the image: 80 tracks of 10 sectors, the catalogue in sectors 0 and 1, the
-files from sector 2 on in the order given, boot option 3 (*EXEC !BOOT).  `table` writes the
-ca65 include the game's loader reads the files by -- F_<name>_SEC and F_<name>_N, the first
-sector and the sector count of each -- laying the files out exactly as `build` does, so the
-two agree.  A file name may carry a DFS directory ('D.NAME'); in the table '!' becomes
-'BOOT' and a '$.' directory is dropped from the symbol.
+`build` writes the image: 80 tracks of 10 sectors of 256 bytes, the catalogue in sectors
+0 and 1, the files from sector 2 on in the order given, each starting a sector, boot
+option 3 (*EXEC !BOOT on SHIFT+BREAK).  `table` writes a ca65 include with each file's
+place on such a disc, F_<name>_SEC (its first sector) and F_<name>_N (its sectors), laid
+out as `build` lays the same files out, for a loader that reads sectors directly.  A file
+name may carry a DFS directory ('D.NAME'); in the table's symbols '!' becomes 'BOOT' and
+a '$.' directory is dropped.
 
 Usage:
     python3 tools/mkdfs.py build out.ssd title name:path[:load[:exec]] ...
     python3 tools/mkdfs.py table files.inc name:path ...
-(build.sh runs both, from the game's directory; load and exec are hex, exec defaults to load.)
+(load and exec are hex; exec defaults to load.  build.sh uses `build`.)
 """
-import sys, struct
+import sys
+
 
 def build(out, title, files, boot=3):
-    """Write the image: files is a list of (name, data, load, exec).  The catalogue lists the
-    files by descending start sector, as DFS does; at most 31 files, and the files must fit
-    the 800 sectors."""
+    """Write the image to `out`.  files: [(name, data, load, exec)], placed from sector 2
+    in order; title: the disc title (12 characters at most, 8 in sector 0 and 4 in
+    sector 1).  At most 31 files, and they must fit the 800 sectors.  The catalogue
+    lists the files by descending start sector, as DFS writes it."""
     sectors = 800
     cat0 = bytearray(256)
     cat1 = bytearray(256)
     cat0[0:8] = title[:8].ljust(8).encode()
     cat1[0:4] = title[8:12].ljust(4).encode()
-    # the catalogue's cycle number, the entry count * 8, the boot option with the sector
-    # count's high bits, the sector count's low byte
-    cat1[4] = 1
-    cat1[5] = len(files) * 8
-    cat1[6] = ((boot & 3) << 4) | ((sectors >> 8) & 3)
+    cat1[4] = 1                                 # the cycle number
+    cat1[5] = len(files) * 8                    # the entries' bytes
+    cat1[6] = ((boot & 3) << 4) | ((sectors >> 8) & 3)   # the boot option, sectors bits 9-8
     cat1[7] = sectors & 255
     img = bytearray(sectors * 256)
     entries = []
@@ -48,23 +49,24 @@ def build(out, title, files, boot=3):
             d, name = name.split('.', 1)
         o = 8 + i * 8
         cat0[o:o + 7] = name[:7].ljust(7).encode()
-        cat0[o + 7] = ord(d)
+        cat0[o + 7] = ord(d)                    # the directory (its bit 7, locked, clear)
         cat1[o] = load & 255
         cat1[o + 1] = (load >> 8) & 255
         cat1[o + 2] = exe & 255
         cat1[o + 3] = (exe >> 8) & 255
         cat1[o + 4] = length & 255
         cat1[o + 5] = (length >> 8) & 255
-        # the mixed byte: bits 17-16 of exec, length and load, and bits 9-8 of the start sector
+        # bits 17-16 of exec, length and load, and bits 9-8 of the start sector
         cat1[o + 6] = (((exe >> 16) & 3) << 6) | (((length >> 16) & 3) << 4) | (((load >> 16) & 3) << 2) | ((start >> 8) & 3)
         cat1[o + 7] = start & 255
     img[0:256] = cat0
     img[256:512] = cat1
     open(out, 'wb').write(img)
 
+
 def layout(files):
-    """{name: (start sector, sector count)} for the files, allocated as build() allocates
-    them: from sector 2, in order, whole sectors each."""
+    """{name: (first sector, sectors)} for files ([(name, data, load, exec)]) as build()
+    places them: from sector 2, in order, whole sectors each."""
     sec = 2
     res = {}
     for (name, data, load, exe) in files:
@@ -72,6 +74,7 @@ def layout(files):
         res[name] = (sec, nsec)
         sec += nsec
     return res
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 3 or sys.argv[1] not in ('table', 'build'):

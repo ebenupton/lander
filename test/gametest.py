@@ -1,9 +1,44 @@
 #!/usr/bin/env python3
-"""Run LAND's game loop in py65 (no OS: the keyboard faked at the system VIA), with
-scripted keys, and print the ship's state each frame.  For debugging src/game.s.
+"""The game loop run in py65 with scripted keys, the ship's state printed each
+frame.  For debugging src/game.s; exit status 0 unless a frame fails to run.
 
-    python3 test/gametest.py [script]     script: frames:keys,... e.g. "20:,30:T,40:TK"
-                                          keys: L R F B (mouse), T thrust, H hover, P the F key (frame rate)
+    python3 test/gametest.py [script]      default "10:,20:T,30:"
+
+    script  frames:keys, comma separated: that many frames with those keys
+            held.  Keys (the game's, src/game.s `keys`): L Z (yaw left),
+            R X (yaw right), F K (nose down), B M (nose up), T SPACE (thrust),
+            H SHIFT (full thrust too), P F (LAND's frame-rate readout on or
+            off: fpson, which nothing here reads).  The cursor keys, which
+            `keys` also scans for the same bits, are not faked.
+
+Each line: the frame number, the keys, the frame's cycles (frame()'s: see
+there), then state(): x, z (tiles), y (height units, 16 a tile), v (gvx,
+gvy, gvz, 16-bit), m (gmx, gmz: unused, 0), k, p (direction, pitch), fuel,
+landed, ctim (crash steps left), L and C (nland, ncrash: BCD), hg (HGV: the
+ground under the ship), came (CAME), shy (GSHY: the ship's line).
+
+Importable: Game() builds the machine and runs G_INIT; frame(keys) runs a
+frame; state() describes the ship; rd(name, n) reads n bytes at a label.
+
+The machine: build/LAND at $1900; TABLES, TABLES2, SHIPB and TABLES7 as
+sideways banks 4..7, a write to ROMSEL ($FE30) paging one in at $8000 (the
+bank paged out keeps the writes made to it).  The keyboard at the system
+VIA's port A ($FE4F): the game writes a key's number there and reads bit 7
+for pressed; here the write selects the key and the read returns bit 7 set
+if it is in the held set (psg's bytes to the sound chip go through the same
+register: each only selects a key, which the next key's write replaces; the
+VIA's and CRTC's other registers are plain memory).  No OS and no LANDS: the
+game's letters at GLY5 (bank 5's $BE00, which LANDS's glyphs5 fills from the
+OS's character set) are zero in build/TABLES2, so G_INIT's FUEL label draws
+blank.  `init` run, `back` set to 0 and `setback` run, as LAND's start does,
+then G_INIT.
+
+A frame, as LAND's main loop without the readout: vcount advanced by vs (the
+vertical syncs the event handler would have counted: `strips` waits for one
+since the flip and `flip` for FMIN, 4); G_STEP (the keys, a step of flight,
+the camera); B6_KEYS (the ship's attitude and place into bank 6); `project`;
+`strips`; G_PRE (the dots beyond the ship); B6_SHIP if GSHV (not while
+crashed); G_POST (the other dots, the map, the status); `flip`.
 """
 import os
 import sys
@@ -13,11 +48,17 @@ from py65.memory import ObservableMemory
 
 ROOT = os.path.join(os.path.dirname(__file__), '..')
 B = os.path.join(ROOT, 'build')
-RET = 0xFF00
+RET = 0xFF00                                     # where a call returns to
+ROMSEL = 0xFE30
+SVIA_ORA_NH = 0xFE4F
+B6_KEYS, B6_SHIP = 0x00, 0x03                    # bank 6's entries, call6's A
+G_INIT, G_STEP, G_POST, G_PRE = 0x00, 0x03, 0x06, 0x09   # bank 5's, call5's A
+CAME, HGV, GSHY, GSHV = 0x07D6, 0x07D7, 0x07DE, 0x07DF   # LAND's and the game's
 KEYS = {'L': 0x61, 'R': 0x42, 'F': 0x46, 'B': 0x65, 'T': 0x62, 'H': 0x00, 'P': 0x43}
 
 
 def labels(f='labels.txt'):
+    """ld65's label file in build/ (lines "al <hex> .<name>"): {name: address}."""
     out = {}
     for ln in open(os.path.join(B, f)):
         _, a, name = ln.split()
@@ -26,6 +67,8 @@ def labels(f='labels.txt'):
 
 
 class Game:
+    """LAND and the game in py65, with the faked bank switching and keyboard."""
+
     def __init__(self):
         self.lab = labels()
         self.banks = {4: bytearray(open(os.path.join(B, 'TABLES'), 'rb').read()),
@@ -33,9 +76,9 @@ class Game:
                       6: bytearray(open(os.path.join(B, 'SHIPB'), 'rb').read().ljust(0x4000, b'\0')),
                       7: bytearray(open(os.path.join(B, 'TABLES7'), 'rb').read())}
         self.mem = mem = ObservableMemory()
-        self.cur = 4
-        self.held = set()
-        self.sel = 0
+        self.cur = 4                             # the bank paged in
+        self.held = set()                        # the keys held, by number
+        self.sel = 0                             # the key the game last selected
 
         def romsel(addr, value):
             if value in self.banks and value != self.cur:
@@ -50,22 +93,21 @@ class Game:
 
         def ora_r(addr):
             return self.sel | (0x80 if self.sel in self.held else 0)
-        mem.subscribe_to_write([0xFE30], romsel)
-        mem.subscribe_to_write([0xFE4F], ora_w)
-        mem.subscribe_to_read([0xFE4F], ora_r)
+        mem.subscribe_to_write([ROMSEL], romsel)
+        mem.subscribe_to_write([SVIA_ORA_NH], ora_w)
+        mem.subscribe_to_read([SVIA_ORA_NH], ora_r)
         self.mpu = MPU(memory=mem)
         code = open(os.path.join(B, 'LAND'), 'rb').read()
         self.mpu.memory[0x1900:0x1900 + len(code)] = code
         mem._subject[0x8000:0xC000] = self.banks[4]
-        # GLY digits: fake glyphs (the OS makes them)
-        for i in range(256):
-            self.mpu.memory[0x1800 + i] = 0
         self.call(self.lab['init'])
         self.mpu.memory[self.lab['back']] = 0
         self.call(self.lab['setback'])
-        self.call5(0x00)
+        self.call5(G_INIT)
 
     def call(self, addr):
+        """Run the routine at addr as if by JSR (a return to RET pushed) until
+        it returns; its cycles.  Raises after 3M cycles."""
         m = self.mpu
         m.memory[0x1FF], m.memory[0x1FE] = (RET - 1) >> 8, (RET - 1) & 0xFF
         m.sp = 0xFD
@@ -78,10 +120,18 @@ class Game:
         return m.processorCycles - start
 
     def call5(self, a):
+        """LAND's call5: bank 5's routine at $A100 + a, bank 4 back after."""
         self.mpu.a = a
         return self.call(self.lab['call5'])
 
+    def call6(self, a):
+        """LAND's call6: bank 6's routine at $8000 + a, bank 4 back after."""
+        self.mpu.a = a
+        return self.call(self.lab['call6'])
+
     def rd(self, name, n=1, bank=5):
+        """The n bytes at label name: a sideways address read from that bank
+        (paged in or not), any other from memory."""
         a = self.lab[name]
         if 0x8000 <= a < 0xC000:
             src = self.mem._subject if self.cur == bank else self.banks[bank]
@@ -92,23 +142,26 @@ class Game:
         return v
 
     def frame(self, keys, vs=4):
+        """A frame with the keys (a string of KEYS' letters) held, vcount
+        advanced by vs; the cycles of G_STEP, project, strips, G_PRE,
+        B6_SHIP and G_POST, the bank calls through call5 and call6 with
+        their paging (not B6_KEYS, flip or the JSRs' own 6)."""
         self.held = {KEYS[k] for k in keys}
         m = self.mpu.memory
         m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255
-        c = self.call5(0x03)
-        self.mpu.a = 0x00
-        self.call(self.lab['call6'])
+        c = self.call5(G_STEP)
+        self.call6(B6_KEYS)
         c += self.call(self.lab['project'])
         c += self.call(self.lab['strips'])
-        c += self.call5(0x09)
-        if m[0x07DF]:
-            self.mpu.a = 0x03
-            c += self.call(self.lab['call6'])
-        c += self.call5(0x06)
+        c += self.call5(G_PRE)
+        if m[GSHV]:
+            c += self.call6(B6_SHIP)
+        c += self.call5(G_POST)
         self.call(self.lab['flip'])
         return c
 
     def state(self):
+        """The ship's state as one line (see the module docstring)."""
         def s24(v):
             x = v[0] | v[1] << 8 | v[2] << 16
             return (x - (1 << 24) if x & 0x800000 else x) / 65536
@@ -122,7 +175,7 @@ class Game:
                 f"m {r('gmx')[0]:3d} {r('gmz')[0]:3d} k {r('gk')[0]:2d} p {r('gp')[0]} "
                 f"fuel {r('fuel', 2)[0] | r('fuel', 2)[1] << 8:5d} landed {r('landed')[0]} "
                 f"ctim {r('ctim')[0]:2d} L {r('nland')[0]:02X} C {r('ncrash')[0]:02X} "
-                f"hg {self.mpu.memory[0x07D7]} came {self.mpu.memory[0x07D6]} shy {self.mpu.memory[0x07DE]}")
+                f"hg {self.mpu.memory[HGV]} came {self.mpu.memory[CAME]} shy {self.mpu.memory[GSHY]}")
 
 
 def main():

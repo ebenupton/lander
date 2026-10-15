@@ -40,7 +40,7 @@ for ln in open(sys.argv[1] + '/labels.txt'):
         out.append(f'L_{n.lstrip(".")} = ${int(a, 16):04X}')
 open(sys.argv[1] + '/landsyms.inc', 'w').write('\n'.join(sorted(set(out))) + '\n')
 PY
-python3 - $B B4S 0x2081 B4S2 0x1200 B4Z 0x3900 B4G 0x3734 B4H 0x393A B4G1 0x3648 B4G2 0x3843 <<'PY'     # the slow way (bank 4) into TABLES
+python3 - $B B4S 0x2081 B4S2 0x1200 B4Z 0x3900 <<'PY'     # the slow way (bank 4) into TABLES
 import sys
 d = sys.argv[1]
 img = bytearray(open(d + '/TABLES', 'rb').read())

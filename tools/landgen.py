@@ -11,9 +11,12 @@ Bank 7, by a row's depth index di = d/16 - DI0 (d its depth, 8.8 tiles: (20 - j)
   R7L, R7H + di           r
   SYT7 + di*32 + v        screen y of a corner of height h, the ground under the ship
                           hg: v = h - hg + HMAX (0..2 HMAX)
-  B1T + di*32 + 2*cxs    the row's second drawn corner's x * 256 (16 bits, low
-                          then high), XC on: corner i's x is (B1 + (i-1)*r) >> 8
-                          (corners 1..NX-2: B1 + (i-1)*r < 65536, no carry out)
+  B1T + di*32 + 2*cxs    the row's second drawn corner's B = x * 256 (XC on:
+                          corner i's x is (B1 + (i-1)*r) >> 8; corners 1..NX-2:
+                          B1 + (i-1)*r < 65536, no carry out): first the carries
+                          out of its low byte (bit k-1: (B1 + (k-1) r) & 255 + (r & 255)
+                          > 255), then its high byte (corner 1's x: corner i's
+                          is corner i-1's + (r >> 8) + bit i-2)
   SYL7, SYH7 + di         di*32's low byte, and SYT7 + di*32's page
   LQLO, LQHI + q          LERPQ7 + q*32
   PXF7, PXN7 + 11*cxs + i the far and near clips' rows' x's (their di fixed: by
@@ -189,6 +192,7 @@ def build7():
     def put(name, off, val):
         img[ADDR7[name] - BASE + off] = val & 255
 
+    b1s = {}
     for di in range(NDI):
         d = (DI0 + di) * 16
         r = L.recip(d)
@@ -203,7 +207,12 @@ def build7():
             b0 = ((dx0 * r + 32768) >> 8) + L.XC * 256
             b1 = (b0 + r) & 0xFFFF                            # (the second's)
             assert all(b1 + (i - 1) * r < 65536 for i in range(1, L.NX - 2 * L.XSKIP - 1))
-            put('B1T', di * 32 + 2 * cxs, b1)
+            cm = sum((((b1 & 255) + (k - 1) * (r & 255)) & 255) + (r & 255) > 255 and 1 << (k - 1) or 0
+                     for k in range(1, L.NX - 2 * L.XSKIP - 2))   # (B's carries: corners 2..)
+            assert all(((b1 >> 8) + (i - 1) * (r >> 8) + bin(cm & ((1 << (i - 1)) - 1)).count('1')) == (b1 + (i - 1) * r) >> 8
+                       for i in range(1, L.NX - 2 * L.XSKIP - 1))
+            b1s[di, cxs] = b1
+            put('B1T', di * 32 + 2 * cxs, cm)
             put('B1T', di * 32 + 2 * cxs + 1, b1 >> 8)
         pl = L.XC + ((-L.XCLIP * r + 32768) >> 16)      # the edges' x (clip planes)
         pr = L.XC + ((L.XCLIP * r + 32768) >> 16)
@@ -214,7 +223,7 @@ def build7():
             if di == dic:                   # (the clips' rows: x by cxs alone)
                 assert not (pl < L.XL or pr > L.XR)
                 for cxs in range(16):
-                    b1 = img[ADDR7['B1T'] - BASE + di * 32 + 2 * cxs] | img[ADDR7['B1T'] - BASE + di * 32 + 2 * cxs + 1] << 8
+                    b1 = b1s[di, cxs]
                     xs = [pl] + [(b1 + (i - 1) * r) >> 8 for i in range(1, NXD - 1)] + [pr]
                     for i, x in enumerate(xs):
                         put(row, 11 * cxs + i, x)

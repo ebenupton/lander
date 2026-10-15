@@ -655,9 +655,11 @@ L1:     lda LERPQ7,y
         lda (syp),y
         sta PY+NX-1,x
 .endmacro
-.macro R7BP                         ; (bank 7) the row's r (Y: di) and B1T's page
+.macro R7BP NOL                     ; (bank 7) the row's r (Y: di) and B1T's page
+.ifblank NOL                        ; (NOL: rh alone, the row's x's need no rl)
         lda R7L,y
         sta rl
+.endif
         lda R7H,y
         sta rh
         lda syp+1
@@ -3531,27 +3533,21 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         lda MODE                   ; to 11, by fx (LERPQ7: land.lerp), from HT
         beq :+                     ; (or PY: a clip's row) into PY
         jmp @alt
-:       R7BP                       ; (r and B1T's page: the clips' rows' x's
+:       R7BP 1                     ; (r and B1T's page: the clips' rows' x's
         EDGEY HT, @lq2, @lq3       ; not by them)
         .repeat NX-2, i
         PYH i+1
         .endrepeat
-@pyd:   ldy CX2                    ; x: corner 1's B (B1T: x * 256, 16 bits),
-        iny                        ; then + r each
-        lda (bp),y
+@pyd:   ldy CX2                    ; x: corner 1's (B1T: B's carries, then x),
+        lda (bp),y                 ; then + rh and B's carry each (the carries
+        sta rl                     ; out of B's low byte, + rl each: bit k
+        iny                        ; corner k+2's; no carry out of the high:
+        lda (bp),y                 ; corners 1..NX-2 on, 8 bits; rl after: 0)
         sta PX+1,x
-        dey
-        lda (bp),y
-        clc
         .repeat NX-3, k
-        adc rl                     ; (A: B's low byte; no carry out of the
-        tay                        ; high: corners 1..NX-2 on, 8 bits)
-        lda PX+1+k,x
+        lsr rl
         adc rh
         sta PX+2+k,x
-        .if k < NX-4
-        tya
-        .endif
         .endrepeat
         ldy DCUR                   ; the edges' x: -XCLIP, +XCLIP (di: DCUR)
         lda PINL7,y

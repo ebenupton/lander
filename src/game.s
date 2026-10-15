@@ -720,14 +720,15 @@ attit:  lda gmx
         rts
 
 ; (g0), (g1): THX's and THZ's row for the pitch gp; Y = gk (their column).
-throw:  ldx gp
-        lda THXL,x
+; X kept (emit's dot).
+throw:  ldy gp
+        lda THXL,y
         sta g0
-        lda THXH,x
+        lda THXH,y
         sta g0+1
-        lda THZL,x
+        lda THZL,y
         sta g1
-        lda THZH,x
+        lda THZH,y
         sta g1+1
         ldy gk
         rts

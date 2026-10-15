@@ -1816,10 +1816,10 @@ c_split: cmp LO+1,x
         bcs c_dbl
         bvs :+
 fsplit: cpx lastri                 ; (fsplit's test, inline: back to c_next)
-        bne :++
-        jmp fs_c
+        beq :++
+        jmp fs_ns
 :       jmp split
-:       jmp fs_ns
+:       jmp fs_c
 
 rc_t:   tax
         inx                        ; one line: here (V kept: c_rr's)

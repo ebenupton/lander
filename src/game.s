@@ -6,8 +6,8 @@
 ; a second on the ARM2), scaled to LAND's units.
 ;
 ; Controls: the attitude as Lander's, pitch then yaw: K or up tips the nose
-; down, M or down back towards flat (and no further: the ship's tables have no
-; nose up); Z or left, X or right turn it; SPACE full thrust, SHIFT hover.  Fuel burns while thrusting; landing
+; down, M or down up, a step (7.5 degrees) a tick, 45 degrees either way at
+; most; Z or left, X or right turn it; SPACE full thrust, SHIFT hover.  Fuel burns while thrusting; landing
 ; slowly on the pad (tiles 0..PADN-1 in x and z; Lander's 8) refuels.  Touching the
 ; ground anywhere else, or the pad too fast, crashes: a burst of dots, then the
 ; ship back on the pad.
@@ -251,7 +251,9 @@ spawn:  lda #24*8                   ; (facing away, level)
         sta gvz
         sta gvz+1
         sta ctim
+        lda #PFLAT                 ; (level)
         sta gp
+        lda #0
         lda #PADX
         sta sx+2
         sta sz+2
@@ -575,18 +577,11 @@ step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 
         lda #0
         sta fuel
         sta fuel+1
-:       lda gp
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        ora gk
-        tay
-        lda THX,y
+:       jsr throw
+        lda (g0),y
         ldx #gvx-gvx
         jsr tadd
-        lda THZ,y
+        lda (g1),y
         ldx #gvz-gvx
         jsr tadd
         ldy gp
@@ -722,6 +717,19 @@ attit:  lda gmx
         lsr a
         lsr a
         sta gk
+        rts
+
+; (g0), (g1): THX's and THZ's row for the pitch gp; Y = gk (their column).
+throw:  ldx gp
+        lda THXL,x
+        sta g0
+        lda THXH,x
+        sta g0+1
+        lda THZL,x
+        sta g1
+        lda THZH,x
+        sta g1+1
+        ldy gk
         rts
 
 ; v (X) += 1.25 (A << gt5): A << gt5, then A << (gt5 - 2) (gt5 1: A asr 1).
@@ -864,18 +872,11 @@ emit:   ldx pnext
         and #7
         adc #6                     ; (6..13 steps)
         sta plife,x
-        lda gp                     ; the exhaust: - thrust / 2 (x, z), - 8 thrust (y)
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        ora gk
-        tay
-        lda THX,y
+        jsr throw                  ; the exhaust: - thrust / 2 (x, z), - 8 thrust (y)
+        lda (g0),y
         jsr exh
         sta gt0                    ; (x)
-        lda THZ,y
+        lda (g1),y
         jsr exh
         sta gt1
         jsr rand                   ; jitter, + the ship's (v >> 6)

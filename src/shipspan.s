@@ -229,10 +229,15 @@ shipdraw:
         sta bso+1
         lda PSOH,x
         sta bso+2
-        ldx ee                     ; its lines
-        lda ELO,x
+        ldx ee                     ; its lines, expanded into DBUF (if not
+        cpx dlast                  ; already: the last drawing's)
+        beq :+
+        stx dlast
+        jsr spdec
+:
+        lda #<DBUF
         sta dp
-        lda EHI,x
+        lda #>DBUF
         jsr page
         lda shx                    ; ptr: line byt, column (shx >> 2) - 5
         and #$FC
@@ -338,6 +343,148 @@ bso:    lda SPATO,y                ; (normal: SPATON)
 bcj:    jmp cn1                    ; (lo patched: cn_j or cm_j)
 
 
+
+; spdec: entry X's lines (ELO, EHI: tools/shipgen.py's stream) into DBUF as the
+; walker reads them: each band B (BANDL its lines, SPATN of BANDP its faces:
+; n + 1 boundaries a line), its lines in two passes (lines L&1 ^ 1, + 2, ..
+; first: region A, the rest after, B), $FF the end.  The stream: B, the first
+; line's bytes, then each next line's boundaries as nibbles (high first): the
+; change from the line before, -7..7, or 8 and the byte's two; a band's last
+; half byte unused.
+spdec:  lda ELO,x
+        sta gbyte+1
+        lda EHI,x
+        sta gbyte+2
+        ldx #0                     ; (X: DBUF's next)
+@bd:    lda #0
+        sta nhf
+        jsr gbyte
+        sta DBUF,x
+        inx
+        cmp #$FF
+        bne :+
+        rts
+:       tay
+        lda BANDL,y
+        sta dl
+        lda BANDP,y
+        tay
+        lda SPATN,y
+        clc
+        adc #1
+        sta dm
+        stx da                     ; A: here; B: + ((L + 1) >> 1) m; the end:
+        lda dl                     ; + L m
+        clc
+        adc #1
+        lsr a
+        jsr mul
+        sta db
+        lda dl
+        jsr mul
+        sta de
+        lda dl                     ; the first line: A if L odd, else B (dst
+        and #1                     ; flips dsel first)
+        eor #1
+        sta dsel
+        jsr dst
+        ldy #0
+:       jsr gbyte
+        sta prev,y
+        sta DBUF,x
+        inx
+        iny
+        cpy dm
+        bne :-
+        dec dl
+        beq @be
+@ln:    jsr dst                    ; (the other region)
+        ldy #0
+@bn:    jsr gnib
+        cmp #8
+        bne @dd
+        jsr gnib                   ; (escaped: the byte)
+        asl a
+        asl a
+        asl a
+        asl a
+        sta nhs
+        jsr gnib
+        ora nhs
+        jmp @st
+@dd:    cmp #8                     ; (-7..-1)
+        bcc :+
+        ora #$F0
+:       clc
+        adc prev,y
+@st:    sta prev,y
+        sta DBUF,x
+        inx
+        iny
+        cpy dm
+        bne @bn
+        dec dl
+        bne @ln
+@be:    ldx de
+        jmp @bd
+; A = A * dm + (dm's region, X): A dm more than X.  Y used.
+mul:    tay
+        txa
+        cpy #0
+        beq @r
+:       clc
+        adc dm
+        dey
+        bne :-
+@r:     rts
+; X: the next line's place (region A, or B: dsel), then dsel the other's.
+dst:    lda dsel
+        eor #1
+        sta dsel
+        beq @b                     ; (dsel was 1: A)
+        ldx da
+        txa
+        clc
+        adc dm
+        sta da
+        rts
+@b:     ldx db
+        txa
+        clc
+        adc dm
+        sta db
+        rts
+gbyte:  lda $FFFF                  ; the stream's next byte (A only)
+        inc gbyte+1
+        bne :+
+        inc gbyte+2
+:       rts
+gnib:   lda nhf                    ; its next nibble (A only)
+        bne @lo
+        jsr gbyte
+        sta nhb
+        inc nhf
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        rts
+@lo:    lda #0
+        sta nhf
+        lda nhb
+        and #15
+        rts
+dlast:  .byte $FF                  ; (the entry DBUF holds)
+nhf:    .byte 0
+nhb:    .byte 0
+nhs:    .byte 0
+dl:     .byte 0
+dm:     .byte 0
+da:     .byte 0
+db:     .byte 0
+de:     .byte 0
+dsel:   .byte 0
+prev:   .res 7
 
 ; The lines' page: dp's high byte and the boundaries' reads'.
 page:   sta dp+1
@@ -506,3 +653,8 @@ FCX:    .res 9
 
 ; KT, BY (normal: N, mirrored: R): tools/shipgen.py's, in the lines' first page.
         .assert >KTR = >(BYN+41) && <KTR >= 3, error, "the u tables: one page"
+
+        .segment "DBUF"
+DBUF:   .res 128                   ; (spdec.s: an entry's lines, as the walker reads)
+        .assert <DBUF = 0, error, "DBUF: page aligned"
+        .code

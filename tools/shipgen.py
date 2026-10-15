@@ -5,7 +5,7 @@ every orientation the BBC draws, plus the reference rasteriser the 6502 must mat
     python3 tools/shipgen.py OUTDIR   -> OUTDIR/ship.inc (ca65 data), OUTDIR/ships.png
 
 Orientation: Lander's (pitch a, direction b) (ref/lander/NOTES.md 2.1).  a in NPITCH steps
-of 90/NPITCH degrees from 0 (the ship never goes upside down: a < 90), b in NDIR steps
+of PSTEP degrees, PFLAT of them nose up (a < 0) to as many nose down (pitch()), b in NDIR steps
 round the circle.  The camera never yaws, so the ship at (a, 180 - b) is the ship at
 (a, b) mirrored left to right (the model is symmetric in its z): only b in -90..90 is
 stored (NDIR/2 + 1 directions), the rest drawn mirrored.
@@ -51,7 +51,9 @@ import ship as SH       # noqa: E402
 import landgen as G     # noqa: E402
 
 NDIR = 32                  # directions round the circle
-NPITCH = 8                 # pitches 0 .. 90 - 90/NPITCH degrees
+NPITCH = 13                # pitches: 45 degrees nose up to 45 nose down, 7.5 apart
+PFLAT = NPITCH // 2        # (level)
+PSTEP = 7.5
 ND2 = NDIR // 2 + 1        # stored directions: -90 .. 90
 NE = ND2 * NPITCH          # entries
 S = 14.0                   # pixels a tile (Lander's ship on its screen, scaled to 256 wide;
@@ -84,8 +86,13 @@ def nearest(rgb):
     return min(range(len(SW.ALL)), key=lambda i: sum((a - b) ** 2 for a, b in zip(AVG[i], rgb)))
 
 
+def pitch(p):
+    """Pitch p's angle a (radians; Lander's: positive nose down)."""
+    return math.radians((p - PFLAT) * PSTEP)
+
+
 def angles(kk, p):
-    return p * math.pi / 2 / NPITCH, (kk - NDIR // 4) * 2 * math.pi / NDIR
+    return pitch(p), (kk - NDIR // 4) * 2 * math.pi / NDIR
 
 
 def entry(kk, p):
@@ -120,7 +127,7 @@ HUE = {0x080: 'purple', 0x040: 'purple', 0x088: 'grey', 0x044: 'grey', 0xC80: 'o
 
 def shade(p, f, ng):
     """Face f's palette entry at pitch p, its rotated normal's x negative or not."""
-    a = p * math.pi / 2 / NPITCH
+    a = pitch(p)
     ny = math.sin(a) * MN[f][0] + math.cos(a) * MN[f][1]       # (the matrix's y row)
     br = SH.lander_brightness(-1 if ng else 1, int(ny * SH.ONE))
     col = SH.FACES[f]['colour']
@@ -334,12 +341,8 @@ def asm6(out):
                 bd = (pats.index(fs), len(ls))
                 if bd not in bands:
                     bands.append(bd)
-                nl = len(ls)                   # (in two passes, alternate lines: the
-                o = list(range(nl % 2 ^ 1, nl, 2)) + list(range(nl % 2, nl, 2))  # last's first)
-                b.append([bands.index(bd)] + [x + U0 for i in o for x in ls[i]])
+                b.append((bands.index(bd), [[x + U0 for x in l] for l in ls]))
             blobs.append(b)
-    # Pages filled in turn: whole entries (largest that fits), then the first bands
-    # of one (the most that fit) and $FE (the rest from the next page's start).
     # The first page: the boundaries' tables (src/shipspan.s), by u + al (normal) or
     # u - al (mirrored, the R tables): pixel w = u + al or 41 + al - u from the column
     # 5 left of shx's: KT the pixels before w's in its byte, BY its byte's offset.
@@ -348,43 +351,33 @@ def asm6(out):
             'BYR': [((41 - k) >> 2) * 8 for k in range(39)],
             'KTN': [LM[i & 3] for i in range(42)],
             'BYN': [(i >> 2) * 8 for i in range(42)]}
-    first, uoff = [0] * 3, {}
+    data, uoff = [0] * 3, {}
     for name, v in utab.items():
-        uoff[name] = len(first)
-        first += v
-    data, where, left, cont = [], {}, set(range(len(blobs))), None
-    while left or cont:
-        page = list(first) if not data else []
-        if cont is not None:
-            e, bs = cont
-            page += [x for bd in bs for x in bd] + [0xFF]
-            cont = None
-        while True:
-            free = 256 - len(page)
-            fit = [e for e in left if sum(map(len, blobs[e])) + 1 <= free]
-            if not fit:
-                break
-            e = max(fit, key=lambda e: sum(map(len, blobs[e])))
-            where[e] = len(data) + len(page)
-            page += [x for bd in blobs[e] for x in bd] + [0xFF]
-            left.discard(e)
-        free = 256 - len(page)
-        best = None
-        for e in left:
-            n = 0
-            for i, bd in enumerate(blobs[e][:-1]):
-                n += len(bd)
-                if n + 1 <= free and (best is None or n > best[0]):
-                    best = (n, e, i + 1)
-        if best is not None:
-            n, e, i = best
-            where[e] = len(data) + len(page)
-            page += [x for bd in blobs[e][:i] for x in bd] + [0xFE]
-            left.discard(e)
-            cont = (e, blobs[e][i:])
-        data += page + [0] * (256 - len(page)) if (left or cont) else page
-    for e in where:
-        assert data[where[e]] < 0xFE
+        uoff[name] = len(data)
+        data += v
+    # Then each entry, compressed (shipspan.s's spdec expands it into DBUF, as the
+    # walker reads it: each band B, its lines in two passes, $FF the end): each
+    # band B, its first line's bytes, then each next line's (in order) as nibbles,
+    # high first, the change from the line before (-7..7), or 8 and the byte's two;
+    # a band's last half byte unused; $FF the end.
+    where, dmax = {}, 0
+    for e, b in enumerate(blobs):
+        where[e] = len(data)
+        dmax = max(dmax, sum(1 + len(ls) * len(ls[0]) for _, ls in b) + 1)
+        for bd in b:
+            B, lines = bd[0], bd[1]
+            data.append(B)
+            data += lines[0]
+            nib = []
+            for i in range(1, len(lines)):
+                for a, c in zip(lines[i - 1], lines[i]):
+                    d = c - a
+                    nib += [d & 15] if -7 <= d <= 7 else [8, c >> 4, c & 15]
+            if len(nib) & 1:
+                nib.append(0)
+            data += [nib[i] << 4 | nib[i + 1] for i in range(0, len(nib), 2)]
+        data.append(0xFF)
+    assert dmax <= 128, dmax
     L = ['; shipspan.inc: from tools/shipgen.py -- do not edit',
          f'SHIP_NDIR = {NDIR}', f'SHIP_NPITCH = {NPITCH}', f'SHIP_ND2 = {ND2}', f'SHIP_NE = {NE}',
          f'SHIP_U0 = {U0}', f'SHIP_NPAT = {len(pats)}',

@@ -79,10 +79,10 @@ PLIFE   = 19                       ; a dot's life, steps: the land's 96 lines at
                                    ; ~5 lines a step)
 NPART   = 20                       ; dots (one a step: none reused alive)
 SNTH    = $E6                      ; the engine: white noise, the low rate
-SATF    = 2                        ; its attenuation: full thrust, hover
-SATH    = 7
-SNCR    = $E7                      ; the crash: white noise at tone 2's rate,
-SCRN    = $180                     ; this (4MHz / 32 / SCRN: 650 shifts a second)
+SATF    = 5                        ; its attenuation: full thrust, hover (half
+SATH    = 10                       ; the volume they were)
+SNCR    = $E7                      ; the crash: white noise at tone 2's rate
+SCRN    = $180                     ; (its period: EXNL, EXNH a step; this at first)
 PGRAV   = 60                       ; a dot's gravity (height units / 256 a step^2)
 PADX    = PADN/2                   ; the pad's middle: the start
 FUELR   = 0                        ; FUEL's row (lines 0..7), its bar's lines and
@@ -419,12 +419,18 @@ keys:   lda #0
 ; and only when what it should play changes: nothing most frames.
 snd:    lda ctim
         beq @t
-        lda #CRASHT                ; crashed: SNCR, louder the newer
-        sec
-        sbc ctim
-        lsr a
-        lsr a
-        tax
+        lda #CRASHT                ; crashed: SNCR, tone 2's period and the
+        sec                        ; attenuation by the step (EXNL, EXNH, EXA:
+        sbc ctim                   ; a crack falling to a rumble, dying away)
+        sta sstp
+        tay
+        lda EXNL,y
+        jsr psg
+        ldy sstp
+        lda EXNH,y
+        jsr psg
+        ldy sstp
+        ldx EXA,y
         lda #SNCR
         bne @c
 @t:     ldx #15                    ; (silent)
@@ -1416,6 +1422,7 @@ su:     .res 2                     ; (units' height, 8.8)
 fuel:   .res 2
 fkey:   .byte 0                    ; (F held last time)
 hpar:   .byte 0                    ; (hover's half unit of fuel)
+sstp:   .byte 0                    ; (snd's: the crash's step)
 dpass:  .byte 0                    ; (dots': $80 the near ones)
 tt0:    .byte 0                    ; (tadd's)
 tt1:    .byte 0

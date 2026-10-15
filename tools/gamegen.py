@@ -70,6 +70,14 @@ def main():
         lines.append(f'{name}:')
         for i in range(0, len(vals), 16):
             lines.append('        .byte ' + ', '.join(f'${v & 255:02X}' for v in vals[i:i + 16]))
+    # the crash's sound, a step at a time (CRASHT 40 steps at 10 a second): the noise
+    # clocked by tone 2, its period N from 10 (12.5kHz: a crack) up by 15% a step
+    # (a falling rumble), EXNL/EXNH its two bytes; EXA its attenuation, full for two
+    # steps, then down to silence by step 24
+    ns = [min(1023, round(10 * 1.15 ** t)) for t in range(40)]
+    emit('EXNL', [0xC0 | (n & 15) for n in ns])
+    emit('EXNH', [(n >> 4) & 63 for n in ns])
+    emit('EXA', [0 if t < 2 else min(15, round((t - 2) * 15 / 22)) for t in range(40)])
     lines.append(f'NPITCH = {NPITCH}')
     lines.append(f'NDIR = {NDIR}')
     lines.append(f'PFLAT = {SG.PFLAT}')

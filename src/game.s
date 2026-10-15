@@ -7,7 +7,7 @@
 ;
 ; Controls: the attitude as Lander's, pitch then yaw: K or up tips the nose
 ; down, M or down up, a step (7.5 degrees) a tick, 45 degrees either way at
-; most; Z or left, X or right turn it; SPACE full thrust, SHIFT hover.  Fuel burns while thrusting; landing
+; most; Z or left, X or right turn it; SPACE or SHIFT thrust.  Fuel burns while thrusting; landing
 ; slowly on the pad (tiles 0..PADN-1 in x and z; Lander's 8) refuels.  Touching the
 ; ground anywhere else, or the pad too fast, crashes: a burst of dots, then the
 ; ship back on the pad.
@@ -78,8 +78,8 @@ PLIFE   = 19                       ; a dot's life, steps: the land's 96 lines at
                                    ; ~5 lines a step)
 NPART   = 20                       ; dots (one a step: none reused alive)
 SNTH    = $E6                      ; the engine: white noise, the low rate
-SATF    = 8                        ; its attenuation: full thrust, hover (a
-SATH    = 13                       ; quarter the volume they were)
+SATF    = 13                       ; its attenuation (full thrust, SPACE or SHIFT)
+SATH    = 13                       ; (hover's: unused, SHIFT full thrust too)
 SNCR    = $E7                      ; the crash: white noise at tone 2's rate
 SCRN    = $180                     ; (its period: EXNL, EXNH a step; this at first)
 PGRAV   = 60                       ; a dot's gravity (height units / 256 a step^2)
@@ -516,8 +516,10 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         lsr a
         lsr a
         lsr a
-        and #3                     ; (1 full, 2 hover)
-        tay
+        and #3                     ; (SPACE or SHIFT: both full thrust)
+        beq :+
+        lda #1
+:       tay
         lda fuel                   ; (none without fuel, nor with the land gone
         ora fuel+1                 ; from the screen below: Lander's engines cut
         beq @off                   ; out at its HIGHEST_ALTITUDE; coasting on)

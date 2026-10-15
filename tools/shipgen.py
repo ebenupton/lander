@@ -110,9 +110,9 @@ def entry(kk, p):
 # lose the facets (the top's greens all land on one dither) and the landscape uses
 # every green, so each of the ship's three hues has a ramp of dithers the land and sea
 # never use (proto/land.py's LAND, SEAC), dark to light, indexed by the green channel
-# Lander would show (its colour's green + the brightness, to 15): its top and back the two
-# purples, its underside greys, its exhaust pink.
-RAMPS = {'purple': [20] * 13 + [9] * 3,
+# Lander would show (its colour's green + the brightness, to 15): its top and back a dark
+# pink (30) and the two purples (20, 9), its underside greys, its exhaust pink.
+RAMPS = {'purple': [30] * 13 + [20] + [9] * 2,
          'grey': [19] * 8 + [8] * 3 + [4] * 2 + [7] * 3,
          'orange': [13] * 10 + [12] * 6}
 HUE = {0x080: 'purple', 0x040: 'purple', 0x088: 'grey', 0x044: 'grey', 0xC80: 'orange'}

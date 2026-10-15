@@ -286,7 +286,8 @@ czt:    .res 1
 czs:    .res 1
 back:   .res 1                     ; the screen being drawn: 0 ($3000) or 1
 scrb:   .res 1                     ; ($5800), and its high byte
-np:     .res 1                     ; points a row: NX (prow7's)
+np:     .res 1                     ; points a row: NX (prow7's; game.s reads
+                                   ; it: the renderer uses NX)
 nr:     .res 1                     ; rows: 7 or 8 (project's)
 vcount: .res 1                     ; vertical syncs (vsync's)
 vflip:  .res 1                     ; vcount at the last flip
@@ -302,7 +303,6 @@ rh:     .res 1
 ; strips
 ns:     .res 1                     ; the strip: 0 (row 0 traced only), 1..nr-1
                                    ; the land's (nr-1 the near strip)
-np1:    .res 1                     ; np + 1: the right margin's point
 xl:     .res 1                     ; the strip's margins: its columns are
 xr:     .res 1                     ; xl/4 .. xr/4 - 1
 xlp:    .res 1                     ; the last strip's
@@ -976,9 +976,6 @@ strips: ldx back                   ; the screen's set (sidx): tsp, bsp (gone's)
         sta topa
         sta bota
         sta ns
-        ldx np
-        inx
-        stx np1
 @strip: jsr setup                  ; the points, boxes and margins, the bottom
         jsr bclip                  ; row traced; then held at YGND+1 where it
         lda ns                     ; is past the screen
@@ -1044,7 +1041,7 @@ bclip:  lda BCL
 ; margins: x at the byte boundary at or left of the bottom row's first point
 ; (xl) and at or right of its last (xr), y the end points'; boxes 0 and np
 ; black.  Then the bottom row is traced into (bota) (traceb, whose RTS is
-; this routine's).  In: ns, nr, np, np1, PX, PY, CLE, CLO, ldCLE, bota.  Out:
+; this routine's).  In: ns, nr, PX, PY, CLE, CLO, ldCLE, bota.  Out:
 ; TX, TY, BX, BY, CE, CO (0 .. np+1), xl, xr, BCL, last ($FF for the near
 ; strip, ns = nr-1), (bota).  Clobbers A, X, Y and traceb's
 ; (bank 7 paged for su_l7 and bank 4 back: pw7s, pw4s are wpatch's).  Called
@@ -1089,7 +1086,7 @@ su_q:     lda PX,y                 ; points 1 .. np: the row's
         bcs su_qc
 su_qb:    iny
         inx
-        cpx np1
+        cpx #NX+1
         bcc su_q
         bcs su_m                   ; (always)
 su_m4:  lda BANKMAP                ; su_l7's end: bank 4 back (as pg4)
@@ -1108,7 +1105,7 @@ su_m:
         sta xl
         sta TX
         sta BX
-        ldx np
+        ldx #NX
         lda BX,x
         clc
         adc #MARGIN+3              ; (no carry: the row within XL .. XR)
@@ -1153,7 +1150,7 @@ su_bot:   jmp traceb               ; the bottom row's line (its RTS returns to
 ; error in Y biased by 256 - 2dx, a carry marking a step (needs 2dx <= 256);
 ; a steep segment (|dy| >= dx > 0; rare: the rows are meant to be shallow)
 ; takes t_steep's general loop.
-; In: BX, BY, ns, nr, np, np1, PX (row ns+1), bota, xl.  Out: (bota) over
+; In: BX, BY, ns, nr, PX (row ns+1), bota, xl.  Out: (bota) over
 ; the widened row.  Clobbers A, X, Y, tyv, tj, terr, dva, ra2, rq, rq2,
 ; rrem, fe, tcnt, tx1, tyy, tdx2, tdy2; patches jvb, tf_h, t1_h, tx_h, tv_h0,
 ; t_end, t_inc, t_dq, t_dr, t_rr, tf_j, t1_j, tx_j, jv0, t_bq, tr_k and
@@ -1166,7 +1163,7 @@ traceb: lda bota+1                 ; the row's page: jvb's store, and the
         sta t1_h+2
         sta tx_h+2
         sta tv_h0+2
-        ldx np1                    ; the end: xr + 1 (t_end's operand), or the
+        ldx #NX+1                  ; the end: xr + 1 (t_end's operand), or the
         ldy BX,x                   ; next strip's xr + 1 if further right
         iny
         sty t_end+1
@@ -1189,9 +1186,9 @@ traceb: lda bota+1                 ; the row's page: jvb's store, and the
         sta tcnt
 :       tya
         clc
-        adc np
+        adc #NX
         tay
-        lda PX-1,y                 ; its last point (index np - 1), and its xr
+        lda PX-1,y                 ; its last point (index NX - 1), and its xr
         adc #3                     ; (C clear)
         and #$FC
         cmp t_end+1
@@ -1218,7 +1215,7 @@ t_dx0:  jsr t_fl0                  ; dx = 0, y differs: the pending run ends at
         sta tyv
 t_next: ldx tj
 t_nx:   inx                        ; (X = tj on every way here)
-        cpx np1
+        cpx #NX+1
         bcs t_end
 t_seg:  lda BY+1,x                 ; segment X: (BX, BY) to (BX+1, BY+1); tyv
         cmp BY,x                   ; = BY,x on every way here
@@ -1554,7 +1551,7 @@ tr_inc: inc tyv                    ; (INC or DEC: t_old's, t_steep's opcode)
 ; 2 (D mod a) (RDIV: DQT, DRT for a < 32, D < 64; divs otherwise), the first
 ; line yt + q + (rem > 0), each next q2 on, or q2 + 1 when E += r2 carries (E
 ; = 255 - e, e how far the next step is short of a line, in 2a'ths).
-; In: TX, TY, BX, BY (0 .. np+1), xl, xr, np1.  Out: LO, HI (0 .. np+1),
+; In: TX, TY, BX, BY (0 .. np+1), xl, xr.  Out: LO, HI (0 .. np+1),
 ; RTPL (1 .. np), RTBUF, alloc, rtp+1 = RTBUF's page.  Clobbers A, X, Y, tj,
 ; dva, dvd, ra2, rq, rq2, rrem, rr2.  Called by strips (strips 1 .. nr-1).
 ; RDIV slow: D = BY,x - TY,x into dvd; to `slow` if a >= 32 or D >= 64, else
@@ -1613,7 +1610,7 @@ tr_inc: inc tyv                    ; (INC or DEC: t_old's, t_steep's opcode)
 rungs:  lda xl                     ; the margins: upright, no pixels
         sta LO
         sta HI
-        ldx np1
+        ldx #NX+1
         lda xr
         sta LO,x
         sta HI,x
@@ -1705,7 +1702,7 @@ rg_nr:    lda #$FF                 ; the sentinel at Y = a; alloc += a + 1 (the
         sta alloc
 rg_nx:    ldx tj                   ; the next rung, to np
         inx
-        cpx np1
+        cpx #NX+1
         bcs :+
         jmp rg_r
 :       rts
@@ -1775,7 +1772,7 @@ rg_lw:    tax
 ; ...).  LAYPAD puts the code from here on at the page phase that satisfies
 ; them all (the smallest value that links); change it when code before this
 ; point grows or shrinks.
-LAYPAD  = 97
+LAYPAD  = 102
         .res LAYPAD
 
 ; ---------------------------------------------------------------- columns
@@ -3850,7 +3847,7 @@ oswblk: .res 9                     ; OSWORD 10's block: the character, 8 rows
 ; byte is fixed).  Other rungs (a > RFA, or D >= 16, which includes a wrapped
 ; D with yb < yt) go back to rungs' division (rg_rdr, rg_rdl) with ra2 = 2a.
 ; In: X the rung, Y = dva = a, TY, BY, alloc (in RTBUF's
-; page), tj = X, np1.  Clobbers A, X, Y, rrem (= yt).  Callers: rungs (JMP
+; page), tj = X.  Clobbers A, X, Y, rrem (= yt).  Callers: rungs (JMP
 ; from rg_r's leaning-right and leaning-left cases).
         .segment "B4C"
 rfastr: cpy #RFA+1                 ; a > RFA: the division
@@ -3917,7 +3914,7 @@ DUFL:   .repeat RFA, i
         sta RTBUF-1,y
         ldx tj                     ; the next rung, or done (rungs' rg_nx)
         inx
-        cpx np1
+        cpx #NX+1
         bcs :+
         jmp rg_r
 :       rts
@@ -4018,7 +4015,7 @@ prow7:  lda SHF                    ; (zsh4 stepped the map: shift HT first)
         sta lp
         lda LQHI,y
         sta lp+1
-:       lda #NX                    ; (the strips' np: always NX)
+:       lda #NX                    ; (np: NX, game.s's; the strips use NX)
         sta np
         lda #0                     ; row 0: tmp = 16 j = 0
         sta tmp

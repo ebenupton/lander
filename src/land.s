@@ -1189,7 +1189,7 @@ t_dq:   lda DQT,y                  ; q2 = dx div |dy|: q = q2 / 2
         lsr a
         sta rq
 t_dr:   lda DRT,y                  ; r2 = 2 (dx mod |dy|) (DRT holds 2r)
-        sta rr2                    ; rem = r + |dy| (q2 odd)
+        sta t_rr+1                 ; rem = r + |dy| (q2 odd)
         bcc :+
         adc ra2                    ; (C set: 2r + 2|dy| + 1)
 :       lsr a                      ; (C clear if rem = 0)
@@ -1289,7 +1289,7 @@ t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         dey
 t_bq:   beq t_last                 ; (or t_fr: t_fl's)
         lda rrem                   ; the next step: + 2dx / 2|dy|, by e (rrem:
-        adc rr2                    ; 255 - e; C clear here, every way in)
+t_rr:   adc #0                     ; 255 - e; C clear here, every way in; r2)
         bcs :+
         sta rrem
         txa

@@ -1824,7 +1824,7 @@ fsplit: cpx lastri                 ; (fsplit's test, inline: back to c_next)
         bne :++
         jmp fs_c
 :       jmp split
-:       jmp fs_new
+:       jmp fs_ns
 
 rc_t:   tax
         inx                        ; one line: here (V kept: c_rr's)
@@ -2416,6 +2416,13 @@ fe_r:   lda BE,x                   ; the floor's run
         ldy flr1
         jsr run2
 ff_d:   jmp c_np                   ; (c_next; s2v's: s2ov)
+fs_ns:  lda CE-1,x                 ; (fsplit's, a new rung: its boxes the same, the
+        cmp CE,x                   ; column one box: c_ld's, V clear)
+        bne fs_new
+        lda CO-1,x
+        cmp CO,x
+        bne fs_new
+        jmp c_ld
 fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         lda CE-1,x                 ; 4 the left (Y: the two EORed)
         sta BE+4
@@ -2575,6 +2582,14 @@ zline:  sta zv
 split:  ldx ri
         cpx lastri
         beq sp_c
+        lda CE-1,x                 ; (its boxes the same: one box, c_ld's, V set:
+        cmp CE,x                   ; zone1)
+        bne :+
+        lda CO-1,x
+        cmp CO,x
+        bne :+
+        jmp c_ld
+:
         lda #<sp_r                 ; (fs_new: back to sp_r)
         sta fs_nj+1
         lda #>sp_r
@@ -3049,7 +3064,10 @@ s2v:    lda CE-1,x                 ; (X = ri) L's bytes
         sta ff_d+2
         ldx ri
         inx
-        jmp fsplit
+        cpx lastri                 ; (fsplit's, but not fs_ns's)
+        bne :+
+        jmp fs_c
+:       jmp fs_new
 s2ov:   lda #<c_np                 ; (ff_d's again)
         sta ff_d+1
         lda #>c_np

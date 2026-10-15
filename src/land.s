@@ -3854,9 +3854,9 @@ rfastr: cpy #RFA+1                 ; a > RFA: the division
         bcs @sl
         lda TY,x
         sta rrem                   ; yt
-        lda BY,x
+        eor #$FF                   ; D = yb - yt (yb + ~yt + 1: C as an SBC's)
         sec
-        sbc rrem                   ; D
+        adc BY,x
         cmp #16
         bcs @sl                    ; (C clear after: RFBODY's ADCs rely on it)
         ora B16-1,y                ; X = 16 (RFA - a) + D (D < 16: OR adds)
@@ -3873,9 +3873,9 @@ rfastl: cpy #RFA+1                 ; (as rfastr, leaning left)
         bcs @sl
         lda TY,x
         sta rrem
-        lda BY,x
+        eor #$FF
         sec
-        sbc rrem
+        adc BY,x
         cmp #16
         bcs @sl
         ora B16-1,y

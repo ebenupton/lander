@@ -1721,6 +1721,8 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         sta ph_hi+1
         lda #0
         sta ri
+        lda #$FF                   ; (c_one's ve, vo: none this strip yet)
+        sta c_vri+1
         lda xl
         sta x4
         jsr phase
@@ -1809,6 +1811,13 @@ c_ri:   inx                        ; (the next rung)
         bcs c_ri
         stx ri
         jmp c_rr
+c_ld:   stx c_vri+1
+        lda CE-1,x
+        sta ve
+        lda CO-1,x
+        sta vo
+        bvc c_r1
+        jmp zone1                  ; (a top not level)
 c_v1:   .byte $40                  ; (BIT: V)
 c_z1:    jmp zone1                  ; (back to c_r1)
 c_srx:  ldx ri                     ; (c_coly's)
@@ -1840,6 +1849,8 @@ rc_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
         jmp c_rd
 rc_r:   dex
         ldy mx
+        lda #$FF                   ; (c_one's ve, vo gone)
+        sta c_vri+1
         lda #0
         sta ve
         sta vo
@@ -1854,11 +1865,10 @@ c_rr:   ora #3
         cmp LO,x
         bcs c_split                 ; (LO <= x4 + 3)
 o_nr:   ldx ri
-c_one:  lda CE-1,x                 ; one box: ri - 1
-        sta ve
-        lda CO-1,x
-        sta vo
-        bvs c_z1                   ; (a top not level)
+c_one:                             ; one box: ri - 1
+c_vri:  cpx #$FF                   ; (ve, vo its already: the last c_one's ri,
+        bne c_ld                   ; $FF if since a strip's start or a run
+c_on:   bvs c_z1                   ; with black; a split's comes with ri past)
 c_r1:    ldx mx
         cpx flr1
         bcs c_next
@@ -2071,6 +2081,8 @@ np_r:
 pB8:    lda BOTS,y
         tay
         iny
+        lda #$FF                   ; (c_one's ve, vo gone)
+        sta c_vri+1
         lda #0
         sta ve
         sta vo

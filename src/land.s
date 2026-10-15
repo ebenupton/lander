@@ -1795,7 +1795,7 @@ rg_lw:    tax
 ; ...).  LAYPAD puts the code from here on at the page phase that satisfies
 ; them all (the smallest value that links); change it when code before this
 ; point grows or shrinks.
-LAYPAD  = 111
+LAYPAD  = 72
         .res LAYPAD
 
 ; ---------------------------------------------------------------- columns
@@ -1898,10 +1898,12 @@ cols:   lda #$FF                   ; fsplit's tables are no rung's yet
         jmp c_coly
 
 ; phase: the columns from x4 (A, kept) up to the next of xlp, xrp and xr form
-; a phase: c_xe's operand is its end, and the record choice is patched for it:
-; c_rec JMP recordc or c_srx, o_rec and ob_rj JMP record or o_nr (low bytes
-; only: record and o_nr share a page).  In: A = x4; ph_lo and ph_hi's operands
-; (cols').  Clobbers X.  Called by cols and c_lim.
+; a phase: ph_e is its end and c_xe's operand the end, or 128 when the phase
+; would cross from the left half into the right (the half switches at 128,
+; c_lim's), and the record choice is patched for it: c_rec JMP recordc or
+; c_srx, o_rec and ob_rj JMP record or o_nr (low bytes only: record and o_nr
+; share a page).  In: A = x4; ph_lo and ph_hi's operands (cols').  Clobbers
+; X, Y.  Called by cols and c_lim.
 phase:
 ph_lo:  cmp #0                     ; operand: xlp (strip 1: xr), cols'
         bcs ph_h
@@ -1914,29 +1916,48 @@ ph_hi:  cmp #0                     ; operand: xrp, cols'
         cpx xr                     ; most xr)
         bcc ph_n
         ldx xr
-ph_n:   stx c_xe+1
-        ldx #<o_nr                 ; (>o_nr = >record: asserted below)
-        stx o_rec+1
-        stx ob_rj+1
-        ldx #<c_srx
-        stx c_rec+1
-        ldx #>c_srx
-        stx c_rec+2
-        rts
+ph_n:   ldy #<o_nr                 ; (>o_nr = >record: asserted below)
+        sty o_rec+1
+        sty ob_rj+1
+        ldy #<c_srx
+        sty c_rec+1
+        ldy #>c_srx
+        sty c_rec+2
+        jmp ph_en
 ph_x:   ldx xr                     ; x4 >= xrp: recorded, to xr
 ph_rec: cpx xr                     ; (at most xr)
         bcc ph_r
         ldx xr
-ph_r:   stx c_xe+1
-        ldx #<record
-        stx o_rec+1
-        stx ob_rj+1
+ph_r:   ldy #<record
+        sty o_rec+1
+        sty ob_rj+1
         .assert >record = >o_nr, error, "record, o_nr: one page (phase patches the low byte only)"
-        ldx #<recordc
-        stx c_rec+1
-        ldx #>recordc
-        stx c_rec+2
+        ldy #<recordc
+        sty c_rec+1
+        ldy #>recordc
+        sty c_rec+2
+ph_en:  stx ph_e                   ; the end (X); c_xe's operand at most 128
+        cpx #129                   ; when x4 is in the left half
+        bcc :+
+        cmp #128
+        bcs :+
+        ldx #128
+:       stx c_xe+1
         rts
+ph_e:   .byte 0                    ; the phase's end (data, in the code)
+; c_nh: x4 is 128, an end from the left half (c_lim's): the right half starts
+; (sethalf, A = 1), then the phase goes on to its own end (ph_e), or, when
+; that is 128, the next phase (phase).  Out to c_xt with A = x4.
+c_nh:   lda #1
+        jsr sethalf
+        ldx ph_e
+        cpx #129
+        lda #128                   ; (x4 again)
+        bcc :+
+        stx c_xe+1
+        jmp c_xt
+:       jsr phase
+        jmp c_xt
 
 ; c_dbl: from c_split, rung ri+1 starts in the column too (A = x4 | 3 >= its
 ; LO).  Two rungs: s2v (bank 4) when the top is level (V clear, c_coly's), else
@@ -2122,9 +2143,8 @@ c_xe:   cmp #0                     ; operand: the phase's end (phase's)
 c_xt:   tay
         asl a                      ; coff = 8 * column mod 256
         sta coff
-        beq c_nh                   ; 0: x4 = 128, the right half starts
 ; c_coly: the column at Y = x4 (coff set).  V is clear here: c_nd1's and np_n's
-; ADC can set it only for x4 = 128, which comes through c_nh and sethalf's
+; ADC can set it only for x4 = 128, which comes through c_lim and sethalf's
 ; CLV.  ri is the first rung not wholly left of the column (its HI > x4,
 ; c_rix's); rung ri is in the column if its LO <= x4 + 3, i.e. LO & $FC <= x4.
 c_coly:
@@ -2146,14 +2166,12 @@ o_lv:   sta flr1                   ; a level floor, A: the run ends at it (as
 o_rec:  jmp record                 ; (phase's: record or o_nr)
 c_lim:  cmp xr                     ; the phase's end: the strip's too?
         beq c_end
+        cmp #128                   ; 128 from the left half: the right half
+        beq c_nhj                  ; starts
         jsr phase                  ; (A = x4 kept)
         jmp c_xt
-c_nh:   lda #0                     ; the right half: A = C = 1 (c_xt's ASL)
-        rol a
-        jsr sethalf
-        ldy x4
-        jmp c_coly
 c_end:  rts
+c_nhj:  jmp c_nh
 ; o_zt: a one-box column whose top is not level.  C from ot3: p0 > p3, oz_dn
 ; (mn = p3).  Else mn = p0, mx = p3 and msk the pixels at line mn: pixel 0,
 ; and 1, 2 while they equal it (the row monotonic).  V set (zone1's and
@@ -2448,7 +2466,7 @@ rpatch: lda HI,x
 ; sh_2: their pages are the last call's; at first TPE0, TPO0 at offset $FF)
 ; and pY's operand made t, below YSKY, so the next run2 plants afresh.  In: A;
 ; sh_b's operand (setback's 2 * back).  Out: V clear (c_coly's), Y = t.
-; Clobbers A, X.  Called by cols, c_nh and gn_d.
+; Clobbers A, X.  Called by cols, c_lim and gn_d.
 sethalf:
 sh_b:   ora #0                     ; operand: 2 * back (setback's)
         tay                        ; Y = t

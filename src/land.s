@@ -1154,11 +1154,11 @@ t_dr:   lda DRT,y                  ; r2 = 2 (dx mod |dy|) (DRT holds 2r)
         bcc :+
         adc ra2                    ; (C set: 2r + 2|dy| + 1)
 :       lsr a                      ; (C clear if rem = 0)
-        beq :+                     ; e: how far short of the next step (2|dy| - rem,
-        eor #$FF                   ; or 0; C: rem > 0)
-        sec
-        adc ra2
-:       sta rrem
+        beq :+                     ; rrem: 255 - e, e how far short of the next
+        sec                        ; step (2|dy| - rem, or 0): rem - 2|dy| - 1,
+        sbc ra2                    ; or $FF (C clear: rem < 2|dy|)
+:       sbc #0                     ; (C after: rem > 0)
+        sta rrem
         lda rq                     ; the first run: the pending one, to x0 + q +
         adc #0                     ; (rem > 0)
         adc BX,x                   ; (C clear)
@@ -1178,6 +1178,7 @@ tv_h0:  lda TENH4,y
         sta tf_j+1
 tf_h:   lda TENH4,y
         sta tf_j+2
+        clc                        ; (t_inc's)
         ldy dva                    ; (Y: the runs left after this one)
         lda tyv
 tf_j:   jmp t_back
@@ -1243,31 +1244,31 @@ fl_3:   sta ROWB+3,x
         cpx fe
         bcc fl_0
 :       ldx fe
+        clc                        ; (t_inc's)
 t_back:                            ; (the fills' way back: X the run's end)
 t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         dey
         bmi t_fr
         beq t_last
-        lda rrem                   ; the next step: + 2dx / 2|dy|, by e
-        sec
-        sbc rr2
+        lda rrem                   ; the next step: + 2dx / 2|dy|, by e (rrem:
+        adc rr2                    ; 255 - e; C clear here, every way in)
         bcs :+
-        adc ra2                    ; (C set after: + 1)
+        sta rrem
+        txa
+        adc rq2                    ; (C clear after: x < 256)
+        tax
+        lda tyv
+jv0:    jmp t_back
+:       sbc ra2                    ; (C clear after: 2|dy| > r2 > A)
         sta rrem
         lda tyv                    ; q2 + 1: the first here, then jv0's q2
 jvb:    sta ROWB,x
         txa
+        sec
         adc rq2
         tax
         lda tyv
         jmp jv0
-:       sta rrem
-        txa
-        clc
-        adc rq2
-        tax
-        lda tyv
-jv0:    jmp t_back
 t_old:  lda t_inc                  ; (dx >= 64 or |dy| >= 32) a pixel at a time
         sta tr_inc
         lda terr

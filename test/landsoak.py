@@ -126,6 +126,8 @@ def main():
         m[lab['czt']], m[lab['czs']] = (cz >> 8) & 63, (cz >> 4) & 15
         scr = 0x3000 if m[lab['back']] == 0 else 0x5800
         e = int(rng.integers(0, L.EMAX + 1)) if cam and rng.integers(2) else 0
+        if os.environ.get('SOAKE'):
+            e = int(os.environ['SOAKE'])            # (a fixed camera raise)
         m[0x07D6] = e                                # (CAME)
         if DBG: print('f', f, 'e', e, 'back', m[lab['back']])
         m[lab['vcount']] = (m[lab['vflip']] + 4) & 255     # (flip's four vertical syncs since the last)

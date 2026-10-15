@@ -21,9 +21,11 @@
 ; point is the ship less 128 in x, ZSHIP tiles in z); its height Lander's rule
 ; (min(ship, 0): it follows the ship up) within what the strips allow: CAMH
 ; (6 tiles) above the ground under the ship, or more to keep the ship KOFF
-; units below it (so the ship stays at line ~90 on screen as it climbs), at
-; most EMAX more (CAME: LAND's y's within a byte).  The ship's ceiling is
-; height YTOP (the camera can follow it all the way).
+; units below it (so the ship stays at line ~97 on screen as it climbs), at
+; most EMAX more (CAME: by then every row is below the screen, LAND's y's
+; held at 254; above that the ship stays at KOFF's line over no land).  The
+; engines cut out from height ENGH up (Lander's HIGHEST_ALTITUDE); YTOP a
+; ceiling past that (su: a byte of units).
 ;
 ; The screen's top 64 lines are the game's (LAND draws from YSKY, 64): the
 ; FUEL (a bar, row 0), the frame rate (row 2: F toggles it, LAND's readout); the
@@ -60,7 +62,9 @@ THRS    = 3                        ; full thrust: THX.. << THRS (1016: 0.062, La
 HOVS    = 1                        ; hover: << HOVS (Lander's quarter)
 LANDV   = 2048                     ; Lander's LANDING_SPEED: |gvx| + |gvy| + |gvz| below
 UNDER   = 6                        ; Lander's UNDERCARRIAGE_Y (0.39 tiles), height units
-YTOP    = 63                       ; the ship's ceiling, height units
+ENGH    = 160                      ; the engines cut out from here up, height units
+                                   ; (10 tiles: the land all below the screen by then)
+YTOP    = 240                      ; and a ceiling (su's byte: the climb coasts on)
 KOFF    = 79                       ; the camera this far above the ship, or more
 FUEL0   = 3413                     ; Lander's fuel: at the start; most (refuelling)
 FUELMX  = 5120
@@ -298,25 +302,28 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         lsr a
         sta czs
         jsr units                  ; (su: the ship's height, units 8.8)
-        lda su+1                   ; above the ground under it: rel (signed)
-        sec
+        lda su+1                   ; above the ground under it: rel (0 below it:
+        sec                        ; crashing)
         sbc HGV
-        sta gt0
+        bcs :+
+        lda #0
+:       sta gt0
         sec                        ; CAME: rel - (KOFF - CAMH), 0..EMAX
         sbc #CAMH-KOFF
-        bvc :+
-        eor #$80
-:       bpl :+
+        bcs :+
         lda #0
 :       cmp #EMAX+1
         bcc :+
-        lda #EMAX
+        lda #EMAX                  ; (past it: every row below the screen; the
+        sta CAME                   ; ship KOFF below the camera, still following)
+        lda #KOFF
+        bne gsy
 :       sta CAME
         clc                        ; the ship's line: HORIZON + SHYT (camera - ship),
         adc #CAMH                  ; the camera CAMH + CAME above the ground (d R / 16,
         sec                        ; R the landscape's at ZSHIP)
         sbc gt0
-        tax
+gsy:    tax
         lda SHYT,x
         clc
         adc #HORIZON
@@ -477,12 +484,18 @@ step:   lda gkb                     ; the virtual mouse
         lsr a
         lsr a
         and #3                     ; (1 full, 2 hover)
-        ldx fuel
-        bne :+
-        ldx fuel+1
-        bne :+
-        lda #0
-:       sta thr
+        tay
+        lda fuel                   ; (none without fuel, nor from ENGH units up:
+        ora fuel+1                 ; Lander's engines cut out at its
+        beq @off                   ; HIGHEST_ALTITUDE)
+        lda sy+1
+        cmp #(ENGH<<4)&255
+        lda sy+2
+        sbc #ENGH>>4
+        bcc :+
+@off:   ldy #0
+:       tya
+        sta thr
         cmp #0
         beq :+
         lda #0                     ; (thrust: off the ground)
@@ -1097,7 +1110,7 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         adc #8
         cmp #16
         bcc :+
-        jmp @o
+@o1:    jmp @o
 :       ldy #4
 :       lda gt1
         cmp #$80
@@ -1112,9 +1125,13 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         sec
         sbc ppy,x
         lda su+1
-        sbc ppyh,x                 ; (lines: whole units, signed)
-        sta gt3
-        lda ppz,x                  ; dz (8.8) >> 6: lines up
+        sbc ppyh,x                 ; (lines: whole units, signed; off if not
+        sta gt3                    ; within a byte, the ship far above it)
+        bcc :+
+        bmi @o1
+        bpl :++
+:       bpl @o1
+:       lda ppz,x                  ; dz (8.8) >> 6: lines up
         sec
         sbc sz+1
         sta gt0

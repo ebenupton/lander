@@ -41,6 +41,8 @@ def strips_of(hm, cx, cz, m=M, e=0):
     pairs = [(sky, pts[0], [BLACK] * n)] + list(zip(pts, pts[1:], cols)) + [(pts[-1], gnd, [BLACK] * n)]
     out = []
     for t, b, c in pairs:
+        if min(y for _, y in t + b) > YGND:      # (wholly below the screen: the camera
+            continue                             # raised, y's held at 254)
         xl = max(L.XL, (b[0][0] - m) & ~3)       # (within the clip)
         xr = min(L.XR, (b[-1][0] + m + 3) & ~3)
         out.append(([(xl, t[0][1])] + t + [(xr, t[-1][1])],

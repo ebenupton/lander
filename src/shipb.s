@@ -1,8 +1,8 @@
 ; ============================================================================
 ; shipb.s -- SHIPB, LAND's bank 6: sideways RAM at $8000.  build.sh assembles
 ; it (ca65; it includes landsyms.inc, shipspan.s and shipspan.inc) and links
-; it with shipb.cfg (CODE at $8000, then SPANS, TAIL, and DTAB on a page
-; boundary); LANDS loads the file into bank 6.  Two entry points, the jmps at
+; it with shipb.cfg (CODE at $8000, then SPANS, then TAIL and DTAB each on a
+; page boundary); LANDS loads the file into bank 6.  Two entry points, the jmps at
 ; the bank's start, each reached through LAND's call6 (A = the low byte; bank
 ; 6 paged in for the call, bank 4 back after):
 ;   B6_KEYS ($8000): each frame after the game's step (bank 5, game.s) and
@@ -15,14 +15,14 @@
 ;     shipdraw), then widens that screen's column records to the ship's box
 ;     so the strips repaint its rows the next time they draw the screen.
 ;
-; Memory: CODE $8000-$875C (keys and ship here, then shipspan.s's walker, its
-; tables and FCE, FCX); SPANS $875D-$B46C (the orientations' streams); TAIL
-; $B46D-$B59F (spdec); DTAB $B600-$BFD2 (DL4, DH4, shipspan.inc's tables).
-; Main RAM: DBUF ($2F00, at most 128 bytes), the current orientation's lines,
-; kept across frames (dlast).  Zero page, shipdraw's only: LAND's $8E-$9F
-; (project's HPZ, bank 7's and the strips' scratch, all finished when
+; Memory: CODE $8000-$869E (keys and ship here, then shipspan.s's walker, its
+; tables and FCE, FCX); SPANS $869F-$B3AE (the orientations' streams); TAIL
+; $B400-$B58A (spdec); DTAB $B600-$BF7E (DTH, DL4, shipspan.inc's tables).
+; Main RAM: DBUF ($2F00, under 256 bytes), the current orientation's lines,
+; kept across frames (dlast, dmir, dal).  Zero page, shipdraw's only: LAND's
+; $8E-$9F (project's HPZ, bank 7's and the strips' scratch, all finished when
 ; B6_SHIP runs and set afresh each frame) for c0+1..6, x0+1..6, ptr, dp, lim,
-; bl and spdec's dc .. dtmp; TRL+0..15 (LAND's TRL and the first four of TRB:
+; bl and spdec's dl; TRL+0..15 (LAND's TRL and the first four of TRB:
 ; a split column's transitions, dead after the strips) for the rest; $8D,
 ; c0 itself, is never touched.
 ;
@@ -50,7 +50,7 @@ lim     = $9E                      ; LIM's for the last boundary (is the next in
 bl      = $9F                      ; its byte?); lines left in the pass
 t       = L_TRL                    ; scratch
 al      = L_TRL+1                  ; shx & 3
-alx     = L_TRL+2                  ; al, or - al mirrored
+wb      = L_TRL+2                  ; spdec's base for w: al, or 41 + al mirrored
 k       = L_TRL+3                  ; scratch
 ee      = L_TRL+5                  ; the orientation's entry, 17 shp + kk
 tmp     = L_TRL+6                  ; ship's last column
@@ -59,12 +59,13 @@ pm      = L_TRL+9                  ; $FF if pass A's lines are odd
 mk      = L_TRL+10                 ; lk's mask on n: 0, or $FF mirrored
 nb      = L_TRL+12                 ; pass B's lines ($80: none, a one-line band)
 ptb     = L_TRL+14                 ; pass B's first line's screen byte
+dpb     = L_TRL+4                  ; its bytes in DBUF
         .assert ptb+2 <= L_TRL+24, error, "the TRL names must fit TRL, TRB: 24 bytes"
 
 ; SHPAD: the span walker's patch chains and tables must each sit within one
 ; page (shipspan.s's .asserts); this pad after `keys` puts the code from
 ; `ship` on at a page phase that satisfies them (the smallest that links).
-SHPAD   = 208
+SHPAD   = 164
         .code
         .assert * = $8000, error, "bank 6 starts at $8000: B6_KEYS, B6_SHIP"
         jmp keys                   ; B6_KEYS ($8000)
@@ -129,6 +130,6 @@ bxr:    .byte 0                    ; and last line (inclusive)
 byt:    .byte 0
 byb:    .byte 0
 
-        .include "shipspan.s"      ; the walker (CODE), spdec (TAIL), DL4, DH4
+        .include "shipspan.s"      ; the walker (CODE), spdec (TAIL), DTH, DL4
         .include "shipspan.inc"    ; shipgen's tables: DTAB (still current),
                                    ; SPANS, DTAB again

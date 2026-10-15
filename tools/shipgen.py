@@ -64,24 +64,23 @@ worth (-8..7) between lines.  Each entry's stream, which shipspan.s's spdec expa
                the first line's m = SPATN[P] + 1 boundaries, a byte each, u =
                offset + U0,
                then each following line as nibbles, high first, a byte a pair (an
-               odd m's last low nibble 0, unused): each boundary's change from the
-               same boundary of the line before, as a signed nibble;
+               odd m's first high nibble 0, unused): each boundary's change from
+               the same boundary of the line before, as a signed nibble, the high
+               one rotated to put its sign bit lowest (bit 4 of the byte: spdec's
+               carry between the pair's adds);
     then $FF.
-spdec writes DBUF as the walker reads it: per band P, L, then the lines in two
-passes of alternate lines, m bytes each: first the lines of the last line's parity
-(L odd: 0, 2, ..; L even: 1, 3, ..), then the rest; $FF after the last band.  An
-entry's DBUF image is at most 128 bytes (asserted).
+spdec writes DBUF as the walker reads it: per band P, L, then the lines in order,
+each the last m bytes of an eight-byte slot, as pixels (the u's shifted by the
+centre's pixel in its byte, mirrored if the direction is); $FF after the last
+band.  An entry's DBUF image is under 256 bytes (asserted).
 
 The tables, in shipspan.inc's order (e an entry, P a pattern):
   SHIP_NDIR, SHIP_NPITCH, SHIP_ND2, SHIP_NE, SHIP_U0, SHIP_NPAT, SHIP_MAXN
                      the counts; NPAT the patterns, MAXN the most faces in one
-  LIM + 36 * (al + 4 * mirrored) + u - 3   for u in 3..38 and al = shx & 3, the
-                     walker's byte test against the next boundary it reads: normal
-                     (boundary u at pixel w = u + al from the column 5 left of
-                     shx's, the boundaries read in rising order), the least u whose
-                     pixel is in the byte after w's; mirrored (w = 41 + al - u, read
-                     in falling order), the least u whose pixel is still in w's
-                     byte, floored at 0
+  LIM + w            for a boundary at pixel w (from the column 5 left of shx's: w
+                     = u + al normal, 41 + al - u mirrored, al = shx & 3; w in
+                     3..41), the first pixel of the byte after w's, 4 * (w // 4 +
+                     1): the walker's byte test against the next boundary it reads
   SPATN, SPATO + P   pattern P's faces: how many, where in SPATF
   SPATON + P         SPATO + SPATN, the pattern's end (the unmirrored walker's base)
   SPATF              the patterns' faces, left to right, in turn
@@ -92,13 +91,10 @@ The tables, in shipspan.inc's order (e an entry, P a pattern):
                      x negative (neg = 1) or not: even lines' and odd lines'
   ELO, EHI + e       entry e's stream, low and high bytes of its address in SPANS
   SPANS              the streams (segment SPANS)
-  KTR, BYR + k       (segment DTAB again, after SPANS: the bank's last page, which
-                     shipspan.s asserts holds all four u tables) for a mirrored
-                     line's u = k + al, k in 0..38: KT the mask of the pixels
-                     before pixel w = 41 + al - u in its byte ($00, $88, $CC, $EE for
-                     w & 3 = 0..3), BY the byte's offset from the column 5 left of
-                     shx's, 8 * (w >> 2)
-  KTN, BYN + i       the same for a normal line's pixel w = i = u + al, i in 0..41
+  KTN, BYN + w       (segment DTAB again, after SPANS) for a boundary at pixel w:
+                     KT the mask of the pixels before w in its byte ($00, $88, $CC,
+                     $EE for w & 3 = 0..3), BY the byte's offset from the column 5
+                     left of shx's, 8 * (w >> 2)
 """
 import argparse
 import functools
@@ -357,15 +353,16 @@ def write(out):
     data, where, dmax = [], {}, 0
     for e, b in enumerate(blobs):
         where[e] = len(data)
-        dmax = max(dmax, sum(2 + len(ls) * len(ls[0]) for _, ls in b) + 1)
+        dmax = max(dmax, sum(2 + len(ls) * 8 for _, ls in b) + 1)
         for P, lines in b:
             data += [P, len(lines)]
             data += lines[0]
             for i in range(1, len(lines)):
-                d = [(c - a) & 15 for a, c in zip(lines[i - 1], lines[i])] + [0]
-                data += [d[j] << 4 | d[j + 1] for j in range(0, len(lines[0]), 2)]
+                d = [(c - a) & 15 for a, c in zip(lines[i - 1], lines[i])]
+                d = [0] * (len(d) & 1) + d
+                data += [((d[j] & 7) << 1 | d[j] >> 3) << 4 | d[j + 1] for j in range(0, len(d), 2)]
         data.append(0xFF)
-    assert dmax <= 128, dmax
+    assert dmax < 256, dmax
     L = ['; shipspan.inc: from tools/shipgen.py -- do not edit',
          f'SHIP_NDIR = {NDIR}', f'SHIP_NPITCH = {NPITCH}', f'SHIP_ND2 = {ND2}', f'SHIP_NE = {NE}',
          f'SHIP_U0 = {U0}', f'SHIP_NPAT = {len(pats)}',
@@ -375,8 +372,7 @@ def write(out):
         L.append(f'{name}:')
         for i in range(0, len(vals), 16):
             L.append('        .byte ' + ', '.join(f'${v & 255:02X}' for v in vals[i:i + 16]))
-    tab('LIM', [((u + a) // 4 + 1) * 4 - a for a in range(4) for u in range(3, 39)] +
-        [max(0, a + 38 - 4 * ((41 + a - u) // 4)) for a in range(4) for u in range(3, 39)])
+    tab('LIM', [(w // 4 + 1) * 4 for w in range(42)])
     tab('SPATN', [len(f) for f in pats])
     o, po = 0, []
     for f in pats:
@@ -406,8 +402,6 @@ def write(out):
     tab('SPANS', data)
     L.append('        .segment "DTAB"')
     LM = [0, 0x88, 0xCC, 0xEE]
-    tab('KTR', [LM[(41 - k) & 3] for k in range(39)])
-    tab('BYR', [((41 - k) >> 2) * 8 for k in range(39)])
     tab('KTN', [LM[i & 3] for i in range(42)])
     tab('BYN', [(i >> 2) * 8 for i in range(42)])
     L.append('        .code')

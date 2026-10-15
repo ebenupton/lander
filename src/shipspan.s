@@ -1,9 +1,9 @@
 ; ============================================================================
 ; shipspan.s -- the ship's drawing for LAND's bank 6.  Included by shipb.s:
 ; the span walker and its tables go into the bank's CODE segment after keys
-; and ship ($8131-$875C), the decoder spdec into TAIL ($B46D-$B59F, after the
-; SPANS streams) and the nibble tables DL4, DH4 open DTAB ($B600), where
-; shipspan.inc's tables follow.  tools/shipgen.py writes shipspan.inc: every
+; and ship ($8105-$869E), the decoder spdec into TAIL ($B400-$B58A, the page
+; after the SPANS streams) and the nibble tables DTH, DL4 open DTAB ($B600),
+; where shipspan.inc's tables follow.  tools/shipgen.py writes shipspan.inc: every
 ; stored orientation's lines, rasterised by its reference tri() and
 ; compressed; test/shipbtest.py runs shipdraw under py65 for every
 ; orientation and checks each screen byte against that reference.
@@ -30,28 +30,29 @@
 ; first pixel, then where each of the band's n faces ends, left to right on
 ; the stored picture (a face the line lacks ends where it starts).  The
 ; screen pixel of u is w = u + al (normal) or 41 + al - u (mirrored), al =
-; shx & 3, counted from the column five left of shx's (ptr's column); so a
-; mirrored line's boundaries are read from its last to its first and the
-; faces' slots are filled from the pattern's end.
+; shx & 3, counted from the column five left of shx's (ptr's column): spdec
+; stores w, and a mirrored line's boundaries are read from its last to its
+; first and the faces' slots are filled from the pattern's end.
 ;
 ; Bands: an orientation's lines run top to bottom in bands, each band's lines
 ; sharing a pattern P (SPATN + P faces: n, 1..6, listed in SPATF from SPATO +
 ; P to SPATON + P) and each boundary moving by at most a nibble (-8..7) a
 ; line.  The stream (SPANS; ELO, EHI + e): per band P, L (its lines), line
 ; 0's m bytes, then lines 1 .. L-1 each as m nibbles, high nibble first, a
-; byte a pair (an odd m's last low nibble zero, unused): each boundary's
-; change from the line before; $FF after the last band.  spdec expands it
-; into DBUF ($2F00, main RAM) as the walker reads it: P, L, then the pass-A
-; lines (0, 2, .. if L is odd; 1, 3, .. if even), then the pass-B lines (the
-; rest), m bytes each; $FF the end.  An orientation's DBUF image is at most
-; 128 bytes (shipgen asserts), so it never leaves page $2F: dp and the reads'
-; low bytes alone move.
+; byte a pair (an odd m's first high nibble zero, unused): each boundary's
+; change from the line before, the high nibble rotated to put its sign bit
+; lowest; $FF after the last band.  spdec expands it
+; into DBUF ($2F00, main RAM): P, L, then the lines in order, each as its w's
+; (below) in the last m bytes of an eight-byte slot; $FF the end.  An
+; orientation's DBUF image is under 256 bytes (shipgen asserts), so it never
+; leaves page $2F: dp and the reads' low bytes alone move.
 ;
 ; Drawing (band, line, SEG): a band's lines in two passes of alternate lines,
-; A then B, each pass with the faces' dithers for its lines' parity (c0+j
-; slot j's byte for this pass, x0+j its even ^ odd, to flip for pass B).  A
-; line: Y = the first boundary's byte (its offset from ptr: 8 a column), acc
-; (A) = that screen byte; then for each face in turn acc's pixels from the
+; A then B (dp stepping two slots a line), each pass with the faces' dithers
+; for its lines' parity (c0+j slot j's byte for this pass, x0+j its even ^
+; odd, to flip for pass B).  A line: Y = the first boundary's byte (its
+; offset from ptr: 8 a column), acc (A) = that screen byte; then for each
+; face in turn acc's pixels from the
 ; boundary on become the face's dither (eor c, and KT, eor c: KT the mask of
 ; the pixels before w in its byte); when the next boundary lies in a later
 ; byte, acc is stored, the whole bytes between are filled with the dither
@@ -61,20 +62,16 @@
 ; character row; line y's byte of column c is at base + 512 (y >> 3) + (y &
 ; 7) + 8 c.
 ;
-; Tables for u (shipgen's write(): LIM, and KTR .. BYN in page $BF of DTAB):
-; KTN + al + u and BYN + al + u (normal), KTR - al + u and BYR - al + u
-; (mirrored): KT for w, and 8 (w >> 2), its byte's offset from ptr.  LIM - 3
-; + 36 al + u (normal): the least u whose pixel is in the byte after w's;
-; LIM - 3 + 144 + 36 al + u (mirrored): the least u still in w's byte.  The
-; bases are patched into the walker's operands per drawing (al, mir), so each
-; access is one indexed load.
+; Tables for w (shipgen's write(), in DTAB): KTN + w the mask of the pixels
+; before w in its byte, BYN + w the byte's offset from ptr, 8 (w >> 2), LIM +
+; w the first pixel of the byte after, 4 ((w >> 2) + 1): the next boundary
+; is in the same byte when it is under that, read in rising w either way.
 ;
-; Self-modification: shipdraw patches the u tables' bases (kt_j, bya_j,
-; byb_j, hl_j, ktf, iby, ihl), the mirror-dependent opcodes and operands
-; (br_j, ad_j, lop; lk's mask mk), band's table bases (bpcl, bccl, bso) and
-; the lines' page (rd_j, in: page).  band patches the line stride (stp), the
-; first read's offset (lk) and the chains' entries (lj, ij, fj, bcj); each
-; line patches its m reads (in, rd_j) through the pn_j or pm_j chain.  The
+; Self-modification: shipdraw patches the mirror-dependent opcode and
+; operands (lop; lk's mask mk), band's table bases (bpcl, bccl, bso) and the
+; lines' page (rd_j, in: page).  band patches the first read's offset (lk)
+; and the chains' entries (lj, ij, fj, bcj); each line patches its m reads
+; (in, rd_j) through the pn_j or pm_j chain.  The
 ; chains pn_j/pm_j, cn_j/cm_j, seg_j, fl_j are six entries each running on
 ; into the next; a band of n faces enters at entry 7 - n (tables PNL, PML,
 ; CNL, CML, SGL, SGH, FLL + n), so the faces occupy slots 7 - n .. 6, slot 6
@@ -83,7 +80,8 @@
 
 ; Zero page (shipb.s's names): c0+j, x0+j (j 1..6) the slots; ptr the line's
 ; screen byte, dp its DBUF bytes, lim, bl (lines left in the pass); and in
-; TRL: t, k (scratch), al, alx, ee, pm, mk, nb, ptb (pass B's first line).
+; TRL: t, k (scratch), al, wb (spdec's base for w), ee, pm, mk, nb, ptb, dpb
+; (pass B's first line: its screen byte and its DBUF slot).
 
         .assert SHIP_MAXN <= 6, error, "six slots: no pattern may have more faces"
 
@@ -122,9 +120,10 @@ cm6:    CS SPATF+0, 6
 ; ---------------------------------------------------------------- shipdraw
 ; shipdraw: draw the ship (shk, shp) centred at (shx, shy) on screen scrb;
 ; In, Out and Clobbers as the file header.  Sets mir, ee, the faces' dithers
-; FCE, FCX, the box, al, alx, every per-drawing patch, DBUF (spdec, if dlast
-; is another entry), dp = DBUF and ptr = line byt's byte in column (shx >>
-; 2) - 5, then falls into band; band's rts at the $FF ends the drawing.
+; FCE, FCX, the box, al, wb, every per-drawing patch, DBUF (spdec, unless it
+; holds this entry as drawn with this mir and al: dlast, dmir, dal), dp =
+; DBUF and ptr = line byt's byte in column (shx >> 2) - 5, then falls into
+; band; band's rts at the $FF ends the drawing.
 shipdraw:
         lda shk                    ; kk = (shk + 8) & 31 if under 17: as stored
         clc
@@ -200,8 +199,8 @@ shipdraw:
         lda shx
         and #3
         sta al                     ; al = shx & 3, the centre's pixel in byte
-        sta alx                    ; alx = al (normal) or - al (mirrored): the u
-        lda EXB,x                  ; tables' base shift
+        sta wb                     ; wb = al (normal) or 41 + al (mirrored):
+        lda EXB,x                  ; spdec's base for w
         and #$0F                   ; low nibble: the leftmost pixel's offset + 1
         sta t
         lda EXB,x                  ; high nibble: the rightmost's offset - 4
@@ -235,60 +234,17 @@ shipdraw:
         sec
         sbc t
         sta bxr
-        lda #0
-        sec
-        sbc al
-        sta alx                    ; alx = - al
+        lda al                     ; wb = 41 + al: w = wb + (u ^ $FF) + 1
+        clc
+        adc #2*SHIP_U0+1
+        sta wb
         ldx #1                     ; X = 1: the P* tables' mirrored entry
-@pt:    lda PKT,x                  ; KTN + al, or KTR - al: the low byte of kt_j
-        clc                        ; and ktf's `and KT,x` (one page: asserted)
-        adc alx
-        .repeat 6, j
-        sta .ident(.sprintf("kt%d", j + 1))+1
-        .endrepeat
-        sta ktf+1
-        lda PBY,x                  ; BYN + al, or BYR - al: bya_j's and byb_j's
-        clc                        ; `cmp BY,x`, iby's `ldy BY,x`
-        adc alx
-        .repeat 6, j
-        sta .ident(.sprintf("bya%d", j + 1))+1
-        sta .ident(.sprintf("byb%d", j + 1))+1
-        .endrepeat
-        sta iby+1
-        lda al                     ; LIM - 3 + 36 al (+ 144 mirrored), 16 bits:
-        asl a                      ; hl_j's and ihl's `lda LIM,x`
-        asl a
-        asl a
-        adc al                     ; (9 al)
-        asl a
-        asl a                      ; (36 al)
-        adc PLM,x                  ; the low byte; its carry kept (php) over the
-        php                        ; stores for the high byte's adc #0
-        .repeat 6, j
-        sta .ident(.sprintf("hl%d", j + 1))+1
-        .endrepeat
-        sta ihl+1
-        plp
-        lda PLMH,x
-        adc #0
-        .repeat 6, j
-        sta .ident(.sprintf("hl%d", j + 1))+2
-        .endrepeat
-        sta ihl+2
-        lda PAD,x                  ; ad_j's operand: 7 (normal: C set there) or
-        .repeat 6, j               ; 8 (mirrored, C clear): Y + 8 either way
-        sta .ident(.sprintf("ad%d", j + 1))+1
-        .endrepeat
-        lda PBR,x                  ; br_j's opcode: bcc (normal: one byte if u <
-        .repeat 6, j               ; lim) or bcs (mirrored: if u >= lim)
-        sta .ident(.sprintf("br%d", j + 1))
-        .endrepeat
-        lda PLO,x                  ; lop: adc #1 (normal: the reads step up the
+@pt:    lda PLO,x                  ; lop: adc #1 (normal: the reads step up the
         sta lop                    ; line's bytes) or sbc #0 (mirrored: down; C
         lda PLV,x                  ; clear makes it - 1)
         sta lop+1
-        lda PMK,x                  ; mk: lk's mask on n: 0 (the first read is by
-        sta mk                     ; 0) or $FF (byte n, the last)
+        lda PMK,x                  ; mk: lk's mask on n: $FF (the first read is
+        sta mk                     ; the line's first byte) or 0 (its last)
         lda PPL,x                  ; bpcl's table: PNL or PML (lj's entry)
         sta bpcl+1
         lda PCL,x                  ; bccl's: CNL or CML (bcj's entry)
@@ -297,10 +253,20 @@ shipdraw:
         sta bso+1                  ; or SPATO (mirrored: its start)
         lda PSOH,x
         sta bso+2
-        ldx ee                     ; DBUF holds entry dlast's lines: expand ee's
-        cpx dlast                  ; unless it already does
-        beq :+
-        stx dlast
+        ldx ee                     ; DBUF holds entry dlast's lines as drawn
+        cpx dlast                  ; mirrored dmir at pixel dal: expand ee's
+        bne :+                     ; unless it already does
+        lda mir
+        cmp dmir
+        bne :+
+        lda al
+        cmp dal
+        beq :++
+:       stx dlast
+        lda mir
+        sta dmir
+        lda al
+        sta dal
         jsr spdec
 :
         lda #<DBUF                 ; dp = DBUF; its page into dp+1, rd_j, in
@@ -336,31 +302,34 @@ shipdraw:
 ; ---------------------------------------------------------------- a band
 ; band: start the band at dp (its P, L), or at $FF return (the rts is
 ; shipdraw's: the drawing is done).  In: dp the band's bytes, ptr its first
-; line's screen byte, the per-drawing patches.  Sets stp (the line stride m
-; = n + 1), lk (the first read's byte: 0, or n mirrored), lj, ij, fj, bcj
-; (the chains' entries for n), ptr and ptb (pass A's and pass B's first
-; lines' bytes: the band's first two lines, swapped when L is even), bl and
-; nb (the passes' lines), pm (pass A's parity), then enters the dithers' chain,
-; which runs on to lnx2.  Reached by falling in from shipdraw and by jmp
-; from pstb, psrb after a band.
+; line's screen byte, the per-drawing patches.  Sets lk (the first read's
+; slot byte: 7 - n, or 7 mirrored), lj, ij, fj, bcj (the chains' entries for
+; n), ptr and ptb, dp and dpb (pass A's and pass B's first lines' screen
+; bytes and DBUF slots: the band's first two lines, swapped when L is even),
+; bl and nb (the passes' lines), pm (pass A's parity), then enters the
+; dithers' chain, which runs on to lnx2.
+; Reached by falling in from shipdraw and by jmp from pstb, psrb after a
+; band.
 band:   ldy #1
         lda (dp),y                 ; L, the band's lines
         sta bl
         dey
-        lda (dp),y                 ; P, its pattern, or $FF
-        cmp #$FF
-        bne :+
+        lda (dp),y                 ; P, its pattern, or $FF (bit 7: P < 128)
+        bpl :+
         rts
 :       tay
-        inc dp                     ; dp past P, L (no page crossing: the DBUF
-        inc dp                     ; image is within its page)
         ldx SPATN,y                ; n, the pattern's faces
-        inx
-        stx stp+1                  ; stp: a line is n + 1 bytes
-        dex
+        lda dp                     ; dp past P, L (no page crossing: the DBUF
+        clc                        ; image is within its page), dpb = the
+        adc #2                     ; second line's slot (pass B's first, or
+        sta dp                     ; swapped)
+        adc #8
+        sta dpb
         txa
         and mk
-        sta lk+1                   ; lk: the first read's byte, 0 or n
+        eor #7
+        sta lk+1                   ; lk: the first read's slot byte, 7 - n (the
+                                   ; line's first) or 7 (its last, mirrored)
 bpcl:   lda PNL,x                  ; (operand patched: PNL or PML) lj's target,
         sta lj+1                   ; pn_(7-n) or pm_(7-n)
         lda SGL,x                  ; ij's target, seg_(7-n): the first face's
@@ -405,6 +374,10 @@ bccl:   lda CNL,x                  ; (operand patched: CNL or CML) bcj's target,
         ldx ptb+1
         stx ptr+1
         sta ptb+1
+        lda dp                     ; and dp, dpb: A reads from the second line
+        ldx dpb
+        stx dp
+        sta dpb
 @cl:    lda ptr                    ; pm = $FF if pass A's lines are odd (a
         and #1                     ; line's byte address has its y's bit 0)
         beq :+
@@ -455,51 +428,43 @@ pm6:    sta rd6+1
 ; (operand from lk), lim = LIM's for it, Y = its byte's offset from ptr, A =
 ; that screen byte (acc); then into seg_(7-n), the first face's slot.
 in:     ldx $FFFF                  ; (operand: the line's first read, lk's)
-ihl:    lda LIM-3,x                ; (operand: LIM's block for al, mir)
+        lda LIM,x
         sta lim
-iby:    ldy BYN,x                  ; (operand: BYN + al, or BYR - al)
+        ldy BYN,x
         lda (ptr),y
 ij:     jmp $FFFF                  ; (operand: seg_(7-n), band's)
 
 ; SEG j: slot j's face, from boundary X (acc A is its byte Y so far) to the
 ; next boundary.  acc's pixels from w on become c0+j (KT: those before w
-; stay).  rd_j reads the next boundary; if it is in acc's byte (br_j: normal
-; u < lim, mirrored u >= lim) the next slot continues with the same acc; else
-; acc is stored, lim becomes the new boundary's, Y steps by 8 a byte (ad_j),
-; the whole bytes before the boundary's are filled with c0+j (bya_j, byb_j:
-; cmp its BY) and acc restarts as c0+j with Y its byte.  Runs into
-; seg_(j+1); seg6 into seg7.  Patched: kt_j, br_j, hl_j, ad_j, bya_j, byb_j
-; a drawing; rd_j's low byte a line, its high byte a drawing (page).
+; stay).  rd_j reads the next boundary; if it is in acc's byte (w < lim) the
+; next slot continues with the same acc; else acc is stored, lim becomes the
+; new boundary's, Y steps by 8 a byte, the whole bytes before the boundary's
+; are filled with c0+j (cmp its BY) and acc restarts as c0+j with Y its byte.
+; Runs into seg_(j+1); seg6 into seg7.  Patched: rd_j's low byte a line, its
+; high byte a drawing (page).
 .macro SEG j
         .local fl, fd
 .ident(.sprintf("seg%d", j)):
         eor c0+j                   ; acc = (acc ^ c) & KT ^ c: KT's pixels keep
-.ident(.sprintf("kt%d", j)):       ; acc, the rest become c
-        and KTN,x                  ; (operand: KTN + al, or KTR - al)
+        and KTN,x                  ; acc, the rest become c
         eor c0+j
 .ident(.sprintf("rd%d", j)):
         ldx $FFFF                  ; (operand: the line's byte 1 + j - (7 - n),
-        cpx lim                    ; or n - 1 - (j - (7 - n)) mirrored): next u
-.ident(.sprintf("br%d", j)):
-        ; (opcode: bcc, or bcs mirrored) the same byte: on to the next slot
-        bcc .ident(.sprintf("seg%d", j + 1))
+        cpx lim                    ; or n - 1 - (j - (7 - n)) mirrored): next w
+        bcc .ident(.sprintf("seg%d", j + 1))   ; the same byte: the next slot
         sta (ptr),y                ; acc complete
-.ident(.sprintf("hl%d", j)):
-        lda LIM-3,x                ; (operand: LIM's block) lim for the new u
+        lda LIM,x                  ; lim for the new w
         sta lim
         tya
-.ident(.sprintf("ad%d", j)):
-        adc #7                     ; (operand: 7, C set; or 8, C clear) Y + 8
-.ident(.sprintf("bya%d", j)):
-        cmp BYN,x                  ; (operand: BY + al, or - al) the u's byte
-        bcs fd                     ; reached: nothing between
+        adc #7                     ; (C set: the cpx's) Y + 8
+        cmp BYN,x                  ; the w's byte reached: nothing between
+        bcs fd
 fl:     tay                        ; a whole byte of c
         lda c0+j
         sta (ptr),y
         tya
         adc #8                     ; (C clear: the cmp's)
-.ident(.sprintf("byb%d", j)):
-        cmp BYN,x                  ; (operand: as bya_j's)
+        cmp BYN,x
         bcc fl
 fd:     tay                        ; Y = the boundary's byte, acc = c, into the
         lda c0+j                   ; next slot
@@ -512,7 +477,7 @@ fd:     tay                        ; Y = the boundary's byte, acc = c, into the
         SEG 6
 seg7:                              ; the last boundary: acc's pixels before it,
         eor (ptr),y                ; the screen's from it: (acc ^ s) & KT ^ s
-ktf:    and KTN,x                  ; (operand: as kt_j's)
+        and KTN,x
         eor (ptr),y
         sta (ptr),y
 lend:   lda ptr                    ; ptr to the pass's next line, y + 2; into a
@@ -521,9 +486,9 @@ lend:   lda ptr                    ; ptr to the pass's next line, y + 2; into a
         sta ptr
         and #6
         beq lrow
-lnx:    lda dp                     ; dp to the next line's bytes
+lnx:    lda dp                     ; dp to the pass's next line: two slots on
         clc
-stp:    adc #0                     ; (operand: n + 1, band's)
+        adc #16
         sta dp
         dec bl                     ; the pass's lines left (C clear, for lk)
         bne line
@@ -548,26 +513,31 @@ fj:     jmp fl1                    ; (operand low byte patched: fl_(7-n))
         FLIP 4
         FLIP 5
         FLIP 6
-        lda ptb                    ; pass B's first line
+        lda ptb                    ; pass B's first line: ptr = ptb, dp = dpb
         sta ptr
         lda ptb+1
         sta ptr+1
+        lda dpb
+        sta dp
         jmp lnx2
-psrb:   lda ptb                    ; a one-line band: ptr = ptb, the band's end
-        sta ptr
+psrb:   lda ptb                    ; a one-line band: ptr = ptb, the band's end,
+        sta ptr                    ; dp = dpb, the next band's P
         lda ptb+1
         sta ptr+1
+        lda dpb
+        sta dp
 pstb:   jmp band                   ; (pass B's last line is L - 2: ptr is at
-                                   ; line L, the next band's first)
+                                   ; line L, the next band's first, and dp at
+                                   ; the band's end)
 ; ---------------------------------------------------------------- a line
 ; line: patch the line's m boundary reads, then draw it (in).  In: A = dp,
-; the line's first byte in DBUF, C clear.  in reads byte lk (0, or n
+; the line's slot in DBUF, C clear.  in reads slot byte lk (7 - n, or 7
 ; mirrored); lop makes the second read's byte and lj's chain patches the
-; rest.  lnx2 enters with a pass's first line, lnx with A from stp's adc.
+; rest.  lnx2 enters with a pass's first line, lnx with A from its adc.
 lnx2:   lda dp
         clc
 line:
-lk:     adc #0                     ; (operand: 0, or n mirrored) in's byte
+lk:     adc #0                     ; (operand: 7 - n, or 7 mirrored) in's byte
         sta in+1
 lop:    adc #1                     ; (adc #1; or sbc #0 mirrored, C clear: - 1)
 lj:     jmp pn1                    ; (low byte patched: pn_(7-n) or pm_(7-n))
@@ -582,21 +552,15 @@ lrow:   lda ptr                    ; into the next character row: - 8 + 512 (the
 ; ---------------------------------------------------------------- tables
 ; The chains' entries by n (1..6: entry 7 - n at index n) and, in pairs
 ; indexed 0 normal, 1 mirrored, the P* values shipdraw patches in.
-        .align 64                  ; (PNL .. CML, 28 bytes, in one page: bpcl
+        .align 32                  ; (PNL .. CML, 28 bytes, in one page: bpcl
                                    ; and bccl are patched in the low byte only)
 PNL:    .byte 0, <pn6, <pn5, <pn4, <pn3, <pn2, <pn1
 PML:    .byte 0, <pm6, <pm5, <pm4, <pm3, <pm2, <pm1
 CNL:    .byte 0, <cn6, <cn5, <cn4, <cn3, <cn2, <cn1
 CML:    .byte 0, <cm6, <cm5, <cm4, <cm3, <cm2, <cm1
-PKT:    .byte <KTN, <KTR           ; kt_j, ktf: + al, or - al
-PBY:    .byte <BYN, <BYR           ; bya_j, byb_j, iby: + al, or - al
-PLM:    .byte <(LIM-3), <(LIM-3+144)   ; hl_j, ihl: + 36 al, 16 bits
-PLMH:   .byte >(LIM-3), >(LIM-3+144)
-PBR:    .byte $90, $B0             ; br_j's opcode: bcc, bcs
-PAD:    .byte 7, 8                 ; ad_j's operand (C set, or clear, there)
 PLO:    .byte $69, $E9             ; lop: adc #1, or sbc #0
 PLV:    .byte 1, 0
-PMK:    .byte 0, $FF               ; mk: lk's mask on n
+PMK:    .byte $FF, 0               ; mk: lk's mask on n
 PPL:    .byte <PNL, <PML           ; bpcl's table
 PCL:    .byte <CNL, <CML           ; bccl's
 PSO:    .byte <SPATON, <SPATO      ; bso's: the pattern's end, or its start
@@ -604,206 +568,189 @@ PSOH:   .byte >SPATON, >SPATO
 SGL:    .byte 0, <seg6, <seg5, <seg4, <seg3, <seg2, <seg1   ; ij: the first slot
 SGH:    .byte 0, >seg6, >seg5, >seg4, >seg3, >seg2, >seg1
 FLL:    .byte 0, <fl6, <fl5, <fl4, <fl3, <fl2, <fl1     ; fj: the flips' entry
+SDP:    .byte 0, <pr1, <hf3, <pr2, <hf5, <pr3, <hf7   ; spdec: sd_ln's entry for
+                                   ; m = n + 1
+SDR:    .byte 0, <sd_r6, <sd_r5, <sd_r4, <sd_r3, <sd_r2, <sd_r1   ; and sd_r0's,
+                                   ; RAW 8 - m
         .assert >PNL = >PML && >CNL = >CML, error, "PNL, PML and CNL, CML each in one page: bpcl, bccl patch the low byte"
         .assert >pn1 = >pm6 && >cn1 = >(cm6+12) && >fl1 = >fl6, error, "each chain in one page: lj, bcj, fj patch the low byte"
 
 FCE:    .res 9                     ; faces 0-7, the exhaust (8), this drawing's
 FCX:    .res 9                     ; even-line dither byte, and even ^ odd
 
-; The u tables (shipspan.inc's KTR, BYR, KTN, BYN, closing DTAB) must share
-; a page: kt_j, bya_j, byb_j, iby, ktf hold a base shifted by al (-3 .. +3)
-; in the low byte only, and KTR - 3 must not fall below its page.
-        .assert >KTR = >(BYN+41) && <KTR >= 3, error, "KTR .. BYN+41 in one page, KTR 3 bytes in at least"
-
         .segment "TAIL"
 ; ---------------------------------------------------------------- spdec
-; spdec: expand entry X's stream (ELO, EHI + X, in SPANS) into DBUF in the
-; order the walker reads it.  Per band: P, L copied; m = SPATN[P] + 1 bytes
-; a line; the stream's lines 0 .. L-1 go alternately into region A (the
-; pass-A lines: line 0 first if L is odd, line 1 if even) and region B (the
-; rest), A's dd = ((L + 1) >> 1) m bytes first and B's after; each line but
-; the first is the line before it (in the other region) plus its nibbles.
-; With q = m if L is odd, else 0: a line written into A finds the line before
-; at + offA = dd - q (0 .. 127: DBUF's page), one written into B at + offB =
-; q - dd - m (negative: addressed from the page before, DBUF-256); and from
-; the end of a line just written, the next starts at + offB (into A) or +
-; offA (into B).  The two offsets are patched into the DLINE operands (p1a,
-; p2a, ada; p1b, p2b, adb) a band.  $FF, copied, ends the entry.
-; In: X the entry.  Out: DBUF.  Clobbers A, X, Y, ptr (the stream pointer, Y
-; indexing it: an entry is under 256 bytes), $8E-$93 (dc .. dtmp: the
-; walker's slot bytes, which it sets after this runs), sd_y, the patched
-; operands.  Called by shipdraw when dlast changes.
-dc      = $8E                      ; boundaries left in the line
-dl      = $8F                      ; lines left in the band
-dm      = $90                      ; m
-dd      = $91                      ; region A's bytes
-dend    = $92                      ; region B's end so far (finally the band's)
-dtmp    = $93                      ; the pair of nibbles
-; DLINE r, nx: one line into region r at X from the stream at Y: m nibbles,
-; each added to the line before's boundary (at + off from X: p1r's and p2r's
-; operand, patched; nx is 256 for region B, whose negative off needs the
-; page before in the operand).  A nibble's signed value comes through DH4
-; (high) or DL4 (low) with the nibble as the operand's low byte (h_r, l_r:
-; DL4 opens its page, DH4 is 16 in).  X ends past the line.
-.macro DLINE r, nx
-        lda dm
-        sta dc
-:       lda (ptr),y                ; a pair, high nibble first
+; spdec: expand entry X's stream (ELO, EHI + X, in SPANS) into DBUF as the
+; drawing reads it: per band P, L copied, then its L lines in order, each in
+; an eight-byte slot (X) as its last m = SPATN[P] + 1 bytes, slot bytes 8 - m
+; .. 7, each boundary as its pixel w: line 0's from the stream's u (wb + u
+; normal, wb + (u ^ $FF) + 1 = 41 + al - u mirrored: C, sd_c's, is mir's bit
+; 0 and the adds keep it; the RAW chain, entered at its byte 8 - m: sd_r0's
+; operand, SDR + n, patched a band), each later line's the line before's
+; (the slot before: eight bytes back) plus (normal) or minus (mirrored: the
+; adds' opcodes and sd_c, patched when mir differs from dsg) its nibble, a
+; pair a stream byte: the PAIR chain pr3 (slot bytes 2, 3), pr2 (4, 5), pr1
+; (6, 7), entered at pr(m / 2) for an even m, or through a HALF (hf7: byte
+; 1, hf5: 3, hf3: 5, the first byte's low nibble alone) for an odd one
+; (sd_ln's operand, SDP + n, patched a band).  A nibble's signed value comes
+; from DTH (the high one: the whole byte as the operand's low byte) or DL4
+; (the low one, masked, with the high one's sign bit).  $FF, copied, ends
+; the entry.
+; In: X the entry; mir, wb.  Out: DBUF.  Clobbers A, X, Y, ptr (the stream
+; pointer, Y indexing it: an entry is under 256 bytes), $8E (dl: a walker
+; slot byte, which it sets after this runs), sd_y, the patched opcodes and
+; operands.  Called by shipdraw when dlast, dmir or dal changes.  TAIL
+; starts a page (shipb.cfg) so that the chains, laid first, each lie in one.
+dl      = $8E                      ; lines left in the band
+; RAW k: line 0's slot byte k from the stream's u: wb + u, or wb + (u ^ $FF)
+; + 1 mirrored (C, mir's bit 0 from sd_c, kept by the add: w is in 3 .. 41).
+.macro RAW k
+.ident(.sprintf("sd_r%d", k)):
+        lda (ptr),y
         iny
-        sta dtmp
-        and #15                    ; l_r: adc DL4 + the low nibble
-        sta .ident(.sprintf("l%s", r))+1
-        lda dtmp
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora #<DH4                  ; h_r: adc DH4 + the high nibble
-        sta .ident(.sprintf("h%s", r))+1
-.ident(.sprintf("p1%s", r)):
-        lda DBUF-nx,x              ; (low byte patched: off) the boundary in the
-        clc                        ; line before
-.ident(.sprintf("h%s", r)):
-        adc DH4                    ; (operand: the nibble's)
-        sta DBUF,x
-        inx
-        dec dc
-        beq :+                     ; (an odd m: the last low nibble unused)
-.ident(.sprintf("p2%s", r)):
-        lda DBUF-nx,x
-        clc
-.ident(.sprintf("l%s", r)):
-        adc DL4
-        sta DBUF,x
-        inx
-        dec dc
-        bne :-
-:
+        eor mir
+        adc wb
+        sta DBUF+k,x
 .endmacro
-spdec:  lda ELO,x                  ; ptr = the entry's stream
+        RAW 1
+        RAW 2
+        RAW 3
+        RAW 4
+        RAW 5
+        RAW 6
+        RAW 7
+        jmp sd_le
+; HALF k: a stream byte's low nibble alone, taken from (or added to) the
+; line before's slot byte k into this line's.
+.macro HALF k
+        lda (ptr),y                ; hl_k: adc DL4 + the low nibble
+        iny
+        and #15
+        sta .ident(.sprintf("hl%d", k))+1
+        lda DBUF-8+k,x             ; the boundary in the line before
+.ident(.sprintf("hc%d", k)):
+        clc                        ; (opcode: clc, or sec)
+.ident(.sprintf("hl%d", k)):
+        adc DL4                    ; (opcode: adc, or sbc; operand: the entry)
+        sta DBUF+k,x
+.endmacro
+; PAIR k: a stream byte's two nibbles added to (or taken from) the line
+; before's slot bytes k, k + 1 into this line's.  The first add's carry out
+; (adc: set by a negative nibble; sbc: clear by one) feeds the second, whose
+; entry (DL4 + b & $1F: the low nibble and the high one's sign, bit 4) makes
+; up for it.
+.macro PAIR k
+        lda (ptr),y                ; h_k: adc DTH + b, the high nibble's entry
+        iny
+        sta .ident(.sprintf("h%d", k))+1
+        and #$1F                   ; l_k: adc DL4 + the low nibble, with the
+        sta .ident(.sprintf("l%d", k))+1   ; high one's sign
+        lda DBUF-8+k,x             ; the boundary in the line before
+.ident(.sprintf("ca%d", k)):
+        clc                        ; (opcode: clc, or sec)
+.ident(.sprintf("h%d", k)):
+        adc DTH                    ; (opcode: adc, or sbc; operand: the entry)
+        sta DBUF+k,x
+        lda DBUF-8+k+1,x
+.ident(.sprintf("l%d", k)):
+        adc DL4                    ; (opcode and operand likewise)
+        sta DBUF+k+1,x
+.endmacro
+hf7:    HALF 1                     ; m = 7: byte 1, then pairs 2 .. 7
+pr3:    PAIR 2                     ; m = 6
+pr2:    PAIR 4                     ; m = 4
+pr1:    PAIR 6                     ; m = 2
+sd_le:  txa                        ; X to the next slot
+        clc
+        adc #8
+        tax
+        dec dl
+        beq :+
+sd_ln:  jmp pr3                    ; (low byte patched: the entry for m) a line
+:       jmp sd_bd
+hf5:    HALF 3                     ; m = 5: byte 3, then pairs 4 .. 7
+        jmp pr2
+hf3:    HALF 5                     ; m = 3: byte 5, then the pair 6, 7
+        jmp pr1
+        .assert >hf7 = >hf3 && >sd_r1 = >sd_r7, error, "the PAIR and RAW chains each in one page: sd_ln, sd_r0 patch the low byte"
+spdec:  lda mir                    ; the adds' opcodes for mir: clc, adc
+        cmp dsg                    ; (normal) or sec, sbc (mirrored), unless
+        beq :+                     ; they are already
+        sta dsg
+        and #$20
+        ora #$18                   ; clc $18, sec $38
+        sta sd_c
+        sta hc1
+        sta hc3
+        sta hc5
+        .repeat 3, i
+        sta .ident(.sprintf("ca%d", 2 * i + 2))
+        .endrepeat
+        lda mir
+        and #$80
+        ora #$6D                   ; adc abs $6D, sbc abs $ED
+        sta hl1
+        sta hl3
+        sta hl5
+        .repeat 3, i
+        sta .ident(.sprintf("h%d", 2 * i + 2))
+        sta .ident(.sprintf("l%d", 2 * i + 2))
+        .endrepeat
+:       lda ELO,x                  ; ptr = the entry's stream
         sta ptr
         lda EHI,x
         sta ptr+1
         ldy #0                     ; Y: the stream's next byte
         ldx #0                     ; X: DBUF's next byte
-sd_bd:  lda (ptr),y                ; a band's P, or $FF: copied
-        iny
+sd_bd:  lda (ptr),y                ; a band's P, or $FF (bit 7: P < 128): copied
         sta DBUF,x
+        bmi sd_end
+        iny
         inx
-        cmp #$FF
-        bne :+
-        rts
-:       sty sd_y                   ; (Y lent to index SPATN)
+        sty sd_y                   ; (Y lent to index SPATN)
         tay
-        lda SPATN,y
-        clc
-        adc #1
-        sta dm                     ; m = n + 1
+        lda SPATN,y                ; n: the chains' entries
+        tay
+        lda SDP,y
+        sta sd_ln+1
+        lda SDR,y
+        sta sd_r0+1
         ldy sd_y
         lda (ptr),y                ; L: copied
         iny
-        sty sd_y
         sta DBUF,x
         inx
         sta dl
-        clc                        ; dd = ((L + 1) >> 1) m, region A's bytes
-        adc #1
-        lsr a
-        tay
-        lda #0
-:       clc
-        adc dm
-        dey
-        bne :-
-        sta dd
-        txa                        ; dend = region B's start (its end, empty)
-        clc
-        adc dd
-        sta dend
-        lda dl                     ; q = m if L is odd, else 0 (dc a moment)
-        lsr a
-        lda #0
-        bcc :+
-        lda dm
-:       sta dc
-        lda dd                     ; offA = dd - q: p1a, p2a (into A: the line
-        sec                        ; before), adb (into B: the next's start)
-        sbc dc
-        sta p1a+1
-        sta p2a+1
-        sta adb+1
-        lda dc                     ; offB = q - dd - m: p1b, p2b (into B), ada
-        sec                        ; (into A)
-        sbc dd
-        sec
-        sbc dm
-        sta p1b+1
-        sta p2b+1
-        sta ada+1
-        ldy sd_y
-        lda dl                     ; line 0, raw: into A (at X) if L is odd,
-        lsr a                      ; else into B (at dend)
-        bcs sd_0a
-        ldx dend
-        jsr sd_raw
-        stx dend
-        dec dl
-        bne sd_ia
-        jmp sd_end
-sd_0a:  jsr sd_raw
-        dec dl
-        bne sd_ib
-        jmp sd_end
-sd_ib:  txa                        ; a line into B: at the last line's end + off
-        clc
-adb:    adc #0                     ; (operand: offA)
-        tax
-        DLINE "b", 256
-        stx dend
-        dec dl
-        bne sd_ia
-        jmp sd_end
-sd_ia:  txa                        ; a line into A: at the last line's end + off
-        clc
-ada:    adc #0                     ; (operand: offB)
-        tax
-        DLINE "a", 0
-        dec dl
-        beq sd_end
-        jmp sd_ib
-sd_end: ldx dend                   ; X = the band's end, the next band's P
-        jmp sd_bd
-; sd_raw: a band's line 0, m stream bytes (Y) copied to DBUF at X; X, Y
-; advanced past it.
-sd_raw: lda dm
-        sta dc
-:       lda (ptr),y
-        iny
-        sta DBUF,x
-        inx
-        dec dc
-        bne :-
-        rts
+sd_c:   clc                        ; (opcode: clc, or sec mirrored) the RAW
+sd_r0:  jmp sd_r1                  ; adds' carry in; (low byte patched: RAW 8
+                                   ; - m) line 0
+sd_end: rts
 sd_y:   .byte 0                    ; Y, while Y indexes SPATN
-dlast:  .byte $FF                  ; the entry DBUF holds ($FF: none yet)
+dlast:  .byte $FF                  ; the entry DBUF holds ($FF: none yet), as
+dmir:   .byte 0                    ; drawn mirrored or not,
+dal:    .byte 0                    ; at al
+dsg:    .byte 0                    ; the mir the adds' opcodes are for
 
         .code
         .segment "DTAB"
-; DL4, DH4: a nibble b's signed value, (b ^ 8) - 8 = -8 .. 7, as a byte.  Two
-; copies so DLINE's adc operands take the nibble itself as the low byte: DL4
-; at its page's start (the low nibble as is), DH4 16 in (the high nibble | 16).
+; DTH, DL4: a nibble's signed value, -8 .. 7, as a byte, laid out so spdec's
+; adc operands take the stream byte as their low byte.  DTH, a page, by the
+; whole byte: the high nibble's value, that nibble stored rotated (shipgen:
+; its sign bit lowest, so the byte's bit 4).  DL4, 32 bytes opening a page,
+; by the low nibble with that sign bit: the low nibble's value, less one when
+; the sign is set (the first add's carry out, into the second).
+DTH:    .repeat 256, b
+        .byte <(((((b >> 4) & 1) << 3 | (b >> 5)) ^ 8) - 8)
+        .endrepeat
+DL4:    .repeat 32, b
+        .byte <(((b & 15) ^ 8) - 8 - (b >> 4))
+        .endrepeat
+        .assert <DTH = 0 && <DL4 = 0, error, "DTH, DL4 open pages: spdec patches a byte, a nibble in as the low byte"
 ; shipspan.inc's tables follow in this segment, which is left current for
-; it: LIM, SPATN, SPATO, SPATON, SPATF, SNEG, EYS, EXB, SHDE, SHDO, ELO, EHI,
-; and after its SPANS segment KTR, BYR, KTN, BYN (page $BF).
-DL4:    .repeat 16, b
-        .byte <(((b ^ 8) - 8))
-        .endrepeat
-DH4:    .repeat 16, b
-        .byte <(((b ^ 8) - 8))
-        .endrepeat
-        .assert <DL4 = 0 && <DH4 = 16, error, "DL4 opens a page, DH4 follows: DLINE patches the nibble in as the low byte"
+; it: LIM, SPATN, SPATO, SPATON, SPATF, SNEG, EYS, EXB, SHDE, SHDO, ELO,
+; EHI, and after its SPANS segment KTN, BYN.
 
 DBUF    = $2F00                    ; main RAM: the page below screen 0 ($3000),
                                    ; above LAND's end (land.s asserts <= $2F00);
                                    ; entry dlast's lines, in the order the
-                                   ; walker reads them (at most 128 bytes)
+                                   ; walker reads them (under 256 bytes)

@@ -1768,9 +1768,7 @@ ph_r:   stx c_xe+1
         ldx #>recordc
         stx c_rec+2
         rts
-c_dbl:  lda x4
-        ora #3
-        cmp LO+2,x
+c_dbl:  cmp LO+2,x                  ; (A: x4 | 3, c_split's)
         bcs c_d3
         bvs :+                     ; (two rungs: s2v, its top level; else split2)
         jmp s2v

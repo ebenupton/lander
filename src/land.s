@@ -1129,16 +1129,16 @@ t_seg:  stx tj
         sty t_inc                  ; ($E6 or $C6: +1 or -1 below)
         sta dva                    ; a run a y: the steps at x0 + ceil(dx (2k-1) / 2|dy|)
         tay                        ; (k = 1 .. |dy|; ragged.transitions' sum)
+        cmp #1                     ; (|dy| 1: t_one's, any dx)
+        beq t_one
         asl a
         sta ra2                    ; (t_old: none of ra2)
         ora terr                   ; |dy| < 32 and dx < 64 (|dy| < dx: 2|dy| < 256
         cmp #64                    ; or dx >= 128)
         bcs t_o
-        cpy #1
-        beq t_one
         lda DVH,y                  ; divt's, inline: q, rem = dx div 2|dy|, mod;
         sta t_dq+2                 ; q2, r2 = 2dx's
-        adc #>(DRT-DQT)-1          ; (DVR's: DVH + 8; C set: Y >= 2)
+        adc #>(DRT-DQT)            ; (DVR's: DVH + 8; C clear)
         sta t_dr+2
         lda DVL,y
         ora terr

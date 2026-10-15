@@ -2063,9 +2063,9 @@ np_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
         ldy coff
         lda #0
         sta (zp_),y
+        txa                        ; (flr)
         ldx x4                     ; (np_b's: flr on the screen here)
         ldy DIV4,x
-        lda flr
 pB4:    sta CURB,y
 pB5:    cmp BOTS,y
         bcs np_n
@@ -2453,7 +2453,7 @@ fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
         sta fen_o+1
         sec
 fs_nj:  jmp fs_c                   ; (split's: sp_r)
-        .res 0                     ; (spare: keeps the code after in place)
+        .res 1                     ; (spare: keeps the code after in place)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).

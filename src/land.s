@@ -1884,10 +1884,8 @@ c_xt:   tay
         beq c_nh
 c_coly:                            ; (V clear: the adc #4 above, or sethalf's
                                    ; last sbc) the rungs: past those wholly left
-c_hi:   cpy #0                     ; (rpatch's: rung ri's HI)
-        bcs c_ri0
-c_lo:   cpy #0                     ; (rpatch's: its LO & $FC; LO <= x4 + 3,
-        bcs c_sp                   ; a rung in the column)
+c_lo:   cpy #0                     ; (rpatch's: rung ri's LO & $FC; LO <= x4 + 3:
+        bcs c_hi                   ; a rung in the column, or past it; LO <= HI)
                                    ; one box: no vertex of either row inside it
                                    ; (rungs ri-1 and before: at or left of x4;
                                    ; ri on: right of x4 + 3), so each row
@@ -1945,7 +1943,8 @@ ob_cl:  dex                        ; (rare)
         dec flr
         bcs ob_st                  ; (C set)
 c_ri0:  jmp c_rix                   ; (in reach)
-
+c_hi:   cpy #0                     ; (rpatch's: its HI)
+        bcs c_ri0
 c_sp:                              ; a rung in the column: the top level?
 pt0:    lda ROWA,y
 pt1:    cmp ROWA+1,y

@@ -1192,12 +1192,12 @@ t_one:  lda terr
         tay                        ; (TNB = $80: N, Y > TNB, or $80, t_flo's alike)
         bmi t_fl1
         lda TENL,y
-        sta tf_j+1
+        sta t1_j+1
 t1_h:   lda TENH4,y
-        sta tf_j+2
+        sta t1_j+2
         ldy #1
         lda tyv
-        jmp tf_j
+t1_j:   jmp t_back                 ; (its own, as tf_j)
 t_fr:   rts                        ; (t_back's: in its page, no page crossed)
 t_last: stx tcnt                   ; the last run: pending (at y1)
         jmp t_next

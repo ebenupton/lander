@@ -23,8 +23,8 @@
 ; units below it (so the ship stays at line ~81 on screen as it climbs), it
 ; always following: LAND drawn at most EMAX higher (CAME: by then every row is
 ; below the screen, its y's held at 254).  The
-; engines cut out ENGR above the ground (Lander's HIGHEST_ALTITUDE); YTOP a
-; ceiling past that (su: a byte of units).
+; engines cut out once the land has gone from the screen (Lander's
+; HIGHEST_ALTITUDE); it coasts up and falls back, no ceiling.
 ;
 ; The screen's top 64 lines are the game's (LAND draws from YSKY, 64): the
 ; FUEL (a bar, row 0), the frame rate (row 2: F toggles it, LAND's readout); the
@@ -66,9 +66,8 @@ HOVS    = 1                        ; hover: << HOVS (Lander's quarter); each 1.2
 LANDV   = 2048                     ; Lander's LANDING_SPEED: |gvx| + |gvy| + |gvz| below
 UNDER   = 4                        ; Lander's UNDERCARRIAGE_Y (0.39 tiles) at the ship's
                                    ; size here (14 / R(ZSHIP) of Lander's): height units
-ENGR    = 104                      ; the engines cut out from here up, height units
-                                   ; above the ground under the ship
-YTOP    = 240                      ; and a ceiling (su's byte: the climb coasts on)
+EOFF    = 60                       ; (the camera raise below which the land can't
+                                   ; all be below the screen: landoff not needed)
 KOFF    = 79                       ; the camera this far above the ship, or more
 FUEL0   = 3413                     ; Lander's fuel: at the start; most (refuelling)
 FUELMX  = 5120
@@ -314,12 +313,18 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         lsr a
         sta czs
         jsr units                  ; (su: the ship's height, units 8.8)
-        lda su+1                   ; above the ground under it: rel (0 below it:
+        lda sy+2                   ; (16 tiles up or more: past su's byte, rel the
+        bmi gr_lo                  ; most)
+        cmp #16
+        bcc gr_lo
+        lda #$FF
+        bne gr_st
+gr_lo:  lda su+1                   ; above the ground under it: rel (0 below it:
         sec                        ; crashing)
         sbc HGV
-        bcs :+
+        bcs gr_st
         lda #0
-:       sta gt0
+gr_st:  sta gt0
         sec                        ; CAME: rel - (KOFF - CAMH), 0..EMAX
         sbc #CAMH-KOFF
         bcs :+
@@ -511,14 +516,17 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         lsr a
         and #3                     ; (1 full, 2 hover)
         tay
-        lda fuel                   ; (none without fuel, nor ENGR units or more
-        ora fuel+1                 ; above the ground under it: Lander's engines
-        beq @off                   ; cut out at its HIGHEST_ALTITUDE; coasting on)
-        lda su+1
-        sec
-        sbc HGV
-        bcc :+                     ; (below it: crashing)
-        cmp #ENGR
+        lda fuel                   ; (none without fuel, nor with the land gone
+        ora fuel+1                 ; from the screen below: Lander's engines cut
+        beq @off                   ; out at its HIGHEST_ALTITUDE; coasting on)
+        lda sy+2
+        bmi :+
+        cmp #16
+        bcs @off                   ; (16 tiles up: gone)
+        lda CAME
+        cmp #EOFF
+        bcc :+                     ; (the camera that low: in view)
+        jsr landoff
         bcc :+
 @off:   ldy #0
 :       tya
@@ -643,7 +651,10 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         jsr pmove
         lda sy+2                   ; below 0: the ground
         bmi @gnd
-        jsr units                  ; the ground: the ship below the ground under
+        cmp #16                    ; (16 tiles up: nowhere near it)
+        bcc :+
+        jmp parts
+:       jsr units                  ; the ground: the ship below the ground under
         lda su+1                   ; it (HGV) + UNDER
         sec
         sbc HGV
@@ -711,23 +722,38 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         cli
         jsr burst
         jmp parts
-@up:    lda sy+1                   ; the ceiling: YTOP units
-        cmp #(YTOP<<4)&255
-        lda sy+2
-        sbc #YTOP>>4
-        bcc :+
-        lda #YTOP>>4
-        sta sy+2
-        lda #(YTOP<<4)&255
-        sta sy+1
-        lda #0
-        sta sy
-        lda gvy+1
-        bmi :+
-        lda #0
-        sta gvy
-        sta gvy+1
-:       jmp parts
+@up:    jmp parts                  ; (no ceiling: it coasts up and falls back)
+
+; landoff: C set if the land was all below the screen last frame (every
+; point of every row past YGND).  X used, Y kept (step's thrust).
+landoff:
+        tya
+        pha
+        ldx #0
+        ldy nr
+@r:     stx gt0
+        lda np
+        sta gt1
+@p:     lda PY,x
+        cmp #YGND+1
+        bcc @v                     ; (on the screen)
+        inx
+        dec gt1
+        bne @p
+        lda gt0
+        clc
+        adc #16
+        tax
+        dey
+        bne @r
+        pla
+        tay
+        sec
+        rts
+@v:     pla
+        tay
+        clc
+        rts
 
 
 ; (g0), (g1): THX's and THZ's row for the pitch gp; Y = gk (their column).
@@ -1130,6 +1156,12 @@ dset:   lda scrb
         jmp units
 ; The live dots beyond the ship in z (A 0) or not (A $80).
 dots:   sta dpass
+        lda sy+2                   ; (16 tiles up: none drawn, su's byte past)
+        bmi :+
+        cmp #16
+        bcc :+
+        rts
+:
         ldx #NPART-1
 @d:     lda plife,x
         beq @n

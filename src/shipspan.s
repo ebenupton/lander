@@ -266,22 +266,17 @@ shipdraw:
         sta ptr+1
 
 ; ---------------------------------------------------------------- a band
-band:   ldy #0
-        lda (dp),y                 ; B, or $FF: the end, $FE: the next page
-        cmp #$FE
-        bcc :++
-        beq :+
-        rts
-:       sty dp
-        lda dp+1
-        adc #0                     ; (C set: + 1)
-        jsr page
-        jmp band
-:       inc dp
-        tax
-        lda BANDL,x
+band:   ldy #1
+        lda (dp),y                 ; its lines
         sta bl
-        ldy BANDP,x                ; its pattern
+        dey
+        lda (dp),y                 ; its pattern, or $FF: the end
+        cmp #$FF
+        bne :+
+        rts
+:       tay
+        inc dp
+        inc dp
         ldx SPATN,y                ; n faces
         inx                        ; its lines: n + 1 bytes
         stx stp+1
@@ -515,33 +510,42 @@ FCX:    .res 9
 
         .segment "TAIL"
 ; spdec: entry X's lines (ELO, EHI: tools/shipgen.py's stream) into DBUF as the
-; walker reads them: each band B (BANDL its lines L, SPATN of BANDP its faces:
-; m = n + 1 boundaries a line), its lines in two passes (region A: lines
-; L&1 ^ 1, + 2, ..; then B, BANDD = ((L + 1) >> 1) m on: the rest), $FF the
+; walker reads them: each band its pattern P (SPATN + P its faces: m = n + 1
+; boundaries a line) and lines L, its lines in two passes (region A: lines
+; L&1 ^ 1, + 2, ..; then B, dd = ((L + 1) >> 1) m on: the rest), $FF the
 ; end.  The stream: B, the first line's bytes, then each next line's
 ; boundaries as nibbles, a byte a pair (high first; an odd m's last low nibble
 ; unused): the change (-8..7) from the line before, read from DBUF.  With q m
-; if L is odd, else 0: a line into A has the last at offA = BANDD - q from it,
-; into B at offB = q - BANDD - m; and from the last's end, a line into A is
+; if L is odd, else 0: a line into A has the last at offA = dd - q from it,
+; into B at offB = q - dd - m; and from the last's end, a line into A is
 ; offB on, into B offA (lp_a, lp_b, the adc's: patched a band).
 ; Zero page: the walker's slots' (free till it runs); ptr the stream, Y in it.
 dc      = $8E                      ; (boundaries left in the line)
 dl      = $8F                      ; (lines left in the band)
 dm      = $90                      ; (m)
-dd      = $91                      ; (BANDD)
+dd      = $91                      ; (region B's offset)
 dend    = $92                      ; (the band's end: region B's)
+dtmp    = $93                      ; (a pair)
 .macro DLINE r, nx                 ; a line into region r (its offsets patched)
         lda dm
         sta dc
-:       lda (ptr),y                ; a pair
+:       lda (ptr),y                ; a pair: its nibbles' changes (DH4, DL4)
         iny
-        sta .ident(.sprintf("h%s", r))+1
+        sta dtmp
+        and #15
         sta .ident(.sprintf("l%s", r))+1
+        lda dtmp
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora #<DH4
+        sta .ident(.sprintf("h%s", r))+1
 .ident(.sprintf("p1%s", r)):
         lda DBUF-nx,x              ; (the last line's: lo patched)
         clc
 .ident(.sprintf("h%s", r)):
-        adc DH
+        adc DH4
         sta DBUF,x
         inx
         dec dc
@@ -550,7 +554,7 @@ dend    = $92                      ; (the band's end: region B's)
         lda DBUF-nx,x
         clc
 .ident(.sprintf("l%s", r)):
-        adc DL
+        adc DL4
         sta DBUF,x
         inx
         dec dc
@@ -563,7 +567,7 @@ spdec:  lda ELO,x
         sta ptr+1
         ldy #0
         ldx #0                     ; (X: DBUF's next)
-sd_bd:  lda (ptr),y                ; B, or $FF
+sd_bd:  lda (ptr),y                ; its pattern, or $FF
         iny
         sta DBUF,x
         inx
@@ -572,16 +576,27 @@ sd_bd:  lda (ptr),y                ; B, or $FF
         rts
 :       sty sd_y                   ; (Y a moment)
         tay
-        lda BANDL,y
-        sta dl
-        lda BANDD,y
-        sta dd
-        lda BANDP,y
-        tay
         lda SPATN,y
         clc
         adc #1
         sta dm
+        ldy sd_y
+        lda (ptr),y                ; its lines
+        iny
+        sty sd_y
+        sta DBUF,x
+        inx
+        sta dl
+        clc                        ; dd: ((L + 1) >> 1) m
+        adc #1
+        lsr a
+        tay
+        lda #0
+:       clc
+        adc dm
+        dey
+        bne :-
+        sta dd
         txa                        ; region B's start (its end if empty)
         clc
         adc dd
@@ -614,11 +629,12 @@ sd_bd:  lda (ptr),y                ; B, or $FF
         jsr sd_raw
         stx dend
         dec dl
-        beq sd_end
-        jmp sd_ia
+        bne sd_ia
+        jmp sd_end
 sd_0a:  jsr sd_raw
         dec dl
-        beq sd_end
+        bne sd_ib
+        jmp sd_end
 sd_ib:  txa                        ; into B
         clc
 adb:    adc #0                     ; (offA)
@@ -626,14 +642,16 @@ adb:    adc #0                     ; (offA)
         DLINE "b", 256
         stx dend
         dec dl
-        beq sd_end
+        bne sd_ia
+        jmp sd_end
 sd_ia:  txa                        ; into A
         clc
 ada:    adc #0                     ; (offB)
         tax
         DLINE "a", 0
         dec dl
-        bne sd_ib
+        beq sd_end
+        jmp sd_ib
 sd_end: ldx dend
         jmp sd_bd
 sd_raw: lda dm                     ; the first line's bytes
@@ -650,14 +668,13 @@ dlast:  .byte $FF                  ; (the entry DBUF holds)
 
         .code
         .segment "DTAB"
-DH:     .repeat 256, b             ; (spdec's: a pair's high nibble, signed;
-        .byte <((((b >> 4) ^ 8) - 8))
+DL4:    .repeat 16, b              ; (spdec's: a nibble's change, signed; DL4
+        .byte <(((b ^ 8) - 8))     ; at the page's start, DH4 after: their
+        .endrepeat                 ; patched low bytes the nibble, 16 + it)
+DH4:    .repeat 16, b
+        .byte <(((b ^ 8) - 8))
         .endrepeat
-DL:     .repeat 256, b             ; its low)
-        .byte <((((b & 15) ^ 8) - 8))
-        .endrepeat
-        .assert <DH = 0 && <DL = 0, error, "DH, DL: page aligned"
-        .segment "DBUF"
-DBUF:   .res 128                   ; (spdec.s: an entry's lines, as the walker reads)
-        .assert <DBUF = 0, error, "DBUF: page aligned"
-        .code
+        .assert <DL4 = 0 && <DH4 = 16, error, "DL4, DH4: a page's start"
+                                   ; (shipspan.inc's KTR, BYR, KTN, BYN follow)
+DBUF    = $2F00                    ; (spdec's: an entry's lines, as the walker reads
+                                   ; them, in main RAM: LAND's code ends before it)

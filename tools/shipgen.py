@@ -51,9 +51,9 @@ import ship as SH       # noqa: E402
 import landgen as G     # noqa: E402
 
 NDIR = 32                  # directions round the circle
-NPITCH = 13                # pitches: 45 degrees nose up to 45 nose down, 7.5 apart
+NPITCH = 13                # pitches: 60 degrees nose up to 60 nose down, 10 apart
 PFLAT = NPITCH // 2        # (level)
-PSTEP = 7.5
+PSTEP = 10
 ND2 = NDIR // 2 + 1        # stored directions: -90 .. 90
 NE = ND2 * NPITCH          # entries
 S = 14.0                   # pixels a tile (Lander's ship on its screen, scaled to 256 wide;
@@ -320,7 +320,7 @@ def asm6(out):
       SPATN, SPATO + P   pattern P's faces: how many, where in SPATF (SPATON:
                          where + how many)
       SPATF              the patterns' faces, left to right
-      BANDP, BANDL + B   band B's pattern, lines
+      (each band: its pattern P and lines L, in the stream)
       ELO, EHI + e       entry e's bands: per band B, then its lines' boundaries
                          + U0 (alternate lines from the last's back, then the
                          others); $FF after the last; $FE: the rest from the next
@@ -342,10 +342,7 @@ def asm6(out):
                              if any(not -8 <= c - a <= 7          # moves a boundary more
                                     for a, c in zip(ls[i - 1], ls[i]))] + [len(ls)]  # than a nibble)
                 for i0, i1 in zip(cut, cut[1:]):
-                    bd = (pats.index(fs), i1 - i0)
-                    if bd not in bands:
-                        bands.append(bd)
-                    b.append((bands.index(bd), [[x + U0 for x in l] for l in ls[i0:i1]]))
+                    b.append((pats.index(fs), [[x + U0 for x in l] for l in ls[i0:i1]]))
             blobs.append(b)
     # The first page: the boundaries' tables (src/shipspan.s), by u + al (normal) or
     # u - al (mirrored, the R tables): pixel w = u + al or 41 + al - u from the column
@@ -355,10 +352,7 @@ def asm6(out):
             'BYR': [((41 - k) >> 2) * 8 for k in range(39)],
             'KTN': [LM[i & 3] for i in range(42)],
             'BYN': [(i >> 2) * 8 for i in range(42)]}
-    data, uoff = [0] * 3, {}
-    for name, v in utab.items():
-        uoff[name] = len(data)
-        data += v
+    data = []
     # Then each entry, compressed (shipspan.s's spdec expands it into DBUF, as the
     # walker reads it: each band B, its lines in two passes, $FF the end): each
     # band B, its first line's bytes, then each next line's (in order) as nibbles,
@@ -367,9 +361,9 @@ def asm6(out):
     where, dmax = {}, 0
     for e, b in enumerate(blobs):
         where[e] = len(data)
-        dmax = max(dmax, sum(1 + len(ls) * len(ls[0]) for _, ls in b) + 1)
-        for B, lines in b:
-            data.append(B)
+        dmax = max(dmax, sum(2 + len(ls) * len(ls[0]) for _, ls in b) + 1)
+        for P, lines in b:
+            data += [P, len(lines)]
             data += lines[0]
             for i in range(1, len(lines)):
                 d = [(c - a) & 15 for a, c in zip(lines[i - 1], lines[i])] + [0]
@@ -379,21 +373,15 @@ def asm6(out):
     L = ['; shipspan.inc: from tools/shipgen.py -- do not edit',
          f'SHIP_NDIR = {NDIR}', f'SHIP_NPITCH = {NPITCH}', f'SHIP_ND2 = {ND2}', f'SHIP_NE = {NE}',
          f'SHIP_U0 = {U0}', f'SHIP_NPAT = {len(pats)}',
-         f'SHIP_MAXN = {max(len(f) for f in pats)}', f'SHIP_NBAND = {len(bands)}']
-    assert len(bands) < 255
+         f'SHIP_MAXN = {max(len(f) for f in pats)}']
     def tab(name, vals):
         L.append(f'{name}:')
         for i in range(0, len(vals), 16):
             L.append('        .byte ' + ', '.join(f'${v & 255:02X}' for v in vals[i:i + 16]))
-    tab('BANDL', [n for _, n in bands])
-    tab('BANDD', [((n + 1) >> 1) * (len(pats[pi]) + 1) for pi, n in bands])   # (spdec's region B)
     # LIM + 36 * (al + 4 * mirrored) + u - 3: the least u in the next byte (normal),
     # or in u's byte (mirrored: w = 41 + al - u)
     tab('LIM', [((u + a) // 4 + 1) * 4 - a for a in range(4) for u in range(3, 39)] +
         [max(0, a + 38 - 4 * ((41 + a - u) // 4)) for a in range(4) for u in range(3, 39)])
-    L.append('        .segment "TAIL"')
-    tab('BANDP', [p for p, _ in bands])
-    L.append('        .code')
     tab('SPATN', [len(f) for f in pats])
     o, po = 0, []
     for f in pats:
@@ -421,8 +409,9 @@ def asm6(out):
     L.append('        .byte ' + ', '.join(f'>(SPANS+{where[e]})' for e in range(len(blobs))))
     L.append('        .segment "SPANS"')
     tab('SPANS', data)
-    for name, o in uoff.items():
-        L.append(f'{name} = SPANS + {o}')
+    L.append('        .segment "DTAB"')               # (after shipspan.s's DL4, DH4: a page)
+    for name, v in utab.items():
+        tab(name, v)
     L.append('        .code')
     open(os.path.join(out, 'shipspan.inc'), 'w').write('\n'.join(L) + '\n')
     return len(data), (len(data) + 255) // 256

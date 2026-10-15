@@ -1742,10 +1742,8 @@ ph_hi:  cmp #0
         bcc ph_n
         ldx xr
 ph_n:   stx c_xe+1
-        ldx #<o_nr
+        ldx #<o_nr                 ; (o_rec's high byte: record's too)
         stx o_rec+1
-        ldx #>o_nr
-        stx o_rec+2
         ldx #<c_srx
         stx c_rec+1
         ldx #>c_srx
@@ -1756,10 +1754,9 @@ ph_rec: cpx xr                     ; (at most xr)
         bcc ph_r
         ldx xr
 ph_r:   stx c_xe+1
-        ldx #<record
+        ldx #<record               ; (its high byte: o_nr's too)
         stx o_rec+1
-        ldx #>record
-        stx o_rec+2
+        .assert >record = >o_nr, error, "record, o_nr: one page (phase)"
         ldx #<recordc
         stx c_rec+1
         ldx #>recordc

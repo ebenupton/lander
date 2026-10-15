@@ -97,6 +97,7 @@ CO      = $0AD0
 SPB     = $0B00                    ; the slow way: each pixel's box at the top
 STL     = $0B10                    ; and transitions (4 a pixel: line, step)
 STD     = $0B20
+EINL    = $1701                    ; run2's EIN (tables.inc's), here: no page crossed
 GLY     = $1800                    ; the readout's characters: 16 bytes each
 ENTL    = $0D00-YSKY               ; each line's entry in STAB (low, high: lines
 ENTH    = $0D61-YSKY               ; YSKY..YGND+1, 97 each)
@@ -109,6 +110,7 @@ LAH     = $16C2-YSKY               ; each line's 2 * (y >> 3) (lines YSKY..YGND+
 LAH0    = $1600-YSKY               ; and its address's high byte, screen 0 (left half)
 LAH1    = $1661-YSKY               ; screen 1
         .assert YGND+2-YSKY <= 97, error, "LAH, ENTL: 97 lines each"
+        .assert <EINL + YGND+2 < $100 && LAH + YGND+2 < EINL + YSKY-1, error, "EINL: in its page, past LAH"
 CX      = $0B30                    ; project's: the columns' map x
 PXX     = $0B40                    ; and a clipped row's x's high bytes
 ZCF     = $07D0                    ; the far clip on (1: always, init's)
@@ -521,6 +523,16 @@ init:   lda #1                     ; (the far clip on: always)
         lda #>t_back
         sta TBLK4+3*TNB+2
         sta TBLK5+3*TNB+2
+        ldx #YSKY-1                ; run2's EINL: EIN's, by line YSKY-1..YGND+2
+        lda #R2OFF                 ; (tools/landgen.py's: lines 2k-1, 2k alike)
+        clc
+:       sta EINL,x
+        sta EINL+1,x
+        adc #3                     ; (C clear: < 256)
+        inx
+        inx
+        cpx #YGND+3
+        bcc :-
         lda #<dummy                ; no RTS planted
         sta pp
         lda #>dummy
@@ -2876,9 +2888,9 @@ dummy:  .byte 0
 ; planted at EIN, OIN + Y (OIN = EIN - 1; rE, rO; pY: the line they are for,
 ; kept while the next run2's end is the same; put back by the next run2's that
 ; ends elsewhere, or sethalf).
-run2:   lda EIN,x
+run2:   lda EINL,x
         sta je+1
-        lda EIN-1,x                ; (OIN)
+        lda EINL-1,x                ; (OIN)
         sta jo+1
 pY:     cpy #$FF                   ; (the RTSes already at Y's)
         beq pY_k
@@ -2887,10 +2899,10 @@ pY:     cpy #$FF                   ; (the RTSes already at Y's)
 pr0:    sta $FFFF                  ; (rE: the low byte EIN's)
 pr1:    sta $FFFF                  ; (rO)
         lda #OP_RTS
-        ldx EIN,y
+        ldx EINL,y
         stx pr0+1
 pp0:    sta $FF00,x
-        ldx EIN-1,y
+        ldx EINL-1,y
         stx pr1+1
 pp1:    sta $FF00,x
 pY_k:   lda ve

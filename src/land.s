@@ -2373,10 +2373,8 @@ fs_nj:  jmp fs_c                   ; (split's: sp_r)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).
-zone1:  ldx mn
-@l:     cpx mx
-        bcs @d
-        cpx flr1
+zone1:  ldx mn                     ; (mn < mx: a top not level)
+@l:     cpx flr1
         bcs @d
         lda #0                     ; (pmask)
         cpx ys+3
@@ -2406,13 +2404,16 @@ zone1:  ldx mn
         eor (zp_),y
         sta (zp_),y
         inx
-        bne @l
+        cpx mx
+        bcc @l
+        bcs @d
 @o:     eor vo
         and msk
         eor (zp_),y
         sta (zp_),y
         inx
-        bne @l
+        cpx mx
+        bcc @l
 @d:     jmp c_r1
 
 ; msk: line X's pixels at or below their top.

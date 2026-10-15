@@ -1505,9 +1505,8 @@ rg_rsl:   jsr divs                   ; (a >= 32 or D >= 64)
         sbc rrem
 rg_rz:    cmp #1
         jmp rg_rst
-:       bcs :+
-        jmp rg_lft
-:       sta HI,x                   ; leaning right: xt .. xb-1
+:       bcc rg_lft
+        sta HI,x                   ; leaning right: xt .. xb-1
         sbc TX,x                   ; (C set)
         sta dva                    ; (a)
         lda TX,x
@@ -1520,6 +1519,19 @@ rg_rz:    cmp #1
         adc #$FF
         sta RTPH,x
         jmp rfastr                 ; (bank 4: a <= RFA, D < 16; else back,
+rg_lft:   sta LO,x                   ; leaning left: xb .. xt-1
+        eor #$FF                   ; RTP = alloc - LO
+        sec
+        adc alloc
+        sta RTPL,x
+        lda alloc+1
+        adc #$FF                   ; (C set after: alloc+1 > 0)
+        sta RTPH,x
+        lda TX,x
+        sta HI,x
+        sbc BX,x
+        sta dva                    ; (a)
+        jmp rfastl                 ; (bank 4: a <= RFA, D < 16; else back,
 rg_rdr:   RDIV rg_rsl                  ; ra2 = 2a)
 rg_rst:   RSET                       ; (C clear after)
         ldy #0                     ; the pixels, from xt (Y = x - LO) to Y = a
@@ -1564,20 +1576,6 @@ rg_nx:    ldx tj
 :       rts
 rg_lslj:  jmp rg_lsl                   ; (in reach)
         .res 3                     ; (keeps the layout)
-rg_lft:   sta LO,x                   ; leaning left: xb .. xt-1
-        eor #$FF                   ; RTP = alloc - LO
-        sec
-        adc alloc
-        sta RTPL,x
-        lda alloc+1
-        adc #$FF
-        sta RTPH,x
-        lda TX,x
-        sta HI,x
-        sec
-        sbc BX,x
-        sta dva                    ; (a)
-        jmp rfastl                 ; (bank 4: a <= RFA, D < 16; else back,
 rg_rdl:   RDIV rg_lslj                 ; ra2 = 2a)
 rg_lst:   RSET                       ; (C clear after)
         ldy dva                    ; the pixels, from xt-1 (Y = x - LO) to 0

@@ -1865,7 +1865,7 @@ c_vri:  cpx #$FF                   ; (ve, vo its already: the last c_one's ri,
         bne c_ld                   ; $FF if since a strip's start or a run
 c_on:   bvs c_z1                   ; with black; a split's comes with ri past)
 c_r1:    ldx mx
-        cpx flr1
+c_r1x:  cpx flr1                   ; (zone1's: X = mx)
         bcs c_next
         ldy flr1
         jsr run2
@@ -2537,7 +2537,7 @@ z1_h:   lda LAHSB0,x               ; (zline; sethalf's, the screen and half's)
         inx
         cpx mx
         bcc z1_l
-        bcs z1_d
+        jmp c_r1x                  ; (X = mx: c_r1's run)
 z1_o:   eor vo
         and msk
         eor (zp_),y
@@ -2545,11 +2545,9 @@ z1_o:   eor vo
         inx
         cpx mx
         bcc z1_l
-z1_d:   cpx flr1                   ; (c_r1's, inline: X = mx)
-        bcs z1_n
-        ldy flr1
-        jsr run2
+        jmp c_r1x                  ; (X = mx: c_r1's run)
 z1_n:   jmp c_np
+        .res 5                     ; (the layout kept)
 
 ; msk: line X's pixels at or below their top.
 pmask:  lda #0

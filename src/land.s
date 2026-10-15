@@ -1889,20 +1889,22 @@ c_split: cmp LO+1,x
         jmp fsplit                 ; (back to c_next)
 :       jmp split
 
-c_dbl:   bvs :+                     ; (the slow ways read ys)
+c_dbl:  lda x4
+        ora #3
+        cmp LO+2,x
+        bcs c_d3
+        bvs :+                     ; (two rungs: s2v, its top level; else split2)
+        jmp s2v
+:       jsr split2
+        jmp c_next
+c_d3:   bvs :+                     ; (three: never seen; slow reads ys)
         lda mx                     ; (mn: mx, V clear)
         sta mn
         sta ys
         sta ys+1
         sta ys+2
         sta ys+3
-:       lda x4
-        ora #3
-        cmp LO+2,x
-        bcs :+
-        jsr split2
-        jmp c_next
-:       jsr slow                   ; (three: never seen)
+:       jsr slow
         jmp c_next
 
 ; The near strip's column, drawn (to the line before its floor if its bottom
@@ -2864,6 +2866,108 @@ vlast:  .res 1
 tcol:   .res 1
 
         .assert * <= $3000, error, "code over the screen"
+
+; ---------------------------------------------------------------- s2v
+; (bank 4, its free space) A column two rungs split (ri, ri+1), its top level:
+; fsplit's for ri+1 (boxes M, R), then box L over the pixels left of ri at
+; each line (mktr's transitions, from TRL; bpos2 the LM mask; le, lo2 L's
+; bytes; c_np's way on kept in me, mo while fsplit's ends at s2ov).
+        .segment "B4V1"
+s2v:    lda CE-1,x                 ; (X = ri) L's bytes
+        sta le
+        lda CO-1,x
+        sta lo2
+        lda #0                     ; ri's transitions
+        jsr mktr
+        sta bpos2
+        lda #0
+        sta kb
+        lda c_np+1                 ; fsplit's end here
+        sta me
+        lda c_np+2
+        sta mo
+        lda #<s2ov
+        sta c_np+1
+        lda #>s2ov
+        sta c_np+2
+        ldx ri
+        inx
+        jmp fsplit
+s2ov:   lda me                     ; (c_np's again)
+        sta c_np+1
+        lda mo
+        sta c_np+2
+        lda #0
+        sta zp_
+        ldx mx                     ; from mx
+        cpx flr1
+        bcs s2_d
+        ldy kb
+        jmp s2_c
+s2_d:   jmp c_np
+        .segment "B4V2"
+s2_c:   txa                        ; (X: the line) the mask by ri's
+        cmp TRL,y                  ; transitions at or above it
+        bcc s2_e
+:       lda TRB,y
+        sta bpos2
+        iny
+        txa
+        cmp TRL,y
+        bcs :-
+s2_e:   sty kb
+        lda TRL,y                  ; the run's end: the next, or the floor
+        cmp flr1
+        bcc :+
+        lda flr1
+:       sta tj
+        lda bpos2
+        beq s2_n                   ; (none left of ri)
+        jmp s2_l
+s2_n:   ldx tj
+        cpx flr1
+        bcs s2_x
+        ldy kb
+        jmp s2_c
+s2_x:   jmp c_np
+        .segment "B4V3"
+s2_l:   lda LAH,x                  ; lines X .. tj-1: L in the mask's pixels
+        clc                        ; (read-modify-write)
+        adc scrh
+        sta zp_+1
+        txa
+        and #7
+        ora coff
+        tay
+        txa
+        lsr a
+        bcs s2_o
+s2_v:   lda (zp_),y                ; an even line
+        eor le
+        and bpos2
+        eor (zp_),y
+        sta (zp_),y
+        iny
+        inx
+        cpx tj
+        beq s2_m
+s2_o:   lda (zp_),y                ; an odd line
+        eor lo2
+        and bpos2
+        eor (zp_),y
+        sta (zp_),y
+        iny
+        inx
+        cpx tj
+        beq s2_m
+        txa
+        and #7
+        bne s2_v
+        inc zp_+1                  ; the next row
+        inc zp_+1
+        ldy coff
+        jmp s2_v
+s2_m:   jmp s2_n
 
 ; ---------------------------------------------------------------- LANDS
 ; LANDS: the start, run once from $7000 (!BOOT: *LOAD LAND, *RUN LANDS): the

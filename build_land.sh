@@ -52,6 +52,16 @@ PY
 python3 tools/shipgen.py $B
 ca65 -g --cpu 6502 -I src -I $B -o $B/shipb.o src/shipb.s -l $B/shipb.lst
 ld65 -C src/shipb.cfg -o $B/SHIPB $B/shipb.o -m $B/shipb_map.txt -Ln $B/shipb_labels.txt
+python3 - $B B4V1 0x3600 B4V2 0x3700 B4V3 0x3800 <<'PY'     # s2v (bank 4) into TABLES
+import sys
+d = sys.argv[1]
+img = bytearray(open(d + '/TABLES', 'rb').read())
+for c, off in zip(sys.argv[2::2], sys.argv[3::2]):
+    code, off = open(f'{d}/{c}', 'rb').read(), int(off, 16)
+    assert not any(img[off:off + len(code)]), c + ': code over the tables'
+    img[off:off + len(code)] = code
+open(d + '/TABLES', 'wb').write(img)
+PY
 printf 'MODE 1\r*LOAD LAND\r*RUN LANDS\r' > $B/BOOT
 python3 tools/mkdfs.py build $B/land.ssd LAND \
     "!BOOT:$B/BOOT:0000:FFFF" "LAND:$B/LAND:1900:1900" "LANDS:$B/LANDS:7000:7000" "TABLES:$B/TABLES:3000:3000" "TABLES2:$B/TABLES2:3000:3000" "SHIPB:$B/SHIPB:3000:3000" "TABLES7:$B/TABLES7:3000:3000"

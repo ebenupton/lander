@@ -1,5 +1,5 @@
 #!/bin/sh
-# LAND's build: build/land/land.ssd (SHIFT+BREAK: !BOOT sets MODE 1, loads LAND and runs LANDS, its start, which
+# LAND's build: build/land/lander.ssd (SHIFT+BREAK: !BOOT sets MODE 1, loads LAND and runs LANDS, its start, which
 # loads TABLES, TABLES2, SHIPB and TABLES7 into sideways RAM banks 4, 5, 6 and 7).  ca65, ld65 (cc65), Python 3.
 set -e
 cd "$(dirname "$0")"
@@ -64,6 +64,6 @@ for c, off in zip(sys.argv[2::2], sys.argv[3::2]):
 open(d + '/TABLES', 'wb').write(img)
 PY
 printf 'MODE1:VDU23,1,0;0;0;0;19,1,0;0;19,2,0;0;19,3,0;0;\r*LOAD LAND\r*RUN LANDS\r' > $B/BOOT   # (palette black, cursor off: the loads unseen)
-python3 tools/mkdfs.py build $B/land.ssd LAND \
+python3 tools/mkdfs.py build $B/lander.ssd LAND \
     "!BOOT:$B/BOOT:0000:FFFF" "LAND:$B/LAND:1900:1900" "LANDS:$B/LANDS:7000:7000" "TABLES:$B/TABLES:3000:3000" "TABLES2:$B/TABLES2:3000:3000" "SHIPB:$B/SHIPB:3000:3000" "TABLES7:$B/TABLES7:3000:3000"
-echo "$B/land.ssd: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, SHIPB $(wc -c < $B/SHIPB | tr -d ' ')"
+echo "$B/lander.ssd: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, SHIPB $(wc -c < $B/SHIPB | tr -d ' ')"

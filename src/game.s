@@ -58,7 +58,8 @@ SVIA_ORA_NH = $FE4F
 ; here a step is a frame at 10: each step is 1.25 of Lander's, velocities
 ; kept in its units: positions move 1.25 v, accelerations and drag 1.25 as
 ; much, fuel likewise, times 0.8 as many steps.)
-MSTEP   = 5                        ; the attitude: a step a key a game step
+SPAWNK  = 9                        ; the start: facing nearly this way (k 8 faces
+SPAWNP  = NPITCH-1                 ; the camera), 45 degrees nose down
 GRAV    = 240                      ; Lander's gravity (&30000: 0.0117 tiles a step^2), 1.25
 THRS    = 3                        ; full thrust: THX.. << THRS (1016: 0.062, Lander's)
 HOVS    = 1                        ; hover: << HOVS (Lander's quarter); each 1.25 (tadd)
@@ -236,9 +237,7 @@ putc:   lda gt3                    ; 16 bytes: (g1) to row gt2, column gt3
         rts
 
 ; The ship on the pad, still, landed, fuelled.
-spawn:  lda #24*8                   ; (facing away, level)
-        sta gmx
-        lda #0
+spawn:  lda #0
         sta sx
         sta sx+1
         sta sz
@@ -261,8 +260,12 @@ spawn:  lda #24*8                   ; (facing away, level)
         sta sy+1
         lda #(PADH+UNDER)>>4
         sta sy+2
-        lda #24                    ; (facing away)
+        lda #SPAWNK                ; (facing nearly this way, nose down)
         sta gk
+        lda #SPAWNP
+        sta gp
+        lda #PADH                  ; the ground under it, now (HGV is the last
+        sta HGV                    ; frame's: the ship's line from it)
         lda #<FUEL0
         sta fuel
         lda #>FUEL0
@@ -457,20 +460,21 @@ psg:    sei
         rts
 
 ; ---------------------------------------------------------------- a step
-step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 a
-        lsr a                      ; direction, round and round); up, down the
-        bcc :+                     ; pitch (gp: a step a tick, flat to fully
-        lda gmx                    ; nose down, held there either end)
-        sec
-        sbc #MSTEP
-        sta gmx
+step:   lda gkb                     ; the attitude, a step a tick: left, right the
+        lsr a                      ; yaw (gk, round and round); up, down the
+        bcc :+                     ; pitch (gp, 45 degrees either way at most)
+        lda gk
+        sbc #1                     ; (C set: the key)
+        and #NDIR-1
+        sta gk
 :       lda gkb
         and #2
         beq :+
-        lda gmx
+        lda gk
         clc
-        adc #MSTEP
-        sta gmx
+        adc #1
+        and #NDIR-1
+        sta gk
 :       lda gkb                    ; (the pitch a step a tick)
         and #4
         beq :+
@@ -490,7 +494,7 @@ step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 
         bne :+
         jsr spawn
 :       jmp parts
-@fly:   jsr attit
+@fly:
         lda gkb                     ; thrust (none without fuel)
         lsr a
         lsr a
@@ -710,14 +714,6 @@ step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 
         sta gvy+1
 :       jmp parts
 
-
-; The ship's attitude: pitch then yaw (Lander's), straight from the keys'.
-attit:  lda gmx
-        lsr a
-        lsr a
-        lsr a
-        sta gk
-        rts
 
 ; (g0), (g1): THX's and THZ's row for the pitch gp; Y = gk (their column).
 ; X kept (emit's dot).

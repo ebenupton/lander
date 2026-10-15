@@ -71,6 +71,7 @@ def main():
         for i in range(0, len(vals), 16):
             lines.append('        .byte ' + ', '.join(f'${v & 255:02X}' for v in vals[i:i + 16]))
     lines.append(f'NPITCH = {NPITCH}')
+    lines.append(f'NDIR = {NDIR}')
     lines.append(f'PFLAT = {SG.PFLAT}')
     for name in ('THX', 'THZ'):                # (each pitch's row: game.s's throw)
         lines.append(f'{name}L: .byte ' + ', '.join(f'<({name}+{32 * p})' for p in range(NPITCH)))

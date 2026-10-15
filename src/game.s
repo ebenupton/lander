@@ -58,8 +58,8 @@ SVIA_ORA_NH = $FE4F
 ; here a step is a frame at 10: each step is 1.25 of Lander's, velocities
 ; kept in its units: positions move 1.25 v, accelerations and drag 1.25 as
 ; much, fuel likewise, times 0.8 as many steps.)
-SPAWNK  = 9                        ; the start: facing nearly this way (k 8 faces
-SPAWNP  = NPITCH-1                 ; the camera), 45 degrees nose down
+SPAWNK  = (24+12) & 31             ; the start: 135 degrees round from facing into
+SPAWNP  = PFLAT                    ; the screen (k 24, a step 11.25), level
 GRAV    = 240                      ; Lander's gravity (&30000: 0.0117 tiles a step^2), 1.25
 THRS    = 3                        ; full thrust: THX.. << THRS (1016: 0.062, Lander's)
 HOVS    = 1                        ; hover: << HOVS (Lander's quarter); each 1.25 (tadd)
@@ -74,7 +74,10 @@ FUEL0   = 3413                     ; Lander's fuel: at the start; most (refuelli
 FUELMX  = 5120
 REFUEL  = 40                       ; on the pad, a step
 CRASHT  = 40                       ; steps the crash lasts
-NPART   = 10                       ; dots
+PLIFE   = 19                       ; a dot's life, steps: the land's 96 lines at the
+                                   ; exhaust's speed (THY 8 / 256 units, 1.25 a step:
+                                   ; ~5 lines a step)
+NPART   = 20                       ; dots (one a step: none reused alive)
 SNTH    = $E6                      ; the engine: white noise, the low rate
 SATF    = 2                        ; its attenuation: full thrust, hover
 SATH    = 7
@@ -260,7 +263,7 @@ spawn:  lda #0
         sta sy+1
         lda #(PADH+UNDER)>>4
         sta sy+2
-        lda #SPAWNK                ; (facing nearly this way, nose down)
+        lda #SPAWNK                ; (135 degrees from facing in, level)
         sta gk
         lda #SPAWNP
         sta gp
@@ -332,10 +335,10 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         bcs :+
         lda #0
 :       tax
-        lda SHYT,x                 ; (held so the ship's lines, 12 up and 16 down,
-        cmp #YSKY+12-HORIZON       ; stay within YSKY..YGND)
+        lda SHYT,x                 ; (held so the ship's lines, 14 up and 16 down,
+        cmp #YSKY+14-HORIZON       ; stay within YSKY..YGND)
         bcs :+
-        lda #YSKY+12-HORIZON
+        lda #YSKY+14-HORIZON
 :       cmp #YGND-16-HORIZON
         bcc :+
         lda #YGND-16-HORIZON
@@ -639,13 +642,18 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         bcc @gnd
         cmp #UNDER
         bcs @up
-@gnd:   lda sx+2                   ; on the pad, slowly: landed
+@gnd:   lda sx+2                   ; on the pad, slowly, near level: landed
         and #63
         cmp #PADN
         bcs @crash
         lda sz+2
         and #63
         cmp #PADN
+        bcs @crash
+        lda gp                     ; (and within a pitch step of level)
+        sec
+        sbc #PFLAT-1
+        cmp #3
         bcs @crash
         jsr speed
         bcs @crash
@@ -864,9 +872,7 @@ emit:   ldx pnext
         ldx #0
 :       stx pnext
         jsr dot0
-        jsr rand
-        and #7
-        adc #6                     ; (6..13 steps)
+        lda #PLIFE
         sta plife,x
         jsr throw                  ; the exhaust: - thrust / 2 (x, z), - 8 thrust (y)
         lda (g0),y
@@ -991,9 +997,7 @@ dot0:   lda sx+1
 ; The crash: every dot from the ship, every way.
 burst:  ldx #NPART-1
 @b:     jsr dot0
-        jsr rand
-        and #15
-        adc #16                    ; (16..31 steps)
+        lda #PLIFE
         sta plife,x
         jsr rand
         and #127

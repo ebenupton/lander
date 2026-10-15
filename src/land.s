@@ -3104,7 +3104,7 @@ dvi:    .res 1
 vlast:  .res 1
 tcol:   .res 1
 
-        .assert * <= $3000, error, "code over the screen"
+        .assert * <= $2F00, error, "code over bank 6's DBUF ($2F00, before the screen)"
 
 ; ---------------------------------------------------------------- s2v
 ; (bank 4, its free space) A column two rungs split (ri, ri+1), its top level:

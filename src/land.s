@@ -1036,28 +1036,6 @@ bclip:  lda BCL
         bne :--
         rts
 
-; c_rix: cols' next rung.  Rung ri is wholly left of the column (x4 >= HI):
-; ri advances to the first rung with HI > x4 (rung np+1, the right margin,
-; stops it: HI = xr), the box to its left (ri - 1) becomes run2's bytes
-; (RVE, RVO), c_lo and c_hi are patched for it (as rpatch), then back to
-; c_lo.  In: Y = x4, ri.  Out: ri, X = ri, Y = x4.  Called from c_hi (c_ri0).
-c_rix:
-        ldx ri
-        tya
-:       inx
-        cmp HI,x
-        bcs :-
-        stx ri
-        lda CE-1,x                 ; box ri - 1's bytes: run2's RVE, RVO
-        sta RVE
-        lda CO-1,x
-        sta RVO
-        lda HI,x                   ; c_hi's operand its HI, c_lo's its LO &
-        sta c_hi+1                 ; $FC (rpatch, inline)
-        lda LO,x
-        and #$FC
-        sta c_lo+1
-        jmp c_lo
 ; setup: the strip's points, boxes and margins, and its bottom row's line.
 ; Points 1 .. np: strip 0 takes row 0 as both rows (its TX, TY are unused:
 ; it is only traced); a land strip (ns 1 .. nr-1) takes rows ns-1 (TX, TY)
@@ -1795,7 +1773,7 @@ rg_lw:    tax
 ; ...).  LAYPAD puts the code from here on at the page phase that satisfies
 ; them all (the smallest value that links); change it when code before this
 ; point grows or shrinks.
-LAYPAD  = 72
+LAYPAD  = 112
         .res LAYPAD
 
 ; ---------------------------------------------------------------- columns
@@ -1885,7 +1863,7 @@ cols:   lda #$FF                   ; fsplit's tables are no rung's yet
         sta ph_hi+1
         ldx #0                     ; rung 0 (the left margin's, upright at xl):
         stx ri                     ; c_lo, c_hi its; the first column's c_rix
-        jsr rpatch                 ; moves on from it and sets RVE, RVO
+        jsr rpatch                 ; moves on from it
         lda xl
         sta x4
         jsr phase                  ; (A kept)
@@ -2211,10 +2189,33 @@ ob_n:   stx flr                    ; the near strip: flr1 = flr + 1, at most
         dec flr
 :       stx flr1
         jmp ob_rj
-c_ri0:  jmp c_rix                   ; (ri on to the first rung with HI > x4, its
-                                   ; RVE, RVO, c_lo, c_hi; back to c_lo)
 c_hi:   cpy #0                     ; operand: rung ri's HI (rpatch's)
-        bcs c_ri0                  ; wholly left of the column
+        bcc c_sp                   ; in the column
+; c_rix: cols' next rung.  Rung ri is wholly left of the column (x4 >= HI):
+; ri advances to the first rung with HI > x4 (rung np+1, the right margin,
+; stops it: HI = xr) and c_lo and c_hi are patched for it (as rpatch); then
+; c_lo's test again: rung ri in the column (LO & $FC <= x4), c_sp; else one
+; box, the box to its left (ri - 1) becoming run2's bytes (RVE, RVO: a one-box
+; column follows a column rung ri is in only through here, and c_ld sets them
+; itself), ot0.  In: Y = x4, ri.  Out: ri, X = ri, Y = x4.
+c_rix:  ldx ri
+        tya
+:       inx
+        cmp HI,x
+        bcs :-
+        stx ri
+        lda HI,x                   ; c_hi's operand its HI, c_lo's its LO &
+        sta c_hi+1                 ; $FC (rpatch, inline)
+        lda LO,x
+        and #$FC
+        sta c_lo+1
+        cpy c_lo+1
+        bcs c_sp
+        lda CE-1,x                 ; one box: box ri - 1's bytes, run2's
+        sta RVE
+        lda CO-1,x
+        sta RVO
+        jmp ot0
 ; c_sp: rung ri is in the column.  The top: level (mx; V clear) or each pixel's
 ; line into ys with mn, mx and V set (c_zt); the floor: level (c_lv) or its
 ; lowest (c_zb); then c_rec.

@@ -1181,7 +1181,8 @@ tf_h:   lda TENH4,y
         ldy dva                    ; (Y: the runs left after this one)
         lda tyv
 tf_j:   jmp t_back
-        .res 7
+t_fl1:  ldy dva                    ; (longer)
+        jmp t_flo
 t_one:  lda terr
         lsr a                      ; |dy| 1: the first run to x0 + ceil(dx / 2)
         adc BX,x
@@ -1197,9 +1198,9 @@ t1_h:   lda TENH4,y
         ldy #1
         lda tyv
         jmp tf_j
-t_fl1:  ldy dva                    ; (longer)
-        jmp t_flo
-        .res 4                     ; (the layout kept)
+t_fr:   rts                        ; (t_back's: in its page, no page crossed)
+t_last: stx tcnt                   ; the last run: pending (at y1)
+        jmp t_next
 t_fl0:  lda tyv                    ; the run pending to x0 (not including), and
         pha                        ; back (tyv kept, X = tj)
         ldx tj
@@ -1267,9 +1268,6 @@ jvb:    sta ROWB,x
         tax
         lda tyv
 jv0:    jmp t_back
-t_fr:   rts
-t_last: stx tcnt                   ; the last run: pending (at y1)
-        jmp t_next
 t_old:  lda t_inc                  ; (dx >= 64 or |dy| >= 32) a pixel at a time
         sta tr_inc
         lda terr

@@ -1257,6 +1257,7 @@ t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         tax
         lda tyv
 jv0:    jmp t_back
+        .assert <(jv0+1) <> $FF, error, "jv0's operand across a page"
 :       sbc ra2                    ; (C clear after: 2|dy| > r2 > A)
         sta rrem
         lda tyv                    ; q2 + 1: the first here, then jv0's q2
@@ -1266,7 +1267,7 @@ jvb:    sta ROWB,x
         adc rq2
         tax
         lda tyv
-        jmp jv0
+        jmp (jv0+1)                ; (jv0's target)
 t_old:  lda t_inc                  ; (dx >= 64 or |dy| >= 32) a pixel at a time
         sta tr_inc
         lda terr

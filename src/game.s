@@ -16,11 +16,11 @@
 ; 64; y up, its height units 4096 each: LAND's 16 a tile); velocities 16 bits,
 ; 16384 a tile a step.
 ;
-; The camera: Lander's, at the ship's x, 15 tiles behind it in z (LAND's camera
-; point is the ship less 128 in x, 15 tiles in z); its height Lander's rule
+; The camera: Lander's, at the ship's x, ZSHIP (14) tiles behind it in z (LAND's camera
+; point is the ship less 128 in x, ZSHIP tiles in z); its height Lander's rule
 ; (min(ship, 0): it follows the ship up) within what the strips allow: CAMH
 ; (6 tiles) above the ground under the ship, or more to keep the ship KOFF
-; units below it (so the ship stays at line ~84 on screen as it climbs), at
+; units below it (so the ship stays at line ~90 on screen as it climbs), at
 ; most EMAX more (CAME: LAND's y's within a byte).  The ship's ceiling is
 ; height YTOP (the camera can follow it all the way).
 ;
@@ -332,17 +332,13 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         bcc :+
         lda #EMAX
 :       sta CAME
-        clc                        ; the ship's line: HORIZON + 17/16 (camera - ship),
-        adc #CAMH                  ; the camera CAMH + CAME above the ground
-        sec
+        clc                        ; the ship's line: HORIZON + SHYT (camera - ship),
+        adc #CAMH                  ; the camera CAMH + CAME above the ground (d R / 16,
+        sec                        ; R the landscape's at ZSHIP)
         sbc gt0
-        sta gt1
-        lsr a
-        lsr a
-        lsr a
-        lsr a
+        tax
+        lda SHYT,x
         clc
-        adc gt1
         adc #HORIZON
         cmp #YSKY+18
         bcs :+

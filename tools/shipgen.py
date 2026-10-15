@@ -54,11 +54,13 @@ NDIR = 32                  # directions round the circle
 NPITCH = 8                 # pitches 0 .. 90 - 90/NPITCH degrees
 ND2 = NDIR // 2 + 1        # stored directions: -90 .. 90
 NE = ND2 * NPITCH          # entries
-S = 14.0                   # pixels a tile (Lander's ship on its screen, scaled to 256 wide)
-TANV = 0.35                # the camera's slope down to the ship: in play shy/255 (shy the
-                           # ship's line, HORIZON 0, R 17 at ZSHIP), 0.325 flying (shy 83,
-                           # the camera following) to 0.40 at touchdown (102); 0.35 the
-                           # least-squares fit over sampled flight (mean 0.346)
+S = 14.0                   # pixels a tile (Lander's ship on its screen, scaled to 256 wide;
+                           # kept as ZSHIP went 15 -> 14: its world size S / R(ZSHIP), 14/15
+                           # what it was)
+TANV = 0.36                # the camera's slope down to the ship: in play shy/256 (shy the
+                           # ship's line, HORIZON 0, F 256), 0.35 flying (shy 90, the
+                           # camera following) to 0.42 at touchdown (107); 0.36 the
+                           # least-squares fit over sampled flight (mean 0.363)
 NV, NF = 9, 9
 
 FACEV = [f['verts'] for f in SH.FACES]

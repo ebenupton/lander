@@ -7,6 +7,8 @@
   THX, THZ + 32 p + k   full thrust's x and z for pitch p, direction k (shipgen's: k 0
                     faces +x, 8 towards the camera (-z), 16 -x, 24 away), 127 a unit
   THY + p           and its y (up)
+  SHYT + d          the ship's line below the horizon for the camera d height units above
+                    it: d R / 16 rounded (R = recip at ZSHIP: the landscape's projection)
   MAPI              the map, 64 x 64 MODE 1 pixels (a tile each, z up): 16 bytes a
                     line, 64 lines: sea cyan, land yellow, the pad grey (its dither,
                     PADC's), turned round the torus so the pad's middle is the map's:
@@ -81,6 +83,8 @@ def main():
     emit('THX', thx)
     emit('THZ', thz)
     emit('THY', thy)
+    r = L.recip(L.ZSHIP << 8)
+    emit('SHYT', [min(255, (d * r + 2048) // 4096) for d in range(256)])
     emit('MAPI', list(mapimg()))
     lines.append(f'MAPX = {MAPX}')
     lines.append(f'MAPZ = {MAPZ}')

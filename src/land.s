@@ -3243,6 +3243,7 @@ FL0:    RFBODY "TL"
         .segment "B7CODE"
 ; (bank 7) Each row's y's (SYT7) and x's (fast, or clipr), the near clip's row
 ; (RN) the last, on its plane, and the far clip's (row 0 with FACT) on its.
+HOFF    = $9E                      ; (bank 7: hgnd's HMAX - hg; project's scratch)
 prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         lsr a
         lsr a
@@ -3311,6 +3312,7 @@ prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
         asl a
         asl a
         asl a
+        ora HOFF                   ; (+ HMAX - hg: 0..15, di*32's low 5 bits 0)
         sta syp
         tya                        ; di * 16: its B0's for cxs
         lsr a
@@ -3506,29 +3508,10 @@ hgnd:   lda #ZBACK-ZSHIP           ; its row: ZBACK - ZSHIP less the first's j
         clc
         adc tmp+1                  ; hg
         sta HGV
-        eor #$FF                   ; HMAX - hg
-        sec
+        eor #$FF                   ; HMAX - hg: prow7's SYT7 offset (the
+        sec                        ; heights stay raw)
         adc #HMAX
-        sta tmp+1
-        ldx #0                     ; every row's heights + it
-@r:     ldy #NX-1
-:       lda PY,x
-        clc
-        adc tmp+1
-        sta PY,x
-        inx
-        dey
-        bpl :-
-        txa
-        clc
-        adc #16-NX
-        tax
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        cmp nr
-        bcc @r
+        sta HOFF
         rts
 lqrow:  pha                        ; lp: LERPQ7's row q (A)
         lsr a

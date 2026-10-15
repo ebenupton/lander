@@ -268,10 +268,12 @@ spawn:  lda #0
         sta gp
         lda #PADH                  ; the ground under it, now (HGV is the last
         sta HGV                    ; frame's: the ship's line from it)
-        lda #<FUEL0
+        lda #<FUELMX               ; (full)
         sta fuel
-        lda #>FUEL0
+        lda #>FUELMX
         sta fuel+1
+        lda #0                     ; (no thrust: snd's next is silent, not the
+        sta thr                    ; crash's last)
         lda #1
         sta landed
         sta GSHV

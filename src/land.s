@@ -212,6 +212,7 @@ tsy:    .res 1
 last:   .res 1                     ; the near strip ($80)
 lastri: .res 1                     ; fsplit: the rung BE, BO, rbl, rbh are for
 BE      = $8E                      ; fsplit's rung's bytes by bpos (the ship's
+HPZ     = $8E                      ; project's map row pointers (8: the ship's scratch)
 BO      = BE+5                     ; zero page: strips' scratch, $8E-$97)
 ; columns
 x4:     .res 1                     ; the column's first pixel
@@ -625,37 +626,41 @@ project:
         inx
         cpx #NX
         bne :-
-        ldx #0                     ; (bank 4) each row's heights
-        stx pr
-@h:     lda czt
+        lda #$9D                   ; (bank 4) each row's heights: row j's map
+        ldy nr                     ; row's pointer at HPZ + 2 j (the ship's zero
+        cpy #8                     ; page: scratch), then by column, all 8 rows
+        beq :+                     ; (row 7 not stored if nr = 7: LDA, not STA)
+        lda #$BD
+:       sta @h7
+        .assert ZBACK-ZSKIP-ZCLIP+1 = 8 && ZFCLIP-ZCLIP+1 = 7, error, "nr 7 or 8"
+        lda czt                    ; (row 7's map row first: czt + ZB - 7)
         clc
         adc ZB
-        sec
-        sbc pr
-        and #63
+        sbc #6
+        ldx #14
+@hp:    and #63
         tay
         lda MRL,y
-        sta hp0
+        sta HPZ,x
         lda MRH,y
-        sta hp0+1
-        stx @ph+1                  ; (PY + 16 j: PY page-aligned)
-        ldx #NX-1
-:       ldy CX,x
-        lda (hp0),y
-        and #15
-@ph:    sta PY,x
+        sta HPZ+1,x
+        iny
+        tya
         dex
-        bpl :-
-        lda @ph+1
-        clc
-        adc #16
-        tax
-        inc pr
-        lda pr
-        cmp nr
-        beq :+
-        jmp @h
-:
+        dex
+        bpl @hp
+        ldx #NX-1
+@hc:    ldy CX,x
+        lda (HPZ+14),y
+        and #15
+@h7:    sta PY+$70,x
+        .repeat 7, i
+        lda (HPZ+12-2*i),y
+        and #15
+        sta PY+$60-16*i,x
+        .endrepeat
+        dex
+        bpl @hc
         lda #BANK7                 ; (bank 7) each row's y's and x's (prow7)
         sta ROMCOPY
         sta ROMSEL

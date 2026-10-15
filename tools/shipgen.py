@@ -338,10 +338,14 @@ def asm6(out):
             for fs, ls in groups(sp[(kk, p)]):
                 if fs not in pats:
                     pats.append(fs)
-                bd = (pats.index(fs), len(ls))
-                if bd not in bands:
-                    bands.append(bd)
-                b.append((bands.index(bd), [[x + U0 for x in l] for l in ls]))
+                cut = [0] + [i for i in range(1, len(ls))   # (a new band where a line
+                             if any(not -8 <= c - a <= 7          # moves a boundary more
+                                    for a, c in zip(ls[i - 1], ls[i]))] + [len(ls)]  # than a nibble)
+                for i0, i1 in zip(cut, cut[1:]):
+                    bd = (pats.index(fs), i1 - i0)
+                    if bd not in bands:
+                        bands.append(bd)
+                    b.append((bands.index(bd), [[x + U0 for x in l] for l in ls[i0:i1]]))
             blobs.append(b)
     # The first page: the boundaries' tables (src/shipspan.s), by u + al (normal) or
     # u - al (mirrored, the R tables): pixel w = u + al or 41 + al - u from the column
@@ -358,24 +362,18 @@ def asm6(out):
     # Then each entry, compressed (shipspan.s's spdec expands it into DBUF, as the
     # walker reads it: each band B, its lines in two passes, $FF the end): each
     # band B, its first line's bytes, then each next line's (in order) as nibbles,
-    # high first, the change from the line before (-7..7), or 8 and the byte's two;
-    # a band's last half byte unused; $FF the end.
+    # high first, a byte a pair (the last's low nibble unused if odd): the change
+    # from the line before (-8..7: bands are cut where it would be more); $FF the end.
     where, dmax = {}, 0
     for e, b in enumerate(blobs):
         where[e] = len(data)
         dmax = max(dmax, sum(1 + len(ls) * len(ls[0]) for _, ls in b) + 1)
-        for bd in b:
-            B, lines = bd[0], bd[1]
+        for B, lines in b:
             data.append(B)
             data += lines[0]
-            nib = []
             for i in range(1, len(lines)):
-                for a, c in zip(lines[i - 1], lines[i]):
-                    d = c - a
-                    nib += [d & 15] if -7 <= d <= 7 else [8, c >> 4, c & 15]
-            if len(nib) & 1:
-                nib.append(0)
-            data += [nib[i] << 4 | nib[i + 1] for i in range(0, len(nib), 2)]
+                d = [(c - a) & 15 for a, c in zip(lines[i - 1], lines[i])] + [0]
+                data += [d[j] << 4 | d[j + 1] for j in range(0, len(lines[0]), 2)]
         data.append(0xFF)
     assert dmax <= 128, dmax
     L = ['; shipspan.inc: from tools/shipgen.py -- do not edit',
@@ -388,6 +386,7 @@ def asm6(out):
         for i in range(0, len(vals), 16):
             L.append('        .byte ' + ', '.join(f'${v & 255:02X}' for v in vals[i:i + 16]))
     tab('BANDL', [n for _, n in bands])
+    tab('BANDD', [((n + 1) >> 1) * (len(pats[pi]) + 1) for pi, n in bands])   # (spdec's region B)
     # LIM + 36 * (al + 4 * mirrored) + u - 3: the least u in the next byte (normal),
     # or in u's byte (mirrored: w = 41 + al - u)
     tab('LIM', [((u + a) // 4 + 1) * 4 - a for a in range(4) for u in range(3, 39)] +

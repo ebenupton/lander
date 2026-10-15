@@ -1203,7 +1203,9 @@ t1_h:   lda TENH4,y
         ldy #1
         lda tyv
 t1_j:   jmp t_back                 ; (its own, as tf_j)
-t_fr:   rts                        ; (t_back's: in its page, no page crossed)
+t_fr:   lda #<(t_last-t_bq-2)       ; (t_fl's way back: t_bq to t_last again)
+        sta t_bq+1
+        rts
 t_last: stx tcnt                   ; the last run: pending (at y1)
         jmp t_next
 t_fl0:  lda tyv                    ; the run pending to x0 (not including), and
@@ -1218,8 +1220,10 @@ t_fl0:  lda tyv                    ; the run pending to x0 (not including), and
         lda BX+1,x                 ; (x1: t_old's and t_steep's)
         sta tx1
         rts
-t_fl:   txa                        ; the run pending to X (not including): back
-        sec                        ; by t_fr
+t_fl:   lda #<(t_fr-t_bq-2)        ; the run pending to X (not including): back
+        sta t_bq+1                 ; by t_fr (t_bq patched; Y = 1: its last run)
+        txa
+        sec
         sbc tcnt
         tay
         cpy #TNB+1
@@ -1228,10 +1232,10 @@ t_fl:   txa                        ; the run pending to X (not including): back
         sta tx_j+1
 tx_h:   lda TENH4,y
         sta tx_j+2
-        ldy #0
+        ldy #1
         lda tyv
 tx_j:   jmp t_back
-t_flf:  ldy #0                     ; (longer)
+t_flf:  ldy #1                     ; (longer)
 t_flo:  stx fe                     ; (longer: 4 at a time, from tcnt to fe)
         ldx tcnt
 t_run:  lda tyv                    ; (bota) from X to (not including) fe (> X):
@@ -1252,8 +1256,7 @@ fl_3:   sta ROWB+3,x
 t_back:                            ; (the fills' way back: X the run's end)
 t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         dey
-        bmi t_fr
-        beq t_last
+t_bq:   beq t_last                 ; (or t_fr: t_fl's)
         lda rrem                   ; the next step: + 2dx / 2|dy|, by e (rrem:
         adc rr2                    ; 255 - e; C clear here, every way in)
         bcs :+

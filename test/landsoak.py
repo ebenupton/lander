@@ -15,6 +15,7 @@ what a frame leaves for the one after next is checked too).  Prints the cycles.
 """
 import os
 import sys
+DBG = bool(os.environ.get('SOAKDBG'))
 
 import numpy as np
 from py65.devices.mpu6502 import MPU
@@ -109,7 +110,7 @@ def main():
     mpu, lab = machine()
     lab6 = labels('shipb_labels.txt')
     hm = L.heightmap()
-    cx, cz = 40 << 8, 30 << 8
+    cx, cz = (int(os.environ['SOAKCX'], 16), int(os.environ['SOAKCZ'], 16)) if os.environ.get('SOAKCX') else (40 << 8, 30 << 8)
     cyc = {'project': [], 'strips': []}
     if ship:
         cyc['ship'] = []
@@ -126,6 +127,7 @@ def main():
         scr = 0x3000 if m[lab['back']] == 0 else 0x5800
         e = int(rng.integers(0, L.EMAX + 1)) if cam and rng.integers(2) else 0
         m[0x07D6] = e                                # (CAME)
+        if DBG: print('f', f, 'e', e, 'back', m[lab['back']])
         m[lab['vcount']] = (m[lab['vflip']] + 4) & 255     # (flip's four vertical syncs since the last)
         for r in ('project', 'strips'):
             cyc[r].append(call(mpu, lab[r]))
@@ -161,9 +163,9 @@ def main():
         bad = [i for i in range(10240) if got[i] != want[i]]
         if perr or bad:
             fails += 1
-            print(f'frame {f} (cx {cx:04X} cz {cz:04X}): {len(bad)} bytes wrong')
-            for e in perr[:3]:
-                print('  ', e)
+            print(f'frame {f} (cx {cx:04X} cz {cz:04X} e {e}): {len(bad)} bytes wrong')
+            for pe in perr[:3]:
+                print('  ', pe)
             for i in bad[:8]:
                 y = (i // 512) * 8 + (i & 7)
                 c = (i % 512) // 8

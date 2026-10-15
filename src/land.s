@@ -597,7 +597,7 @@ cph     = lqx+1
 .macro PYSE i                       ; (bank 7) the same, the camera CAME higher
         ldy PY+i,x
         lda (syp),y
-        adc EYV                     ; (C clear: y's within a byte)
+        adc EYV                     ; (C clear: y's within a byte, or satrow's)
         sta PY+i,x
 .endmacro
 .macro PYH i                        ; (bank 7) PYS, the height from HT
@@ -3636,7 +3636,7 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         sta MODE
         jmp @row
 @fin:   ldx RN16                   ; the near clip's row: a line or more below
-        .repeat NX, i              ; the row before
+        .repeat NX, i              ; the row before (254 at most: 255 at most)
         lda PY-16+i,x
         cmp PY+i,x
         bcc :+
@@ -3697,15 +3697,7 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         bit MODE                   ; (the camera higher: EYV more, eyrow's)
         bmi :+
         jmp @pxc
-:       ldy #NX
-        clc
-:       lda PY,x
-        adc EYV
-        sta PY,x
-        inx
-        dey
-        bne :-
-        ldx tmp
+:       jsr cliprow7               ; (EYV more, each held at 254)
         jmp @pxc
 @cam:   R7BP
         jsr eyrow                  ; (X kept)
@@ -3715,7 +3707,12 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         jmp @ap
 :
         EDGESP HT
-        clc                        ; (EDGESP's C: PYSE's)
+        lda EYV                    ; (a y could pass 254: satrow's)
+        cmp #EYS
+        bcc :+
+        jsr satrow
+        jmp @cx
+:       clc                        ; (EDGESP's C: PYSE's)
         .repeat NX, i
         .if i = 0 || i = NX-1
         PYSE i
@@ -4138,6 +4135,47 @@ su_l7c:
         .segment "B7D"
 su_l7d: SUCL 9
         SUCL 10
+        rts
+
+; (bank 7, CLP7's spare) The camera raised so far a corner's y could pass 254
+; (EYV >= EYS): prow7's row X (16 j) by SYT7 (syp) + EYV, each held at 254
+; (land.project's: below the screen, the bottom clip's), the edges' heights
+; EDGESP's (PY), the rest's HT.  X kept.
+        .segment "B7E"
+satrow: stx MT1
+        ldy PY,x
+        jsr sat1
+        lda #NX-2
+        sta MT0
+:       inx
+        ldy HT,x
+        jsr sat1
+        dec MT0
+        bne :-
+        inx
+        ldy PY,x
+        jsr sat1
+        ldx MT1
+        rts
+sat1:   lda (syp),y                ; PY,x: y Y's + EYV, 254 at most
+sat2:   clc                        ; (A + EYV)
+        adc EYV
+        bcs :+
+        cmp #255
+        bcc :++
+:       lda #254
+:       sta PY,x
+        rts
+; The clips' rows' y's (PY, X: 16 j) EYV more, each 254 at most; X back from tmp.
+cliprow7:
+        lda #NX
+        sta MT0
+:       lda PY,x
+        jsr sat2
+        inx
+        dec MT0
+        bne :-
+        ldx tmp
         rts
 
 ; ---------------------------------------------------------------- an empty rung

@@ -242,13 +242,16 @@ def main():
     open(os.path.join(out, 'TABLES'), 'wb').write(build())
     open(os.path.join(out, 'TABLES2'), 'wb').write(build2())
     open(os.path.join(out, 'TABLES7'), 'wb').write(build7())
+    # (EYS: the least EYV some corner's y could pass 254 at: satrow's, then)
+    EYS = 255 - max(L.HORIZON + (((L.CAMH + L.HMAX) * L.recip((DI0 + di) * 16) + L.HSCALE * 128)
+                                  // (L.HSCALE * 256)) for di in range(NDI))
     with open(os.path.join(out, 'tables.inc'), 'w') as f:
         f.write('; tools/landgen.py\n')
         for k, v in list(ADDR.items()) + list(ADDR2.items()) + list(ADDR7.items()):
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=TNB, MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34,
                       NX=L.NX - 2 * L.XSKIP, XSKIP=L.XSKIP, NZ=L.NZ, ZBACK=L.ZBACK, ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=DI0, NCLP=NCLP, XC=L.XC, XL=L.XL, XR=L.XR, YLIM=L.YLIM, LQOFF=LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH, EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON,
-                      YSKY=YSKY, YGND=YGND, R2OFF=R2OFF, RFA=RFA,
+                      YSKY=YSKY, YGND=YGND, R2OFF=R2OFF, RFA=RFA, EYS=EYS,
                       TPE0=TPE[0], TPE1=TPE[1], TPE2=TPE[2], TPE3=TPE[3],
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])
         for k, v in consts.items():

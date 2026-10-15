@@ -54,7 +54,10 @@ ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far 
 CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height above the
                           # ground at the ship (ZSHIP ahead, at the camera's x), height
                           # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
-EMAX = 46                 # the camera's most above CAMH (the near row's y's within a byte)
+EMAX = 79                 # the camera's most above CAMH: every row below the screen there
+                          # for any ground (the far clip's, R 16: 96 - 15 + e > YGND); y's
+                          # held at 254 (past YGND: the bottom clip's; the near clip's + 1
+                          # within a byte)
 ZSHIP = 13                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID 15: here the clip planes' middle)
 PADN = 6                  # the landing pad: tiles 0..PADN-1 in x and z (Lander's: 8)
 PADH = 4                  # its height
@@ -200,10 +203,10 @@ def project(hm, cx, cz, e=0):
         for dx, h in pts:
             sx = XC + ((dx * r + 32768) >> 16)
             sy = HORIZON + (((CAMH + hg - h) * r + HSCALE * 128) // (HSCALE * 256)) + ey
-            row.append((sx, sy, h))
+            row.append((sx, min(254, sy), h))
         row = clip(row)
         if j == jc:                       # (at least a line below the row before: the
-            row = [(x, max(y, py + 1), h) # strip between can be thin)
+            row = [(x, min(255, max(y, py + 1)), h) # strip between can be thin)
                    for (x, y, h), (_, py, _) in zip(row, rows[-1][1])]
         if FON and fz and j == jf + 1:    # (the far clip's: a line or more above this)
             rows[0] = (rows[0][0], [(x, min(y, ny - 1), h)

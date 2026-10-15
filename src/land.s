@@ -36,7 +36,9 @@
 ; filing system's workspace:
 ;   $0400, $0500  ROWA, ROWB: a row's line by pixel (a strip's top and bottom)
 ;   $0600         RTBUF: the rungs' transition lines
-;   $0700         the frame's rows' points; $0900 its strips' boxes and
+;   $0700         the frame's rows' points ($07E0 HTN: zsh4's new row of
+;                 heights; $0880 HT: the rows' raw heights, project's, kept
+;                 while the map rows and columns are); $0900 its strips' boxes and
 ;                 columns, $0A40 the strip's, $0B00 the
 ;                 slow way's
 ;   $1700 ENTL, ENTH: each line's entry in STAB (low, high); $0C00 TOPS,
@@ -78,6 +80,8 @@ ROWB    = $0500
 RTBUF   = $0600
 PX      = $0700                    ; the rows', far to near: 16 a row (NZ)
 PY      = $0800
+HTN     = $07E0                    ; zsh4's: the new row's heights (for hsh)
+HT      = $0880                    ; project's: the rows' raw heights (by cxt, czt + ZB)
 CLE     = $0900                    ; the land strips' box bytes: 16 a strip (NZ - 1)
 CLO     = $09A0
 TX      = $0A40                    ; the strip's: top row (margins at 0, np+1)
@@ -542,8 +546,11 @@ init:   lda #1                     ; (the far clip on: always)
 ; bank 4 paged, every corner's height (into PY); bank 5, each land strip's boxes'
 ; bytes (CLE, CLO: the tile at its left column and near row); bank 7, by the
 ; row's depth index (di = 16 (ZBACK - j) - czs - DI0), its y's (SYT7, from the
-; heights) and x's (B0 + i r, its x * 256 for corner i: B0L/H/X, R7L/H), the
-; rows overhanging the screen (CLP) clipped (land.clip).
+; heights) and x's (B1 + (i-1) r, its x * 256 for corner i: B1T, R7L/H), the
+; rows overhanging the screen (CLP) clipped (land.clip).  The heights (HT) and
+; boxes (CLE, CLO: pcol5's window of rows) are kept while the map's columns
+; (cxt) and rows (czt + ZB) are: anew when they change, or (rows a step on or
+; back) shifted (zsh4, hsh) and only the new row's made.
         .assert <PY = 0, error, "PY page-aligned"
 cd      = zq                       ; (cyc's)
 cn      = ha
@@ -574,6 +581,77 @@ cph     = lqx+1
         adc EYV                     ; (C clear: y's within a byte)
         sta PY+i,x
 .endmacro
+.macro PYH i                        ; (bank 7) PYS, the height from HT
+        ldy HT+i,x
+        lda (syp),y
+        sta PY+i,x
+.endmacro
+.macro PYHE i                       ; (bank 7) PYSE, the height from HT
+        ldy HT+i,x
+        lda (syp),y
+        adc EYV
+        sta PY+i,x
+.endmacro
+.macro EDGESP S                     ; (bank 7) EDGES, LERPQ7's row at LQP
+        lda S+1,x
+        ora #16
+        clc
+        sbc S,x
+        tay
+        lda (LQP),y
+        adc S,x
+        sta PY,x
+        lda S+NX-1,x
+        ora #16
+        clc
+        sbc S+NX-2,x
+        tay
+        lda (LQP),y
+        adc S+NX-2,x
+        sta PY+NX-1,x
+.endmacro
+; (bank 7) the edges' y's: their heights from S (LERPQ7 at L0, L1, or LQP's
+; row when blank) by SYT7 straight into PY
+.macro EDGEY S, L0, L1
+        lda S+1,x
+        ora #16
+        clc
+        sbc S,x
+        tay
+.ifblank L0
+        lda (LQP),y
+.else
+L0:     lda LERPQ7,y
+.endif
+        adc S,x
+        tay
+        lda (syp),y
+        sta PY,x
+        lda S+NX-1,x
+        ora #16
+        clc
+        sbc S+NX-2,x
+        tay
+.ifblank L1
+        lda (LQP),y
+.else
+L1:     lda LERPQ7,y
+.endif
+        adc S+NX-2,x
+        tay
+        lda (syp),y
+        sta PY+NX-1,x
+.endmacro
+.macro R7BP                         ; (bank 7) the row's r (Y: di) and B1T's page
+        lda R7L,y
+        sta rl
+        lda R7H,y
+        sta rh
+        lda syp+1
+        clc
+        adc #>B1T - >SYT7
+        sta bp+1
+.endmacro
 .macro PXS i                        ; (bank 7) corner i's x (B's high byte, in A),
         sta PX+i,x                  ; then B += r (16 bits: the edges' beyond them
         tay                         ; replaced after)
@@ -586,8 +664,6 @@ cph     = lqx+1
 .endmacro
 
 project:
-        lda #NX                    ; (always: the strips' np)
-        sta np
         lda #ZBACK-ZSKIP           ; the first row (ZB: ZBACK less its j): ZSKIP's,
         ldx #0                     ; or the far clip's: on its plane (fz 0), or
         ldy ZCF                    ; from the rows either side (FACT)
@@ -605,17 +681,19 @@ project:
         tay
         iny
         sty nr
-        lda ZB                     ; the first row's di: 16 ZB - DI0
-        sec
-        sbc #9
-        asl a
-        asl a
-        asl a
-        asl a
-        sbc #DI0-9*16-1            ; (C clear: - (DI0 - 144))
-        sta DIB
-        .assert DI0 > 9*16 && ZFCLIP >= 9 && ZBACK-ZSKIP >= 9, error, "DIB's arithmetic"
-        lda cxt                    ; the drawn columns' map x
+        lda cxt                    ; the map's heights and boxes as last frame's
+        cmp pkx                    ; (the same columns, cxt, and map rows, czt +
+        bne @cx                    ; ZB): only prow7
+        lda czt
+        clc
+        adc ZB
+        cmp pkz
+        bne @zs
+        jmp @p7
+@zs:    jsr zsh4                   ; (bank 4: a step of one map row, the heights
+        bcc @hl                    ; shifted (prow7's hsh) and the new row's
+        jmp @p5                    ; loaded: zsh4)
+@cx:    sta pkx                    ; the drawn columns' map x
         sec
         sbc #5-XSKIP
         ldx #0
@@ -626,16 +704,11 @@ project:
         inx
         cpx #NX
         bne :-
-        lda #$9D                   ; (bank 4) each row's heights: row j's map
-        ldy nr                     ; row's pointer at HPZ + 2 j (the ship's zero
-        cpy #8                     ; page: scratch), then by column, all 8 rows
-        beq :+                     ; (row 7 not stored if nr = 7: LDA, not STA)
-        lda #$BD
-:       sta @h7
         .assert ZBACK-ZSKIP-ZCLIP+1 = 8 && ZFCLIP-ZCLIP+1 = 7, error, "nr 7 or 8"
-        lda czt                    ; (row 7's map row first: czt + ZB - 7)
-        clc
-        adc ZB
+@hl:    lda czt                    ; (bank 4) each row's heights (HT, all 8 rows):
+        clc                        ; row j's map row's pointer at HPZ + 2 j (the
+        adc ZB                     ; ship's zero page: scratch), then by column
+        sta pkz                    ; (row 7's map row first: czt + ZB - 7)
         sbc #6
         ldx #14
 @hp:    and #63
@@ -653,22 +726,22 @@ project:
 @hc:    ldy CX,x
         lda (HPZ+14),y
         and #15
-@h7:    sta PY+$70,x
+        sta HT+$70,x
         .repeat 7, i
         lda (HPZ+12-2*i),y
         and #15
-        sta PY+$60-16*i,x
+        sta HT+$60-16*i,x
         .endrepeat
         dex
         bpl @hc
-        lda #BANK7                 ; (bank 7) each row's y's and x's (prow7)
-        sta ROMCOPY
-        sta ROMSEL
-        jsr prow7
-        lda #BANK2                 ; (bank 5) each land strip's boxes (pcol5)
+@p5:    lda #BANK2                 ; (bank 5) each land strip's boxes (pcol5)
         sta ROMCOPY
         sta ROMSEL
         jsr pcol5
+@p7:    lda #BANK7                 ; (bank 7) each row's y's and x's (prow7)
+        sta ROMCOPY
+        sta ROMSEL
+        jsr prow7
         lda #BANK
         sta ROMCOPY
         sta ROMSEL
@@ -812,9 +885,9 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         ; the points and the boxes: a land strip's top row ns-1, bottom row ns,
         ; boxes CLE + 16 * (ns - 1) + box - 1 (CE, CO np: zeroed below)
         lda ns
-        beq @r                     ; (A = 0: row 0)
+        beq su_r                     ; (A = 0: row 0)
         cmp nr
-        beq @g
+        beq su_g
         asl a                      ; (C clear: ns < 16)
         asl a
         asl a
@@ -823,7 +896,7 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         adc #$EF                   ; 16 (ns - 1) + np - 1: box np, down to 1
         tay
         ldx np
-@p:     lda PX,y
+su_p:     lda PX,y
         sta TX,x
         lda PY,y
         sta TY,x
@@ -832,58 +905,60 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         lda PY+16,y
         sta BY,x
         cmp #YGND+1
-        bcs @pc
-@pb:    lda CLE,y
+        bcs su_pc
+su_pb:    lda CLE,y                  ; (CLE, CLO + 16 o: pcol5's window)
+ldCLE   = * - 2
         sta CE,x
         lda CLO,y
+ldCLO   = * - 2
         sta CO,x
         dey
         dex
-        bne @p
-        beq @m
-@pc:    inc BCL                    ; (C set)
-        bcs @pb
-@qc:    inc BCL
-        bcs @qb
+        bne su_p
+        beq su_m
+su_pc:    inc BCL                    ; (C set)
+        bcs su_pb
+su_qc:    inc BCL
+        bcs su_qb
         ; the sky (row 0 both, the top at YSKY) and the ground (row nr-1
         ; both, the bottom at YGND): boxes black
-@g:     asl a                      ; (C clear: 4 shifts of nr < 16)
+su_g:     asl a                      ; (C clear: 4 shifts of nr < 16)
         asl a
         asl a
         asl a
         adc #$F0
-@r:     tay
+su_r:     tay
         ldx #1
-@q:     lda PX,y
+su_q:     lda PX,y
         sta TX,x
         sta BX,x
         lda PY,y
         sta TY,x
         sta BY,x
         cmp #YGND+1
-        bcs @qc
-@qb:    lda #0
+        bcs su_qc
+su_qb:    lda #0
         sta CE,x
         sta CO,x
         iny
         inx
         cpx np1
-        bcc @q
+        bcc su_q
         ldx np
         lda ns
-        bne @gb
+        bne su_gb
         lda #YSKY
 :       sta TY,x
         dex
         bne :-
-        beq @m
-@gb:    lda #0                     ; (the ground's bottom: YGND, not past it)
+        beq su_m
+su_gb:    lda #0                     ; (the ground's bottom: YGND, not past it)
         sta BCL
         lda #YGND
 :       sta BY,x
         dex
         bne :-
-@m:
+su_m:
         ; the margins: a byte boundary MARGIN or more beyond the bottom row
         lda BX+1
         .if MARGIN
@@ -916,7 +991,7 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         sta CO
         sta CE,x
         sta CO,x
-@bot:   lda ns                     ; the bottom row's line
+su_bot:   lda ns                     ; the bottom row's line
         cmp nr
         beq :+
         jmp traceb
@@ -2889,6 +2964,9 @@ putg:   asl a
         inc tcol
         rts
 
+pkx:    .byte $FF                  ; project's: cxt, czt + ZB its heights (HT) and
+pkz:    .byte $FF                  ; boxes (CLE, CLO) are for
+SHF:    .byte 0                    ; (zsh4's: HT a row on (1) or back ($FF), HTN)
 fps10:  .res 2                     ; (the readout's)
 dvs:    .res 8
 dvi:    .res 1
@@ -3271,175 +3349,259 @@ FL0:    RFBODY "TL"
 
 ; ---------------------------------------------------------------- bank 7
         .segment "B7CODE"
+        .assert LQOFF = 15, error, "EDGES, zlerp, flerp: LQOFF 15 (b + 16 - a - 1)"
 ; (bank 7) Each row's y's (SYT7) and x's (fast, or clipr), the near clip's row
 ; (RN) the last, on its plane, and the far clip's (row 0 with FACT) on its.
+CX2     = $8E                      ; (bank 7, prow7's: 2 cxs, the camera higher
+CAMF    = $8F                      ; ($80: MODE's bit 7), 16 RN, a normal row's
+RN16    = $90                      ; di, MODE (bit 0: the clip's row's heights
+DCUR    = $92                      ; lerped, zlerp's or flerp's; bit 6 a clip's
+MODE    = $93                      ; row; bit 7 the camera higher), the edges'
+LQP     = $94                      ; LERPQ7 row, B1T's row, 11 cxs)
+bp      = $96
+CX11    = $98
+E0      = $99                      ; (zlerp's, flerp's: the edges' heights)
+E1      = $9A
+E2      = $9B
+E3      = $9C
 HOFF    = $9E                      ; (bank 7: hgnd's HMAX - hg; project's scratch)
-prow7:  lda cxs                    ; LERPQ7's row for fx: + 32 cxs
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>LERPQ7
-        sta @lq0+2
-        sta @lq1+2
-        lda cxs
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta @lq0+1
-        sta @lq1+1
-        jsr hgnd                   ; the heights less the ground's under the ship
-        lda RN                     ; the near clip: its row's heights (all still
-        asl a                      ; raw), and the far clip's
-        asl a
-        asl a
-        asl a
-        sta tmp
-        jsr zlerp
-        lda FACT
+prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         beq :+
-        jsr flerp
-:       lda #0
-        sta pr
-@r:     lda pr                     ; di = 16 (ZBACK - j) - czs - DI0 (j = pr + ZSKIP)
+        jsr hsh
+:       ldy cxs                    ; LERPQ7's row for fx: q = cxs (the edges')
+        lda LQHI,y
+        sta @lq2+2
+        sta @lq3+2
+        sta LQP+1
+        lda LQLO,y
+        sta @lq2+1
+        sta @lq3+1
+        sta LQP
+        tya
+        asl a
+        sta CX2                    ; (2 cxs: B1T's; 11 cxs: PXF7, PXN7's)
+        asl a
+        asl a
+        adc CX2                    ; (C clear: cxs < 16)
+        adc cxs
+        sta CX11
+        jsr hgnd                   ; the ground under the ship (HOFF)
+        lda #0                     ; (MODE's bit 7: the camera higher)
+        ldx CAME
+        beq :+
+        lda #$80
+:       sta CAMF
+        lda RN                     ; the near clip's row's heights (zlerp's,
+        asl a                      ; into PY), and the far clip's (flerp's)
         asl a
         asl a
         asl a
-        asl a
-        sta tmp                    ; (16 j: the row's place in PX, PY)
-        lda DIB
-        sec
-        sbc tmp
+        sta RN16
+        lda czs                    ; (zlerp's, flerp's LERPQ7 row: q = 16 - czs)
+        beq :+
+        lda #16
         sec
         sbc czs
         tay
-        lda pr                     ; the clips' rows: on their planes (their
-        cmp RN                     ; heights: zlerp's, flerp's)
-        bne :+
-        ldy #ZCLIP*16-DI0
-:       lda FACT
-        beq :+
-        lda pr
-        bne :+
-        ldy #ZFCLIP*16-DI0
-:       sty xt1                    ; (di)
-        lda R7L,y
-        sta rl
-        lda R7H,y
-        sta rh
-        tya                        ; di * 32: the row's SYT7
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>SYT7
-        sta syp+1
-        tya
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        ora HOFF                   ; (+ HMAX - hg: 0..15, di*32's low 5 bits 0)
-        sta syp
-        tya                        ; di * 16: its B0's for cxs
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        sta tmp+1
-        tya
-        asl a
-        asl a
-        asl a
-        asl a
+        lda LQLO,y
         sta lp
-        sta hp0
-        sta hp1
+        lda LQHI,y
+        sta lp+1
+:       lda #NX                    ; (always: the strips' np)
+        sta np
+        lda #0                     ; row 0: di = 16 ZB - DI0 - czs (the rows
+        sta tmp                    ; after: 16 less each), or the far clip's
+        lda ZB                     ; plane's
+        sec
+        sbc #9
+        asl a
+        asl a
+        asl a
+        asl a
+        sbc #DI0-9*16-1            ; (C clear: - (DI0 - 144))
+        .assert DI0 > 9*16 && ZFCLIP >= 9 && ZBACK-ZSKIP >= 9, error, "di's arithmetic"
+        sec
+        sbc czs
+        sta DCUR
+        tay
+        lda FACT                   ; (MODE's bit 0: the heights in PY, not HT;
+        beq :+                     ; bit 6: the far clip's plane, x by cxs)
+        ldy #ZFCLIP*16-DI0
+:       cpy #ZFCLIP*16-DI0
+        bne :+
+        ora #$40
+:       ora CAMF
+        sta MODE
+; A row: Y its di, tmp 16 j (its place in PX, PY), MODE.
+@row:   lda SYL7,y                 ; di * 32: the row's SYT7 (+ HMAX - hg: 0..15,
+        sta bp                     ; di*32's low 5 bits 0) and B1T
+        ora HOFF
+        sta syp
+        lda SYH7,y
+        sta syp+1
         ldx tmp                    ; the edges' heights: corners 1 to 2, and 10
-        lda PY+1,x                 ; to 11, by fx (LERPQ7: land.lerp)
-        sec
-        sbc PY,x
-        clc
-        adc #LQOFF
-        tay
-@lq0:   lda LERPQ7,y
-        clc
-        adc PY,x
-        sta PY,x
-        lda PY+NX-1,x
-        sec
-        sbc PY+NX-2,x
-        clc
-        adc #LQOFF
-        tay
-@lq1:   lda LERPQ7,y
-        clc
-        adc PY+NX-2,x
-        sta PY+NX-1,x
-        lda CAME                   ; (the camera higher: eyrow's)
-        beq :+
-        jsr eyrow
-        jmp @pyd
-:       .repeat NX, i
-        PYS i
+        lda MODE                   ; to 11, by fx (LERPQ7: land.lerp), from HT
+        beq :+                     ; (or PY: a clip's row) into PY
+        jmp @alt
+:       R7BP                       ; (r and B1T's page: the clips' rows' x's
+        EDGEY HT, @lq2, @lq3       ; not by them)
+        .repeat NX-2, i
+        PYH i+1
         .endrepeat
-@pyd:   lda tmp+1
+@pyd:   ldy CX2                    ; x: corner 1's B (B1T: x * 256, 16 bits),
+        iny                        ; then + r each
+        lda (bp),y
+        sta PX+1,x
+        dey
+        lda (bp),y
         clc
-        adc #>B0L
-        sta hp0+1
-        lda tmp+1
-        clc
-        adc #>B0H
-        sta hp1+1
-        ldy cxs
-        lda (hp0),y
-        sta vx
-        lda (hp1),y
-        .repeat NX, i
-        PXS i
+        .repeat NX-3, k
+        adc rl                     ; (A: B's low byte; no carry out of the
+        tay                        ; high: corners 1..NX-2 on, 8 bits)
+        lda PX+1+k,x
+        adc rh
+        sta PX+2+k,x
+        .if k < NX-4
+        tya
+        .endif
         .endrepeat
-        ldy xt1                    ; the edges' x: -XCLIP, +XCLIP
+        ldy DCUR                   ; the edges' x: -XCLIP, +XCLIP (di: DCUR)
         lda PINL7,y
         sta PX,x
         lda PINR7,y
         sta PX+NX-1,x
-        lda CLP7,y                 ; past the screen's edges: clipr
-        beq @nx
+        cpy #NCLP                  ; past the screen's edges (CLP7: di < NCLP):
+        bcs @nx                    ; clipr
         jsr clipr
-@nx:    lda pr                     ; the near clip's row: a line or more below
-        cmp RN                     ; the row before (then the last)
-        bne @fc
         ldx tmp
-        ldy #NX
-:       lda PY-16,x
-        cmp PY,x
+        sec
+@nx:    txa                        ; the next row (X: tmp, C set; the near
+        adc #15                    ; clip's the last: its x's @pxn's)
+        sta tmp
+        cmp RN16
+        beq @lst
+        lda DCUR
+        sbc #15                    ; (C clear: - 16)
+        sta DCUR
+        tay
+        jmp @row
+@lst:   ldy #ZCLIP*16-DI0          ; the near clip's: on its plane
+        lda czs                    ; (zlerp's heights: none at czs 0)
+        beq :+
+        lda #1
+:       ora #$40                   ; (x by cxs)
+        ora CAMF
+        sta MODE
+        jmp @row
+@fin:   ldx RN16                   ; the near clip's row: a line or more below
+        .repeat NX, i              ; the row before
+        lda PY-16+i,x
+        cmp PY+i,x
         bcc :+
         adc #0                     ; (C set: + 1)
-        sta PY,x
-:       inx
-        dey
-        bne :--
+        sta PY+i,x
+:
+        .endrepeat
+        lda FACT                   ; the far clip's row: a line or more above
+        bne :+                     ; row 1
         rts
-@fc:    cmp #1                     ; the far clip's row: a line or more above
-        bne @nr                    ; this (row 1)
-        lda FACT
-        beq @nr
-        ldx #0
-        ldy #NX
-:       lda PY+16,x
-        sec
-        sbc #1
-        cmp PY,x
+:
+        .repeat NX, i
+        ldx PY+16+i
+        dex
+        cpx PY+i
         bcs :+
+        stx PY+i
+:
+        .endrepeat
+        rts
+@alt:   bpl :+                     ; the clips' rows (bit 6), or the camera higher
+        jmp @cam
+:       lsr a                      ; (the clips' rows: heights from HT or PY)
+        bcc :+
+        jmp @ap
+:
+        EDGEY HT
+        .repeat NX-2, i
+        PYH i+1
+        .endrepeat
+        jmp @pxc
+@ap:    txa                        ; their heights by 1 - fz between the rows
+        bne :+                     ; either side (zlerp, flerp: corners 1..NX-2
+        jsr flerp                  ; straight to y; the edges' heights at E0..E3)
+        jmp :++
+:       jsr zlerp
+:       lda E1                     ; the edges: their heights by fx, their y's
+        ora #16
+        clc
+        sbc E0
+        tay
+        lda (LQP),y
+        adc E0
+        tay
+        lda (syp),y
         sta PY,x
-:       inx
+        lda E3
+        ora #16
+        clc
+        sbc E2
+        tay
+        lda (LQP),y
+        adc E2
+        tay
+        lda (syp),y
+        sta PY+NX-1,x
+        bit MODE                   ; (the camera higher: EYV more, eyrow's)
+        bmi :+
+        jmp @pxc
+:       ldy #NX
+        clc
+:       lda PY,x
+        adc EYV
+        sta PY,x
+        inx
         dey
-        bne :--
-@nr:    inc pr
-        jmp @r
+        bne :-
+        ldx tmp
+        jmp @pxc
+@cam:   R7BP
+        jsr eyrow                  ; (X kept)
+        lda MODE
+        lsr a
+        bcc :+
+        jmp @ap
+:
+        EDGESP HT
+        clc                        ; (EDGESP's C: PYSE's)
+        .repeat NX, i
+        .if i = 0 || i = NX-1
+        PYSE i
+        .else
+        PYHE i
+        .endif
+        .endrepeat
+@cx:    bit MODE
+        bvs @pxc
+        jmp @pyd
+; The clips' rows' x's: on their planes (row 0, di ZFCLIP*16-DI0; row RN, di
+; ZCLIP*16-DI0), by cxs alone (PXF7, PXN7 + 11 cxs: PINL7, B1 + (i-1) r, PINR7;
+; never clipr's).
+        .assert NX = 11, error, "PXF7, PXN7: 11 cxs"
+@pxc:   lda CAMF
+        sta MODE
+        ldy CX11
+        cpx #0
+        bne @pxn
+        .repeat NX, i
+        lda PXF7+i,y
+        sta PX+i
+        .endrepeat
+        jmp @nx
+@pxn:   .repeat NX, i              ; (the near clip's: the last)
+        lda PXN7+i,y
+        sta PX+i,x
+        .endrepeat
+        jmp @fin
 
 
 ; The row's y's (SYT7 by height, X: 16 j) with the camera CAME higher: each
@@ -3475,67 +3637,83 @@ eyrow:  lda rh
         rol a
         sta EYV
         clc
-        .repeat NX, i
-        PYSE i
+        rts
+
+; The heights (HT) a row on (SHF 1: row j + 1 row j's, row 0 HTN) or back
+; ($FF: row j row j + 1's, row 7 HTN): zsh4's.
+hsh:    ldx #NX-1
+        lda SHF
+        bmi @b
+@o:     .repeat 7, k
+        lda HT+16*(6-k),x
+        sta HT+16*(7-k),x
         .endrepeat
+        lda HTN,x
+        sta HT,x
+        dex
+        bpl @o
+        bmi @d
+@b:     .repeat 7, k
+        lda HT+16*(k+1),x
+        sta HT+16*k,x
+        .endrepeat
+        lda HTN,x
+        sta HT+$70,x
+        dex
+        bpl @b
+@d:     lda #0
+        sta SHF
         rts
 
 ; The ground under the ship (land.ground: ZSHIP ahead at the camera's x, corner
 ; rows j ZBACK - ZSHIP and the next farther, columns CX 4 + (cxs >= 8) and the
 ; next, across by (cxs + 8) & 15 sixteenths, then down by czs: LERPQ7), and
 ; every raw height (rows 0..nr-1) less it, + HMAX (SYT7's index).
-hgnd:   lda #ZBACK-ZSHIP           ; its row: ZBACK - ZSHIP less the first's j
-        sec                        ; (ZBACK - ZB)
-        sbc #ZBACK
-        clc
-        adc ZB
+hgnd:   lda ZB                     ; its row: ZBACK - ZSHIP less the first's j
+        sec                        ; (ZBACK - ZB): 16 (ZB - ZSHIP), + its column:
+        sbc #ZSHIP                 ; 4, or 5 at cxs >= 8
         asl a
         asl a
         asl a
         asl a
-        sta tmp                    ; (16 r)
-        lda cxs                    ; its column: 4, or 5 at cxs >= 8
-        cmp #8
-        lda #4
+        adc #4                     ; (C clear: ZB - ZSHIP < 16)
+        ldy cxs
+        cpy #8
         adc #0
-        clc
-        adc tmp
         tax                        ; X: 16 r + its column
         lda cxs                    ; across: q = (cxs + 8) & 15
+        eor #8
+        tay
+        lda LQLO,y
+        sta lp
+        lda LQHI,y
+        sta lp+1
+        lda HT+1,x                 ; the near corners ((b + 16) - a - 1: b - a
+        ora #16                    ; + LQOFF)
         clc
-        adc #8
-        and #15
-        jsr lqrow
-        lda PY+1,x                 ; the near corners
-        sec
-        sbc PY,x
-        clc
-        adc #LQOFF
+        sbc HT,x
         tay
         lda (lp),y
-        clc
-        adc PY,x
+        adc HT,x
         sta tmp+1                  ; (hx0)
-        lda PY-15,x                ; the far corners (the row before: 16 back)
-        sec
-        sbc PY-16,x
+        lda HT-15,x                ; the far corners (the row before: 16 back)
+        ora #16
         clc
-        adc #LQOFF
+        sbc HT-16,x
         tay
         lda (lp),y
+        adc HT-16,x                ; (hx1)
+        ora #16
         clc
-        adc PY-16,x                ; (hx1)
-        sec
         sbc tmp+1
-        clc
-        adc #LQOFF
-        pha
-        lda czs                    ; down: q = czs
-        jsr lqrow
-        pla
-        tay
+        sta tmp
+        ldy czs                    ; down: q = czs
+        lda LQLO,y
+        sta lp
+        lda LQHI,y
+        sta lp+1
+        ldy tmp
         lda (lp),y
-        clc
         adc tmp+1                  ; hg
         sta HGV
         eor #$FF                   ; HMAX - hg: prow7's SYT7 offset (the
@@ -3543,93 +3721,57 @@ hgnd:   lda #ZBACK-ZSHIP           ; its row: ZBACK - ZSHIP less the first's j
         adc #HMAX
         sta HOFF
         rts
-lqrow:  pha                        ; lp: LERPQ7's row q (A)
-        lsr a
-        lsr a
-        lsr a
+
+; The near clip's row (X: RN16; its SYT7 row at syp): its heights from the row
+; before's by 1 - fz (land.lerp, LERPQ7: q = 16 - czs, lp; czs not 0), corners
+; 1..NX-2 by SYT7 into PY, the edges' heights (0, 1, NX-2, NX-1) at E0..E3.
+.macro LERPY SA, SB, CI, IX
+.if IX
+        lda SB+CI,x                  ; (b + 16) - a - 1: b - a + LQOFF
+        ora #16
         clc
-        adc #>LERPQ7
-        sta lp+1
-        pla
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta lp
+        sbc SA+CI,x
+        tay
+        lda (lp),y
+        adc SA+CI,x
+.else
+        lda SB+CI
+        ora #16
+        clc
+        sbc SA+CI
+        tay
+        lda (lp),y
+        adc SA+CI
+.endif
+.if CI = 0
+        sta E0
+.elseif CI = NX-1
+        sta E3
+.else
+.if CI = 1
+        sta E1
+.elseif CI = NX-2
+        sta E2
+.endif
+        tay
+        lda (syp),y
+.if IX
+        sta PY+CI,x
+.else
+        sta PY+CI
+.endif
+.endif
+.endmacro
+zlerp:  .repeat NX, i
+        LERPY HT-16, HT, i, 1
+        .endrepeat
         rts
 
-; The near clip's row's heights (X: 16 j, raw): from the row before's by 1 -
-; fz (land.lerp, LERPQ7: q = 16 - czs; none at fz 0: the row itself).
-zlerp:  lda czs
-        beq @d
-        lda #16
-        sec
-        sbc czs
-        pha
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>LERPQ7
-        sta @zq+2
-        pla
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta @zq+1
-        ldx tmp
-        ldy #NX
-        sty tmp+1
-:       lda PY,x                   ; b - a + 12
-        sec
-        sbc PY-16,x
-        clc
-        adc #LQOFF
-        tay
-@zq:    lda LERPQ7,y
-        clc
-        adc PY-16,x
-        sta PY,x
-        inx
-        dec tmp+1
-        bne :-
-@d:     rts
-
-; The far clip's row's heights (row 0, raw): to row 1's by 1 - fz (land.lerp,
-; LERPQ7: q = 16 - czs; fz not 0).
-flerp:  lda #16
-        sec
-        sbc czs
-        pha
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>LERPQ7
-        sta @fq+2
-        pla
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta @fq+1
-        ldx #NX-1
-:       lda PY+16,x                ; b - a + 12
-        sec
-        sbc PY,x
-        clc
-        adc #LQOFF
-        tay
-@fq:    lda LERPQ7,y
-        clc
-        adc PY,x
-        sta PY,x
-        dex
-        bpl :-
+; The far clip's row (row 0; its SYT7 row at syp): to row 1's by 1 - fz (land.lerp,
+; LERPQ7: q = 16 - czs, lp; fz not 0), as zlerp.
+flerp:  .repeat NX, i
+        LERPY HT, HT+16, i, 0
+        .endrepeat
         rts
 
 ; A row the screen's edges clip (X: 16 j): its corners left of XL onto XL, those
@@ -3801,6 +3943,43 @@ cyc:    sta cdy
 
 ; ---------------------------------------------------------------- the slow way
 ; (bank 4, its free space, in two: never seen)
+        .segment "B4Z"
+; (bank 4, its free space) project's map rows a row on (A: czt + ZB, pkz + 1)
+; or back (pkz - 1), its columns as before: the new row's heights (row 0's,
+; map row czt + ZB; or row 7's, czt + ZB - 7) into HTN, SHF for prow7's hsh,
+; pkz; C set.  Else C clear (all anew).
+zsh4:   tay
+        sec
+        sbc pkz
+        sty pkz
+        cmp #1
+        beq @ld
+        cmp #$FF
+        bne @no
+        tya
+        sbc #7                     ; (C set)
+        tay
+        lda #$FF
+@ld:    sta SHF
+        tya
+        and #63
+        tay
+        lda MRL,y
+        sta HPZ
+        lda MRH,y
+        sta HPZ+1
+        ldx #NX-1
+:       ldy CX,x
+        lda (HPZ),y
+        and #15
+        sta HTN,x
+        dex
+        bpl :-
+        sec
+        rts
+@no:    clc
+        rts
+
         .segment "B4S"
 ; A column two rungs (or more) split: each pixel's box at the top (ri - 1, and
 ; each rung reaching the column with xt <= x) and transitions (each rung
@@ -3922,48 +4101,128 @@ PIXM:   .byte $88, $44, $22, $11
         .segment "B5CODE"
 ; (bank 5) Each land strip's boxes' bytes (CLE, CLO): box i the tile at its left
 ; column and the near row's.
-pcol5:  lda czt                    ; rows 1..7 (nr 7 or 8: ZCF always on; row
-        clc                        ; 7's spare at nr 7): each row's map row's
-        adc ZB                     ; addresses into its loads (@ce, @co + 12
-        sec                        ; (pr - 1)), then by column
-        sbc #1
-        ldx #0
-@cs:    and #63
+pcol5:  lda cxt                    ; a window of 10 rows (m: map row WK - m, by
+        cmp WX                     ; columns CX at WX) at CLE, CLO + 16 m, rows
+        beq :+                     ; VLO..VHI made; the strips' land rows 1..7
+        jmp @f
+:
+        lda WK                     ; (row k = m - o: map row czt + ZB - 1 - k)
+        clc                        ; at o = WK - (czt + ZB) + 1, 0..3
+        sbc czt                    ; (C clear: - 1)
+        sec
+        sbc ZB
+        clc
+        adc #2
+        cmp #4
+        bcc :+                     ; (o out of the window: all anew)
+        lda cxt
+        jmp @f
+:
+        sta WO
+        tax                        ; the rows o.. before VLO
+:       cpx VLO
+        bcs :+
+        txa
+        jsr crow
+        inx
+        bne :-
+:       lda WO                     ; and from VHI + 1 to o + 6
+        adc #6                     ; (C set: + 7)
+        sta WE
+        ldx VHI
+:       inx
+        cpx WE
+        bcs :+
+        txa
+        jsr crow
+        jmp :-
+:       lda WO                     ; (the made rows grown to o..o+6 at least)
+        cmp VLO
+        bcs :+
+        sta VLO
+:       ldx WE
+        dex
+        cpx VHI
+        bcc @pt
+        stx VHI
+@pt:    lda WO                     ; the strips' (setup's): CLE, CLO + 16 o
+        asl a
+        asl a
+        asl a
+        asl a
+        sta ldCLE
+        adc #<CLO                  ; (C clear; no carry)
+        sta ldCLO
+        rts
+@f:     sta WX                     ; all anew: o 1, WK czt + ZB, rows 1..7
+        lda czt
+        clc
+        adc ZB
+        sta WK
+        lda #1
+        sta WO
+        sta VLO
+        lda #7
+        sta VHI
+        ldx #1
+:       txa
+        jsr crow
+        inx
+        cpx #8
+        bne :-
+        jmp @pt
+        .assert <CLE = 0 && <CLO + 48 < $100, error, "pcol5: setup's operands"
+; Window row m (A): map row WK - m, CMAPE, CMAPO by CX into CLE, CLO + 16 m.
+crow:   sta WM
+        asl a
+        asl a
+        asl a
+        asl a
+        sta @se+1
+        clc
+        adc #<CLO
+        sta @so+1
+        lda #>CLO
+        adc #0
+        sta @so+2
+        lda WK
+        sec
+        sbc WM
+        and #63
         tay
         lsr a
         lsr a
-        ora #>CMAPE                ; (CMAPE: $8000, 64 a row)
-        sta @ce+2,x
-        ora #>CMAPO
-        sta @co+2,x
+        ora #>CMAPE
+        sta @le+2
+        ora #>$1000
+        sta @lo+2
         tya
         lsr a
         ror a
         ror a
         and #$C0
-        sta @ce+1,x
-        sta @co+1,x
+        sta @le+1
+        sta @lo+1
         txa
-        clc
-        adc #12
-        tax
-        dey
-        tya
-        cpx #12*7
-        bne @cs
+        pha
         ldx #NX-2
-@b:     ldy CX,x
-@ce:
-.repeat 7, k
-        lda CMAPE,y
-        sta CLE+16*k,x
-        lda CMAPO,y
-        sta CLO+16*k,x
-.endrepeat
-@co     = @ce+6
+@c:     ldy CX,x
+@le:    lda CMAPE,y
+@se:    sta CLE,x
+@lo:    lda CMAPO,y
+@so:    sta CLO,x
         dex
-        bpl @b
+        bpl @c
+        pla
+        tax
         rts
+WX:     .byte $FF                  ; the window's columns' cxt (none yet), map row
+WK:     .byte 0                    ; at m 0, o, the rows made, o + 7, crow's m
+WO:     .byte 0
+VLO:    .byte 0
+VHI:    .byte 0
+WE:     .byte 0
+WM:     .byte 0
         .assert * <= $A100, error, "pcol5: bank 5 from $A100 the game's"
 
         .include "game.s"

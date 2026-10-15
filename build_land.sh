@@ -21,7 +21,7 @@ open(d + '/TABLES', 'wb').write(img)
 PY
 python3 - $B <<'PY'                 # bank 5's and bank 7's code into their tables
 import sys
-for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES2', 'B5GAME', 0x2100), ('TABLES7', 'B7CODE', 0x3900)):
+for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES2', 'B5GAME', 0x2100), ('TABLES7', 'B7CODE', 0x3480)):
     img = bytearray(open(f'{sys.argv[1]}/{t}', 'rb').read())
     code = open(f'{sys.argv[1]}/{c}', 'rb').read()
     assert not any(img[off:off + len(code)]), t + ': code over the tables'
@@ -39,7 +39,7 @@ for ln in open(sys.argv[1] + '/labels.txt'):
         out.append(f'L_{n.lstrip(".")} = ${int(a, 16):04X}')
 open(sys.argv[1] + '/landsyms.inc', 'w').write('\n'.join(sorted(set(out))) + '\n')
 PY
-python3 - $B B4S 0x2081 B4S2 0x1200 <<'PY'     # the slow way (bank 4) into TABLES
+python3 - $B B4S 0x2081 B4S2 0x1200 B4Z 0x3900 <<'PY'     # the slow way (bank 4) into TABLES
 import sys
 d = sys.argv[1]
 img = bytearray(open(d + '/TABLES', 'rb').read())

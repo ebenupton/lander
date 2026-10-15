@@ -11,11 +11,17 @@ Bank 7, by a row's depth index di = d/16 - DI0 (d its depth, 8.8 tiles: (20 - j)
   R7L, R7H + di           r
   SYT7 + di*32 + v        screen y of a corner of height h, the ground under the ship
                           hg: v = h - hg + HMAX (0..2 HMAX)
-  B0L, B0H + di*16 + cxs  the row's first drawn corner's x * 256 (16 bits), XC
-                          on: corner i's x is (B0 + i*r) >> 8
+  B1T + di*32 + 2*cxs    the row's second drawn corner's x * 256 (16 bits, low
+                          then high), XC on: corner i's x is (B1 + (i-1)*r) >> 8
+                          (corners 1..NX-2: B1 + (i-1)*r < 65536, no carry out)
+  SYL7, SYH7 + di         di*32's low byte, and SYT7 + di*32's page
+  LQLO, LQHI + q          LERPQ7 + q*32
+  PXF7, PXN7 + 11*cxs + i the far and near clips' rows' x's (their di fixed: by
+                          cxs alone; never clipped)
   PINL7, PINR7 + di       the x clip planes' x (-XCLIP, +XCLIP: the rows' ends)
   CLP7 + di               1 if they are past the screen's clip (XL, XR): clipped
-  LERPQ7 + q*32 + d + 15  land.lerp(0, d, 16 q): the ends', clips' and ground's heights
+  LERPQ7 + q*32 + d + 15  land.lerp(0, d, 16 q) - 1: the ends', clips' and ground's
+                          heights (added with C set: after (b + 16) - a - 1)
 Bank 4:
   MAP + z*64 + x          a tile corner's height (bits 0-3) and its tile's colour pick
                           (bits 4-7: LANDT or SEAT gives the palette entry)
@@ -58,8 +64,11 @@ R2OFF = 255 - 3 * R2N
 TNB = 128
 DI0 = (L.ZBACK - L.NZ + 1) * 16 - 15        # the least depth / 16: the near row, fz 15
 NDI = L.ZBACK * 16 - DI0 + 1
-ADDR7 = dict(R7L=0x8000, R7H=0x8100, SYT7=0x8200, B0L=0x9800, B0H=0xA300,
-             CLP7=0xAE00, PINL7=0xAF00, PINR7=0xB000, LERPQ7=0xB100)
+NCLP = 4                                    # the rows clipr clips: di < NCLP (CLP7)
+NXD = L.NX - 2 * L.XSKIP                    # the corners drawn a row
+ADDR7 = dict(R7L=0x8000, R7H=0x8100, SYT7=0x8200, B1T=0x9800,
+             CLP7=0xAE00, PINL7=0xAF00, PINR7=0xB000, LERPQ7=0xB100, SYL7=0xB300, SYH7=0xB3B0,
+             LQLO=0xB460, LQHI=0xB470, PXF7=0xBEA0, PXN7=0xBF50)
 LQOFF = 15                                  # LERPQ7's d offset (d -15..15)
 assert YSKY % 2 == 0 and YGND % 2 == 1 and R2OFF > 0 and NDI <= 176
 
@@ -187,19 +196,35 @@ def build7():
         put('R7H', di, r >> 8)
         for v in range(2 * L.HMAX + 1):     # (a height h less the ground's hg, + HMAX)
             put('SYT7', di * 32 + v, L.HORIZON + (((L.CAMH - (v - L.HMAX)) * r + L.HSCALE * 128) // (L.HSCALE * 256)))
+        put('SYL7', di, di * 32)
+        put('SYH7', di, (ADDR7['SYT7'] + di * 32) >> 8)
         for cxs in range(16):
             dx0 = (L.XSKIP - 5) * 256 - cxs * 16 - 128        # (the first drawn corner)
             b0 = ((dx0 * r + 32768) >> 8) + L.XC * 256
-            put('B0L', di * 16 + cxs, b0)
-            put('B0H', di * 16 + cxs, b0 >> 8)
+            b1 = (b0 + r) & 0xFFFF                            # (the second's)
+            assert all(b1 + (i - 1) * r < 65536 for i in range(1, L.NX - 2 * L.XSKIP - 1))
+            put('B1T', di * 32 + 2 * cxs, b1)
+            put('B1T', di * 32 + 2 * cxs + 1, b1 >> 8)
         pl = L.XC + ((-L.XCLIP * r + 32768) >> 16)      # the edges' x (clip planes)
         pr = L.XC + ((L.XCLIP * r + 32768) >> 16)
         put('PINL7', di, pl)
         put('PINR7', di, pr)
         put('CLP7', di, 1 if pl < L.XL or pr > L.XR else 0)
+        for row, dic in (('PXF7', L.ZFCLIP * 16 - DI0), ('PXN7', L.ZCLIP * 16 - DI0)):
+            if di == dic:                   # (the clips' rows: x by cxs alone)
+                assert not (pl < L.XL or pr > L.XR)
+                for cxs in range(16):
+                    b1 = img[ADDR7['B1T'] - BASE + di * 32 + 2 * cxs] | img[ADDR7['B1T'] - BASE + di * 32 + 2 * cxs + 1] << 8
+                    xs = [pl] + [(b1 + (i - 1) * r) >> 8 for i in range(1, NXD - 1)] + [pr]
+                    for i, x in enumerate(xs):
+                        put(row, 11 * cxs + i, x)
+    clp = [img[ADDR7['CLP7'] - BASE + di] for di in range(NDI)]
+    assert clp == [1] * NCLP + [0] * (NDI - NCLP), 'CLP7: di < NCLP'
     for q in range(16):                     # LERPQ7 + q*32 + d + 15: land.lerp(0, d, 16 q)
+        put('LQLO', q, ADDR7['LERPQ7'] + 32 * q)            # (row q's address)
+        put('LQHI', q, (ADDR7['LERPQ7'] + 32 * q) >> 8)
         for d in range(-15, 16):
-            put('LERPQ7', q * 32 + d + LQOFF, L.lerp(0, d, 16 * q))
+            put('LERPQ7', q * 32 + d + LQOFF, L.lerp(0, d, 16 * q) - 1)   # (- 1: added with C set)
     return img
 
 
@@ -213,7 +238,7 @@ def main():
         for k, v in list(ADDR.items()) + list(ADDR2.items()) + list(ADDR7.items()):
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=TNB, MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34,
-                      NX=L.NX - 2 * L.XSKIP, XSKIP=L.XSKIP, NZ=L.NZ, ZBACK=L.ZBACK, ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=DI0, XC=L.XC, XL=L.XL, XR=L.XR, YLIM=L.YLIM, LQOFF=LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH, EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON,
+                      NX=L.NX - 2 * L.XSKIP, XSKIP=L.XSKIP, NZ=L.NZ, ZBACK=L.ZBACK, ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=DI0, NCLP=NCLP, XC=L.XC, XL=L.XL, XR=L.XR, YLIM=L.YLIM, LQOFF=LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH, EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON,
                       YSKY=YSKY, YGND=YGND, R2OFF=R2OFF, RFA=RFA,
                       TPE0=TPE[0], TPE1=TPE[1], TPE2=TPE[2], TPE3=TPE[3],
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])

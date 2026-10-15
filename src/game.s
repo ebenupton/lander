@@ -27,7 +27,7 @@
 ; The screen's top 64 lines are the game's (LAND draws from YSKY, 64): the
 ; FUEL (a bar, row 0), the frame rate (row 2: F toggles it, LAND's readout); the
 ; map (64 x 64 pixels, a tile each, the pad in the middle) at the top right, the
-; ship a blinking magenta dot on it.
+; ship a 2 x 2 magenta dot on it.
 ; ============================================================================
 
 GSHK    = $07DB                    ; the ship for bank 6's B6_SHIP (B6_KEYS copies
@@ -96,9 +96,9 @@ ginit:  lda #$30
         sta gmx
         sta gmz
         sta vacc
-        sta mkon
-        sta mkon+1
         lda #$FF
+        sta mkl
+        sta mkl+1
         sta fdr
         sta fdr+1
         sta dl
@@ -1178,7 +1178,7 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         lda gt2
         and #3
         tay
-        lda PIXM,y
+        lda PIXG,y
         sta gt4
         eor #$FF
         ldy #0
@@ -1205,72 +1205,124 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         sta (bsg),y
 @o:     rts
 
-; The ship's dot on the map, magenta: on screen 0 only (it blinks), screen 1's put back.
+; The ship's dot on the map: 2 x 2 pixels, magenta, on the four tiles nearest
+; it, on both screens (each its own, put back from MAPI as it moves); none
+; while crashed.
 marker: ldx back
-        lda mkon,x
-        beq :+
-        lda mka,x                  ; the byte it was over, back
-        sta g0
-        lda mkah,x
-        sta g0+1
-        lda mkb,x
-        ldy #0
-        sta (g0),y
-        lda #0
-        sta mkon,x
-:       cpx #0
-        bne @r
+        lda #$FF                   ; (none)
+        sta gt0
         lda GSHV
-        beq @r
-        lda #MAPZ                  ; line MAPZ - z, column 48 + (x + MAPX) / 4
-        sec                        ; (gamegen's: the pad in the middle)
+        beq @h
+        lda sz+1                   ; the top line: MAPZ - z, less 1 if z's
+        eor #$FF                   ; fraction >= 1/2 (gamegen's)
+        asl a
+        lda #MAPZ
         sbc sz+2
         and #63
         sta gt0
-        and #7
-        sta g0
+        lda sx+1                   ; the left pixel: x + MAPX - 1, + 1 if x's
+        asl a                      ; fraction >= 1/2
         lda sx+2
-        clc
-        adc #MAPX
+        adc #MAPX-1
         and #63
         sta gt1
+@h:     lda gt0
+        cmp mkl,x
+        bne :+
+        lda gt1
+        cmp mkp,x
+        beq @r                     ; (unmoved)
+:       lda mkl,x                  ; the old one off
+        bmi :+
+        sta mdl
+        lda mkp,x
+        sta mdp
+        lda #0
+        jsr mdot
+:       ldx back                   ; the new one on
+        lda gt1
+        sta mkp,x
+        sta mdp
+        lda gt0
+        sta mkl,x
+        bmi @r
+        sta mdl
+        lda #$80
+        jmp mdot
+@r:     rts
+; Pixels (mdp, mdl), the next right and the next down (round the map), magenta
+; (A $80) or the map's (A 0).
+mdot:   sta mdc
+        jsr mpix
+        inc mdp
+        jsr mpix
+        inc mdl
+        jsr mpix
+        dec mdp
+        jsr mpix
+        dec mdl
+        rts
+; Pixel mdp & 63 of the map's line mdl & 63 on screen scrg (as gscr's).
+mpix:   lda mdl
+        and #63
+        sta gt2                    ; (line)
+        and #7
+        sta g0
+        lda mdp
+        and #63
+        sta gt3                    ; (pixel)
         lsr a
         lsr a
+        sta gt4                    ; (byte)
         asl a
         asl a
         asl a
         ora g0
-        ora #$80
+        ora #$80                   ; (+ 48 * 8 = $180)
         sta g0
-        sta mka,x
-        lda gt0
+        lda gt2
         lsr a
         lsr a
         and #$FE
-        sec
+        sec                        ; (+ 1)
         adc scrg
         sta g0+1
-        sta mkah,x
-        ldy #0
-        lda (g0),y
-        sta mkb,x
-        ldy gt1
-        lda gt1
+        lda gt3
         and #3
         tay
-        lda PIXM,y                 ; (magenta)
-        sta gt2
+        lda PIXG,y
+        sta gt3                    ; (its bits)
+        bit mdc
+        bpl :+
+        and #$F0                   ; magenta
+        bne @w
+:       lda gt2                    ; the map's: MAPI + 16 line + byte
+        asl a
+        asl a
+        asl a
+        asl a
+        ora gt4
+        clc
+        adc #<MAPI
+        sta g1
+        lda gt2
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        adc #>MAPI
+        sta g1+1
+        ldy #0
+        lda (g1),y
+        and gt3
+@w:     sta gt5
+        lda gt3
         eor #$FF
         ldy #0
         and (g0),y
-        sta gt3
-        lda gt2
-        and #$F0
-        ora gt3
+        ora gt5
         sta (g0),y
-        lda #1
-        sta mkon,x
-@r:     rts
+        rts
 
 ; The fuel bar, on this screen if changed.
 status: ldx back
@@ -1316,6 +1368,7 @@ status: ldx back
         bcc @b
 @c:     rts
 BARB:   .byte $00, $88, $CC, $EE, $FF
+PIXG:   .byte $88, $44, $22, $11   ; a pixel's bits (LAND's PIXM is in bank 4)
 
 ; ---------------------------------------------------------------- state
 gmx:     .byte 0                    ; the virtual mouse (signed)
@@ -1358,10 +1411,11 @@ pvz:    .res NPART
 pvzh:   .res NPART
 pvy:    .res NPART
 pvyh:   .res NPART
-mkon:   .res 2                     ; the map's dot, by screen: drawn, where, over
-mka:    .res 2
-mkah:   .res 2
-mkb:    .res 2
+mkl:    .res 2                     ; the map's dot, by screen: its line ($FF none),
+mkp:    .res 2                     ; pixel
+mdl:    .res 1                     ; (mdot's)
+mdp:    .res 1
+mdc:    .res 1
 fdr:    .res 2                     ; the bar and counts drawn, by screen
 dl:     .res 2
 dc:     .res 2

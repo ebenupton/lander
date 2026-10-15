@@ -770,17 +770,10 @@ setBh:  .byte >BOTS, >(BOTS+64), >CURB
 ; The bottom row clipped at the screen's bottom: if a point of it is past
 ; YGND, its line (bota) held at YGND+1 (so every column's floor, top and line
 ; stay on the screen: flr1 at most YGND+1, cols' c_lv's flrc), BCL set.
-bclip:  lda #0
-        sta BCL
-        ldx np1
-:       lda BY,x
-        cmp #YGND+1
-        bcs :+
-        dex
-        bpl :-
+bclip:  lda BCL                    ; (setup's: a point past YGND seen)
+        bne :+
         rts
-:       inc BCL
-        ldy #0
+:       ldy #0
         lda #YGND+1
 :       cmp (bota),y
         bcs :+
@@ -801,6 +794,7 @@ flrc:   tax
 ; The strip's points (TX..BY) and boxes (CE, CO), its top row's line (the
 ; last strip's bottom row's, widened, or the sky's) and its bottom row's.
 setup:  ldx #0                     ; the near strip: the ground below it too
+        stx BCL                    ; (bclip's: a bottom row's point past YGND)
         lda ns
         clc
         adc #1
@@ -837,7 +831,9 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         sta BX,x
         lda PY+16,y
         sta BY,x
-        lda CLE,y
+        cmp #YGND+1
+        bcs @pc
+@pb:    lda CLE,y
         sta CE,x
         lda CLO,y
         sta CO,x
@@ -845,6 +841,10 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         dex
         bne @p
         beq @m
+@pc:    inc BCL                    ; (C set)
+        bcs @pb
+@qc:    inc BCL
+        bcs @qb
         ; the sky (row 0 both, the top at YSKY) and the ground (row nr-1
         ; both, the bottom at YGND): boxes black
 @g:     asl a                      ; (C clear: 4 shifts of nr < 16)
@@ -860,7 +860,9 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         lda PY,y
         sta TY,x
         sta BY,x
-        lda #0
+        cmp #YGND+1
+        bcs @qc
+@qb:    lda #0
         sta CE,x
         sta CO,x
         iny
@@ -875,7 +877,9 @@ setup:  ldx #0                     ; the near strip: the ground below it too
         dex
         bne :-
         beq @m
-@gb:    lda #YGND
+@gb:    lda #0                     ; (the ground's bottom: YGND, not past it)
+        sta BCL
+        lda #YGND
 :       sta BY,x
         dex
         bne :-
@@ -2107,9 +2111,9 @@ sethalf:
         lda exhh,y
         sta r_eh2+2
         lda #OP_STAY               ; run2's RTSes back (its pages change)
-        ldx rE+1
+        ldx pr0+1
 sh_1:   sta TPE0*256,x
-        ldx rO+1
+        ldx pr1+1
 sh_2:   sta TPO0*256,x
         sty pY+1                   ; (none planted: Y < YSKY)
         lda tpe,y
@@ -2760,16 +2764,14 @@ pY:     cpy #$FF                   ; (the RTSes already at Y's)
         beq pY_k
         sty pY+1
         lda #OP_STAY               ; the last back
-rE:     ldx #$FF
-pr0:    sta $FF00,x
-rO:     ldx #$FF
-pr1:    sta $FF00,x
+pr0:    sta $FFFF                  ; (rE: the low byte EIN's)
+pr1:    sta $FFFF                  ; (rO)
         lda #OP_RTS
         ldx EIN,y
-        stx rE+1
+        stx pr0+1
 pp0:    sta $FF00,x
         ldx EIN-1,y
-        stx rO+1
+        stx pr1+1
 pp1:    sta $FF00,x
 pY_k:   lda ve
         ldy coff
@@ -3897,64 +3899,48 @@ PIXM:   .byte $88, $44, $22, $11
         .segment "B5CODE"
 ; (bank 5) Each land strip's boxes' bytes (CLE, CLO): box i the tile at its left
 ; column and the near row's.
-pcol5:  lda #1
-        sta pr
-@cs:    lda czt
-        clc
-        adc ZB
-        sec
-        sbc pr
-        and #63
-        tax
+pcol5:  lda czt                    ; rows 1..7 (nr 7 or 8: ZCF always on; row
+        clc                        ; 7's spare at nr 7): each row's map row's
+        adc ZB                     ; addresses into its loads (@ce, @co + 12
+        sec                        ; (pr - 1)), then by column
+        sbc #1
+        ldx #0
+@cs:    and #63
+        tay
         lsr a
         lsr a
         ora #>CMAPE                ; (CMAPE: $8000, 64 a row)
-        sta hp0+1
+        sta @ce+2,x
         ora #>CMAPO
-        sta hp1+1
+        sta @co+2,x
+        tya
+        lsr a
+        ror a
+        ror a
+        and #$C0
+        sta @ce+1,x
+        sta @co+1,x
         txa
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta hp0
-        sta hp1
-        lda pr                     ; the strip's stores: 16 (strip - 1) on
-        asl a
-        asl a
-        asl a
-        asl a
-        sec
-        sbc #16
-        sta tmp
         clc
-        adc #<CLE
-        sta @se+1
-        lda #>CLE
-        adc #0
-        sta @se+2
-        lda tmp
-        clc
-        adc #<CLO
-        sta @so+1
-        lda #>CLO
-        adc #0
-        sta @so+2
+        adc #12
+        tax
+        dey
+        tya
+        cpx #12*7
+        bne @cs
         ldx #NX-2
 @b:     ldy CX,x
-        lda (hp0),y
-@se:    sta CLE,x
-        lda (hp1),y
-@so:    sta CLO,x
+@ce:
+.repeat 7, k
+        lda CMAPE,y
+        sta CLE+16*k,x
+        lda CMAPO,y
+        sta CLO+16*k,x
+.endrepeat
+@co     = @ce+6
         dex
         bpl @b
-        inc pr
-        lda pr
-        cmp nr
-        beq :+
-        jmp @cs
-:       rts
+        rts
+        .assert * <= $A100, error, "pcol5: bank 5 from $A100 the game's"
 
         .include "game.s"

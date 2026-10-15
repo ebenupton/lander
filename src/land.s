@@ -1047,7 +1047,8 @@ bclip:  lda BCL
 ; this routine's).  In: ns, nr, np, np1, PX, PY, CLE, CLO, ldCLE, bota.  Out:
 ; TX, TY, BX, BY, CE, CO (0 .. np+1), xl, xr, BCL, last ($FF for the near
 ; strip, ns = nr-1), (bota).  Clobbers A, X, Y and traceb's
-; (bank 7 paged and bank 4 back).  Called by strips.
+; (bank 7 paged for su_l7 and bank 4 back: pw7s, pw4s are wpatch's).  Called
+; by strips.
 setup:  lda #0
         sta BCL
         tax
@@ -1067,10 +1068,11 @@ setup:  lda #0
         asl a
         adc #$F0
         tay
-        PAGE 7
-        jsr su_l7
-        PAGE 4
-        jmp su_m
+        lda BANKMAP+3              ; bank 7 paged in (as pg7)
+        sta ROMCOPY
+        sta ROMSEL
+pw7s:   bit wrt
+        jmp su_l7                  ; (ends at su_m4)
 ldCLE:  .byte 0                    ; pcol5's: 16 * its window offset, added to
                                    ; su_l7's CLE, CLO index (data, in the code)
 su_qc:    inc BCL                  ; a bottom point past YGND
@@ -1089,6 +1091,11 @@ su_qb:    iny
         inx
         cpx np1
         bcc su_q
+        bcs su_m                   ; (always)
+su_m4:  lda BANKMAP                ; su_l7's end: bank 4 back (as pg4)
+        sta ROMCOPY
+        sta ROMSEL
+pw4s:   bit wrt
 su_m:
         ; the margins: the byte boundaries MARGIN or more beyond the bottom
         ; row's ends (MARGIN 0: nothing is assembled for it)
@@ -1768,7 +1775,7 @@ rg_lw:    tax
 ; ...).  LAYPAD puts the code from here on at the page phase that satisfies
 ; them all (the smallest value that links); change it when code before this
 ; point grows or shrinks.
-LAYPAD  = 112
+LAYPAD  = 97
         .res LAYPAD
 
 ; ---------------------------------------------------------------- columns
@@ -3463,7 +3470,8 @@ wrt:    .byte 0                    ; (pg4..pg7's BIT operand on a plain machine)
 ; pg4..pg7 (PAGE 4..7): bank 4+k's socket (BANKMAP) paged in for reads, ROMCOPY
 ; kept in step, and selected for writes: pwN is BIT wrt, three bytes that
 ; wpatch makes STA WRSEL_WATFORD + the socket or STA WRSEL_SOLIDISK when
-; find_ram found such a board.  Out: A = the socket; X, Y kept; the flags the
+; find_ram found such a board (setup's inline pagings pw7s, pw4s likewise).
+; Out: A = the socket; X, Y kept; the flags the
 ; BIT's (wrt is 0: Z set, N and V clear) or, on a patched board, the LDA's (N
 ; and Z as the socket).
 .repeat 4, k
@@ -4394,8 +4402,9 @@ hgnd:   lda ZB                     ; X = 16 (ZB - ZSHIP) + 4 + (cxs >= 8)
 ; points TX, TY, BX, BY + 1..NX, BCL counted up for each bottom point at or past
 ; YGND+1 (bclip's); then Y += ldCLE (pcol5's 16 o: the window row of row ns)
 ; and CLE, CLO + Y + 0..NX-2 become the boxes CE, CO + 1..NX-1 (CE, CO + NX,
-; the right margin's, setup zeroes).  Clobbers A, Y.  Caller: setup,
-; with bank 7 paged.  The code is in five pieces: the end of B7CODE, then the
+; the right margin's, setup zeroes).  Clobbers A, Y.  Entered by setup's JMP
+; with bank 7 paged; ends with a JMP to su_m4 (bank 4 back, then setup's
+; su_m).  The code is in five pieces: the end of B7CODE, then the
 ; spare 80 bytes after R7L, R7H, PINL7 and PINR7 (each table is NDI = 176
 ; bytes of its page).
         .assert NX = 11 && NDI = 176, error, "su_l7: unrolled for NX 11; the spares start at offset NDI of their pages"
@@ -4447,7 +4456,7 @@ su_l7c:
         jmp su_l7d
         .segment "B7D"
 su_l7d: SUCL 9
-        rts
+        jmp su_m4
 
 ; satrow (bank 7, CLP7's spare): prow7's row X (16 j) with the camera so far
 ; raised (EYV >= EYS) that a y plus EYV could pass 254: each corner's y from
@@ -5002,15 +5011,16 @@ find_ram:
 @found: clc
         rts
 
-; wpatch: pg4..pg7's write selects made the board's.  Each pwN is BIT wrt (3
-; bytes); on a Watford board it becomes STA WRSEL_WATFORD + the bank's socket,
+; wpatch: pg4..pg7's and setup's write selects made the board's.  Each pwN
+; (and pw7s, pw4s) is BIT wrt (3 bytes); on a Watford board it becomes STA
+; WRSEL_WATFORD + the bank's socket,
 ; on a Solidisk STA WRSEL_SOLIDISK (pgN has the socket in A by then); on a
 ; plain machine nothing changes.  In: board, BANKMAP.  Clobbers A, X, Y, ptr.
 ; Caller: start, after find_ram.
 wpatch: lda board
         beq @r
-        ldx #3
-@l:     lda wrsl,x                 ; ptr = pw(4+X)
+        ldx #5
+@l:     lda wrsl,x                 ; ptr = the BIT (wrsl, wrsh)
         sta ptr
         lda wrsh,x
         sta ptr+1
@@ -5020,7 +5030,8 @@ wpatch: lda board
         lda board
         cmp #BOARD_SOLIDISK
         beq @s
-        lda BANKMAP,x              ; Watford: $FF30 | the socket (< 16)
+        ldy wrsb,x                 ; Watford: $FF30 | the bank's socket (< 16)
+        lda BANKMAP,y
         ora #<WRSEL_WATFORD
         ldy #1
         sta (ptr),y
@@ -5062,6 +5073,8 @@ best:   .byte 0                    ; the most sockets a way found, and which way
 bestb:  .byte 0
 SOCKCLASS: .res NSOCK              ; each socket's CLASS_*, or an alias tag
 SAVED:  .res NSOCK                 ; RAM sockets' copyright bytes while signed
-; pw4..pw7: the BIT wrt in each pgN, for wpatch (low bytes, high bytes)
-wrsl:   .byte <pw4, <pw5, <pw6, <pw7
-wrsh:   .byte >pw4, >pw5, >pw6, >pw7
+; the BIT wrt in each pgN and in setup (pw7s, pw4s), for wpatch: low bytes,
+; high bytes, and each one's bank (BANKMAP's index)
+wrsl:   .byte <pw4, <pw5, <pw6, <pw7, <pw7s, <pw4s
+wrsh:   .byte >pw4, >pw5, >pw6, >pw7, >pw7s, >pw4s
+wrsb:   .byte 0, 1, 2, 3, 3, 0

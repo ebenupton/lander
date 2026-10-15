@@ -66,6 +66,11 @@ FUELMX  = 5120
 REFUEL  = 32                       ; on the pad, a step
 CRASHT  = 50                       ; steps the crash lasts
 NPART   = 10                       ; dots
+SNTH    = $E6                      ; the engine: white noise, the low rate
+SATF    = 2                        ; its attenuation: full thrust, hover
+SATH    = 7
+SNCR    = $E7                      ; the crash: white noise at tone 2's rate,
+SCRN    = $180                     ; this (4MHz / 32 / SCRN: 650 shifts a second)
 PGRAV   = 48                       ; a dot's gravity (height units / 256 a step^2)
 PADX    = PADN/2                   ; the pad's middle: the start
 FUELR   = 0                        ; FUEL's row (lines 0..7), its bar's lines and
@@ -109,8 +114,19 @@ ginit:  lda #$30
         bpl :-
         lda vcount
         sta vlastg
+        ldx #SININ-1               ; the sound chip: all quiet, tone 2 the
+:       lda SINI,x                 ; crash noise's clock
+        jsr psg
+        dex
+        bpl :-
+        lda #$FF
+        sta sctl
+        sta satt
         jsr spawn
         jmp gout
+SINI:   .byte $18, $C0|SCRN & 15   ; (written last first) tone 2: SCRN
+        .byte $FF, $DF, $BF, $9F   ; the four channels silent
+SININ   = * - SINI
 
 ; Screen A's top: the map (MAPI) at columns 48..63, lines 0..63; the labels.
 gscr:   sta gt4
@@ -252,6 +268,7 @@ spawn:  lda #0
 ; Before projecting: the keys; a step for each two vertical syncs since the
 ; last frame (at most 6); then the camera and the ship for LAND and bank 6.
 gstep:  jsr keys
+        jsr snd                    ; (last frame's thrust or crash)
         lda vcount
         sec
         sbc vlastg
@@ -400,6 +417,55 @@ keys:   lda #0
         eor #1
         sta fpson
 :       rts
+
+; ---------------------------------------------------------------- sound
+; Zarch's two (Lander has none): the engine a low white-noise roar while
+; thrusting (hover quieter), the crash a deeper rumble dying away.  The noise
+; channel only, the SN76489 written directly (through the system VIA's port A)
+; and only when what it should play changes: nothing most frames.
+snd:    lda ctim
+        beq @t
+        lda #CRASHT                ; crashed: SNCR, louder the newer
+        sec
+        sbc ctim
+        lsr a
+        lsr a
+        tax
+        lda #SNCR
+        bne @c
+@t:     ldx #15                    ; (silent)
+        lda thr
+        beq @v
+        ldx #SATF                  ; full thrust
+        lsr a
+        bcs :+
+        ldx #SATH                  ; hover
+:       lda #SNTH
+@c:     cmp sctl
+        beq @v
+        sta sctl
+        jsr psg
+@v:     txa                        ; the noise channel's attenuation
+        ora #$F0
+        cmp satt
+        beq :+
+        sta satt
+        jmp psg
+:       rts
+; A to the sound chip (X kept).
+psg:    sei
+        ldy #$FF
+        sty SVIA_DDRA
+        sta SVIA_ORA_NH
+        lda #0                     ; (the latch's 0: the chip's write enable, low)
+        sta SVIA_ORB
+        ldy #3                     ; (8us)
+:       dey
+        bne :-
+        lda #8
+        sta SVIA_ORB
+        cli
+        rts
 
 ; ---------------------------------------------------------------- a step
 step:   lda gkb                     ; the virtual mouse
@@ -1269,6 +1335,8 @@ gvz:     .res 2
 su:     .res 2                     ; (units' height, 8.8)
 fuel:   .res 2
 fkey:   .byte 0                    ; (F held last time)
+sctl:   .byte $FF                  ; (the noise channel as last written)
+satt:   .byte $FF
 nland:  .byte 0                    ; (BCD)
 ncrash: .byte 0
 vlastg: .byte 0

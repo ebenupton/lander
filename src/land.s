@@ -63,6 +63,7 @@ ROMCOPY = $F4
 CRTC_IDX = $FE00
 CRTC_DAT = $FE01
 BANK    = 4                        ; sideways RAM: the tables
+FMIN    = 4                        ; vertical syncs a frame, at least (flip's)
 BANK3   = 6                        ; and the ship's (shipb.s: the keys too)
 B6_KEYS = $8000
 B6_SHIP = $8003
@@ -334,7 +335,12 @@ call5:  sta @j+1
         rts
 
 ; Show the screen just drawn (from the next frame), and draw the other.
-flip:   lda #12
+flip:   lda vcount                 ; (12.5 frames a second at most: four
+        sec                        ; vertical syncs since the last flip, the
+        sbc vlast                  ; game's step a frame)
+        cmp #FMIN
+        bcc flip
+        lda #12
         sta CRTC_IDX
         lda back
         beq :+

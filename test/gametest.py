@@ -91,7 +91,7 @@ class Game:
             v = [self.mpu.memory[a + i] for i in range(n)]
         return v
 
-    def frame(self, keys, vs=2):
+    def frame(self, keys, vs=4):
         self.held = {KEYS[k] for k in keys}
         m = self.mpu.memory
         m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255

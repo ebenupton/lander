@@ -1,10 +1,9 @@
 ; ============================================================================
 ; game.s -- the game (bank 5, from $A100; .included by land.s, segment B5GAME):
 ; Lander's flight over LAND's landscape.  ref/lander/NOTES.md has Lander's
-; model; this is it at a 12.5Hz step (each frame runs a step for every four
-; vertical syncs since the last: Lander's main loop is a step a frame, and on
-; the ARM2 Zarch's, the same engine, averaged 12.5 frames a second), scaled to
-; LAND's units.
+; model; this is it a step a frame, as Lander's main loop (the frame rate held
+; to 12.5 at most by LAND's flip: Zarch, the same engine, averaged 12.5 frames
+; a second on the ARM2), scaled to LAND's units.
 ;
 ; Controls: a virtual mouse (K or up, M or down: forward and back; Z or left,
 ; X or right: left and right), whose offset is the ship's target attitude as
@@ -97,7 +96,6 @@ ginit:  lda #$30
         sta ncrash
         sta gmx
         sta gmz
-        sta vacc
         lda #$FF
         sta mkl
         sta mkl+1
@@ -114,8 +112,6 @@ ginit:  lda #$30
 :       sta plife,x
         dex
         bpl :-
-        lda vcount
-        sta vlastg
         ldx #SININ-1               ; the sound chip: all quiet, tone 2 the
 :       lda SINI,x                 ; crash noise's clock
         jsr psg
@@ -267,32 +263,12 @@ spawn:  lda #0
         rts
 
 ; ---------------------------------------------------------------- step
-; Before projecting: the keys; a step for each four vertical syncs since the
-; last frame (at most 6); then the camera and the ship for LAND and bank 6.
+; Before projecting: the keys; a step (one a frame, as Lander's main loop: LAND's
+; flip holds the frame rate to 12.5 at most); then the camera and the ship for
+; LAND and bank 6.
 gstep:  jsr keys
         jsr snd                    ; (last frame's thrust or crash)
-        lda vcount
-        sec
-        sbc vlastg
-        clc
-        adc vacc
-        ldx vcount
-        stx vlastg
-        tax
-        and #3
-        sta vacc
-        txa
-        lsr a
-        lsr a
-        cmp #7
-        bcc :+
-        lda #6
-:       sta nstep
-        tay                        ; (none due: Z)
-        beq gout
-:       jsr step
-        dec nstep
-        bne :-
+        jsr step
         ; fall into gout
 ; The camera from the ship: x less 128 (1/256 tiles), z less 15 tiles; CAME;
 ; the ship's place on the screen.
@@ -1394,9 +1370,6 @@ sctl:   .byte $FF                  ; (the noise channel as last written)
 satt:   .byte $FF
 nland:  .byte 0                    ; (BCD)
 ncrash: .byte 0
-vlastg: .byte 0
-vacc:   .byte 0
-nstep:  .byte 0
 rnd:    .byte 0
 scrg:   .byte 0
 pnext:  .byte 0

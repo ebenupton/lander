@@ -126,7 +126,7 @@ def main():
         scr = 0x3000 if m[lab['back']] == 0 else 0x5800
         e = int(rng.integers(0, L.EMAX + 1)) if cam and rng.integers(2) else 0
         m[0x07D6] = e                                # (CAME)
-        m[lab['vcount']] = (m[lab['vflip']] + 1) & 255     # (a vertical sync since the flip)
+        m[lab['vcount']] = (m[lab['vflip']] + 4) & 255     # (flip's four vertical syncs since the last)
         for r in ('project', 'strips'):
             cyc[r].append(call(mpu, lab[r]))
         if ship:

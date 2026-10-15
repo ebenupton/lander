@@ -1116,8 +1116,7 @@ t_seg:  stx tj
         beq t_dx0
         sta terr                   ; dx
         lda BY+1,x                 ; (tyv: BY,x already, every way here)
-        sec
-        sbc BY,x
+        sbc BY,x                   ; (C set: dx > 0, the row's x non-decreasing)
         beq t_nx                   ; (level: the run pending goes on)
         ldy #$E6                   ; INC zp
         bcs :+

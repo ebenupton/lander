@@ -906,28 +906,23 @@ flrc:   tax
 
 ; The strip's points (TX..BY) and boxes (CE, CO), its top row's line (the
 ; last strip's bottom row's, widened, or the sky's) and its bottom row's.
-setup:  ldx #0                     ; the near strip: the ground below it too
-        stx BCL                    ; (bclip's: a bottom row's point past YGND)
-        lda ns
-        clc
-        adc #1
-        cmp nr
+setup:  lda #0                     ; the near strip: the ground below it too
+        sta BCL                    ; (bclip's: a bottom row's point past YGND)
+        sta rec                    ; (a land strip: record its lines, below)
+        tax
+        ldy ns
+        iny
+        cpy nr
         bne :+
         dex
 :       stx last
-        ldx #0                     ; a land strip: record its lines
-        lda ns
-        beq :+
-        cmp nr
-        beq :+
-        dex
-:       stx rec
         ; the points and the boxes: a land strip's top row ns-1, bottom row ns,
         ; boxes CLE + 16 * (ns - 1) + box - 1 (CE, CO np: zeroed below)
         lda ns
         beq su_r                     ; (A = 0: row 0)
         cmp nr
         beq su_g
+        dec rec                    ; ($FF: a land strip)
         asl a                      ; (C clear: ns < 16)
         asl a
         asl a

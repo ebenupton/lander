@@ -1,8 +1,10 @@
 ; ============================================================================
 ; game.s -- the game (bank 5, from $A100; .included by land.s, segment B5GAME):
 ; Lander's flight over LAND's landscape.  ref/lander/NOTES.md has Lander's
-; model; this is it at a 25Hz step (each frame runs a step for every two
-; vertical syncs since the last), scaled to LAND's units.
+; model; this is it at a 12.5Hz step (each frame runs a step for every four
+; vertical syncs since the last: Lander's main loop is a step a frame, and on
+; the ARM2 Zarch's, the same engine, averaged 12.5 frames a second), scaled to
+; LAND's units.
 ;
 ; Controls: a virtual mouse (K or up, M or down: forward and back; Z or left,
 ; X or right: left and right), whose offset is the ship's target attitude as
@@ -52,7 +54,7 @@ SVIA_ORB = $FE40
 SVIA_DDRA = $FE43
 SVIA_ORA_NH = $FE4F
 
-MSTEP   = 2                        ; the virtual mouse: a step a key a game step, to
+MSTEP   = 4                        ; the virtual mouse: a step a key a game step, to
 MMAX    = 63                       ; at most this either way
 GRAV    = 192                      ; Lander's gravity (&30000: 0.0117 tiles a step^2)
 THRS    = 3                        ; full thrust: THX.. << THRS (1016: 0.062, Lander's)
@@ -265,7 +267,7 @@ spawn:  lda #0
         rts
 
 ; ---------------------------------------------------------------- step
-; Before projecting: the keys; a step for each two vertical syncs since the
+; Before projecting: the keys; a step for each four vertical syncs since the
 ; last frame (at most 6); then the camera and the ship for LAND and bank 6.
 gstep:  jsr keys
         jsr snd                    ; (last frame's thrust or crash)
@@ -277,14 +279,16 @@ gstep:  jsr keys
         ldx vcount
         stx vlastg
         tax
-        and #1
+        and #3
         sta vacc
         txa
+        lsr a
         lsr a
         cmp #7
         bcc :+
         lda #6
 :       sta nstep
+        tay                        ; (none due: Z)
         beq gout
 :       jsr step
         dec nstep

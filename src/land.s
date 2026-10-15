@@ -1505,6 +1505,7 @@ rg_rz:    cmp #1
         sta HI,x                   ; leaning right: xt .. xb-1
         sbc TX,x                   ; (C set)
         sta dva                    ; (a)
+        tay                        ; (rfastr's)
         lda TX,x
         sta LO,x
         eor #$FF                   ; RTP = alloc - LO - 1
@@ -1526,6 +1527,7 @@ rg_lft:   sta LO,x                   ; leaning left: xb .. xt-1
         sta HI,x
         sbc BX,x
         sta dva                    ; (a)
+        tay                        ; (rfastl's)
         jmp rfastl                 ; (bank 4: a <= RFA, D < 16; else back,
 rg_rdr:   RDIV rg_rsl                  ; ra2 = 2a)
 rg_rst:   RSET                       ; (C clear after)
@@ -3351,8 +3353,7 @@ oswblk: .res 9
 ; (alloc),k), k < a; the code entered at the a-1'th pixel (DUFR, DUFL by a).
 ; Else back to the division (ra2 = 2a).  (rungs': X the rung, dva = a.)
         .segment "B4C"
-rfastr: ldy dva
-        cpy #RFA+1
+rfastr: cpy #RFA+1                  ; (Y: a, rungs')
         bcs @sl
         lda TY,x
         sta rrem                   ; (yt)
@@ -3370,8 +3371,7 @@ rfastr: ldy dva
         asl a
         sta ra2
         jmp rg_rdr
-rfastl: ldy dva
-        cpy #RFA+1
+rfastl: cpy #RFA+1                  ; (Y: a, rungs')
         bcs @sl
         lda TY,x
         sta rrem

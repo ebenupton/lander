@@ -2281,6 +2281,14 @@ fs_h:   lda LAHSB0,y               ; (sethalf: the screen and half's)
         lsr a                      ; (by its parity: fl_e, fl_o)
         bcc fl_e
         bcs fl_o
+fwx_e:  lda BE,x                   ; fwe >= 8: to the row's end, then fw_c
+        sta (zp_),y
+        iny
+fwx_o:  lda BO,x
+        sta (zp_),y
+        iny
+        cpy #8
+        bne fwx_e
 fw_c:   lda zp_+1                  ; the next row (C set): + 2
         adc #1
         sta zp_+1
@@ -2292,7 +2300,7 @@ fw_c:   lda zp_+1                  ; the next row (C set): + 2
         sbc #7                     ; (C clear) - 8
         sta fwe
         beq fn_e
-fw_e:   lda BE,x                   ; an even line
+fw_e:   lda BE,x                   ; an even line (fwe < 8: within the row)
         sta (zp_),y                ; (the row's line Y)
         iny
         cpy fwe
@@ -2300,8 +2308,6 @@ fw_e:   lda BE,x                   ; an even line
 fw_o:   lda BO,x                   ; an odd line
         sta (zp_),y
         iny
-        cpy #8
-        beq fw_c                   ; (the row's end)
         cpy fwe
         bne fw_e
 fn_e:                              ; Y even
@@ -2315,8 +2321,10 @@ fl_e:   lda $FFFF,x                ; the transition's line, t (operand: fs_c's)
         sta fwe
         cpy fwe
         bcs fn_e                   ; (at or above Y: bpos only)
+        cmp #8
+        bcc fw_e                   ; (walked, within the row)
         cmp #8+FSRJ
-        bcc fw_e                   ; (walked, crossing a row at most)
+        bcc fwx_e                  ; (walked, crossing a row at most)
         bcs fr
 fn_o:                              ; Y odd
 fst_o:  inx                        ; (or DEX: fs_new)
@@ -2329,8 +2337,10 @@ fl_o:   lda $FFFF,x
         sta fwe
         cpy fwe
         bcs fn_o
-        cmp #8+FSRJ
+        cmp #8
         bcc fw_o
+        cmp #8+FSRJ
+        bcc fwx_o
 fr:     stx bpos                   ; (C set) lines Y .. t-1, a run
         adc rsm
         sta fwu                    ; t

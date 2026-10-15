@@ -100,6 +100,7 @@ class Game:
         self.call(self.lab['call6'])
         c += self.call(self.lab['project'])
         c += self.call(self.lab['strips'])
+        c += self.call5(0x09)
         if m[0x07DF]:
             self.mpu.a = 0x03
             c += self.call(self.lab['call6'])

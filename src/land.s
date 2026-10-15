@@ -70,6 +70,7 @@ B6_SHIP = $8003
 G_INIT  = $A100                    ; bank 5: the game (game.s)
 G_STEP  = $A103
 G_POST  = $A106
+G_PRE   = $A109
 BANK7   = 7                        ; and the projection (project's)
 BANK2   = 5                        ; and the tiles' colours (project's, a moment)
 ; (banks 4..7 are logical: each is the socket BANKMAP holds, LANDS's find_ram's)
@@ -314,11 +315,13 @@ loop:   lda #<G_STEP               ; the game: keys, flight, the camera
         jsr call6
         jsr project
         jsr strips                 ; (waiting for the flip before drawing)
+        lda #<G_PRE                ; the dots beyond the ship (in z)
+        jsr call5
         lda GSHV                   ; the ship (not while crashed)
         beq :+
         lda #<B6_SHIP
         jsr call6
-:       lda #<G_POST               ; the dots, the map, the status
+:       lda #<G_POST               ; the other dots, the map, the status
         jsr call5
         jsr readout
         jsr flip

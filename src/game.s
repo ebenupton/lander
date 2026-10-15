@@ -5,10 +5,9 @@
 ; to 12.5 at most by LAND's flip: Zarch, the same engine, averaged 12.5 frames
 ; a second on the ARM2), scaled to LAND's units.
 ;
-; Controls: a virtual mouse (K or up, M or down: forward and back; Z or left,
-; X or right: left and right), whose offset is the ship's target attitude as
-; Lander's mouse: its distance the pitch, its direction the way the thrust
-; pushes; SPACE full thrust, SHIFT hover.  Fuel burns while thrusting; landing
+; Controls: the attitude as Lander's, pitch then yaw: K or up tips the nose
+; down, M or down back towards flat (and no further: the ship's tables have no
+; nose up); Z or left, X or right turn it; SPACE full thrust, SHIFT hover.  Fuel burns while thrusting; landing
 ; slowly on the pad (tiles 0..PADN-1 in x and z; Lander's 8) refuels.  Touching the
 ; ground anywhere else, or the pad too fast, crashes: a burst of dots, then the
 ; ship back on the pad.
@@ -55,28 +54,32 @@ SVIA_ORB = $FE40
 SVIA_DDRA = $FE43
 SVIA_ORA_NH = $FE4F
 
-MSTEP   = 4                        ; the virtual mouse: a step a key a game step, to
-MMAX    = 63                       ; at most this either way
-GRAV    = 192                      ; Lander's gravity (&30000: 0.0117 tiles a step^2)
+; (Lander's figures are a step at 12.5 frames a second, Zarch's ARM2 rate;
+; here a step is a frame at 10: each step is 1.25 of Lander's, velocities
+; kept in its units: positions move 1.25 v, accelerations and drag 1.25 as
+; much, fuel likewise, times 0.8 as many steps.)
+MSTEP   = 5                        ; the attitude: a step a key a game step
+GRAV    = 240                      ; Lander's gravity (&30000: 0.0117 tiles a step^2), 1.25
 THRS    = 3                        ; full thrust: THX.. << THRS (1016: 0.062, Lander's)
-HOVS    = 1                        ; hover: << HOVS (Lander's quarter)
+HOVS    = 1                        ; hover: << HOVS (Lander's quarter); each 1.25 (tadd)
 LANDV   = 2048                     ; Lander's LANDING_SPEED: |gvx| + |gvy| + |gvz| below
-UNDER   = 6                        ; Lander's UNDERCARRIAGE_Y (0.39 tiles), height units
+UNDER   = 4                        ; Lander's UNDERCARRIAGE_Y (0.39 tiles) at the ship's
+                                   ; size here (14 / R(ZSHIP) of Lander's): height units
 ENGH    = 160                      ; the engines cut out from here up, height units
                                    ; (10 tiles: the land all below the screen by then)
 YTOP    = 240                      ; and a ceiling (su's byte: the climb coasts on)
 KOFF    = 79                       ; the camera this far above the ship, or more
 FUEL0   = 3413                     ; Lander's fuel: at the start; most (refuelling)
 FUELMX  = 5120
-REFUEL  = 32                       ; on the pad, a step
-CRASHT  = 50                       ; steps the crash lasts
+REFUEL  = 40                       ; on the pad, a step
+CRASHT  = 40                       ; steps the crash lasts
 NPART   = 10                       ; dots
 SNTH    = $E6                      ; the engine: white noise, the low rate
 SATF    = 2                        ; its attenuation: full thrust, hover
 SATH    = 7
 SNCR    = $E7                      ; the crash: white noise at tone 2's rate,
 SCRN    = $180                     ; this (4MHz / 32 / SCRN: 650 shifts a second)
-PGRAV   = 48                       ; a dot's gravity (height units / 256 a step^2)
+PGRAV   = 60                       ; a dot's gravity (height units / 256 a step^2)
 PADX    = PADN/2                   ; the pad's middle: the start
 FUELR   = 0                        ; FUEL's row (lines 0..7), its bar's lines and
 FBL     = 2                        ; columns (bytes 10..29: 80 pixels, fuel >> 6)
@@ -87,6 +90,7 @@ FBC     = 10
         jmp ginit                  ; G_INIT
         jmp gstep                  ; G_STEP
         jmp gpost                  ; G_POST
+        jmp gpre                   ; G_PRE
 
 ; ---------------------------------------------------------------- init
 ; (after LAND's init: the screens black) The map and labels on both screens;
@@ -232,8 +236,9 @@ putc:   lda gt3                    ; 16 bytes: (g1) to row gt2, column gt3
         rts
 
 ; The ship on the pad, still, landed, fuelled.
-spawn:  lda #0
-        sta gmx                    ; (the mouse back in the middle)
+spawn:  lda #24*8                   ; (facing away, level)
+        sta gmx
+        lda #0
         sta gmz
         sta sx
         sta sx+1
@@ -451,26 +456,39 @@ psg:    sei
         rts
 
 ; ---------------------------------------------------------------- a step
-step:   lda gkb                     ; the virtual mouse
-        lsr a
-        bcc :+
-        ldx #gmx-gmx
-        jsr mdec
+step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 a
+        lsr a                      ; direction, round and round); up, down the
+        bcc :+                     ; pitch (gmz: 8 a step, flat to fully nose
+        lda gmx                    ; down, held there either end)
+        sec
+        sbc #MSTEP
+        sta gmx
 :       lda gkb
         and #2
         beq :+
-        ldx #gmx-gmx
-        jsr minc
+        lda gmx
+        clc
+        adc #MSTEP
+        sta gmx
 :       lda gkb
         and #4
-        beq :+
-        ldx #gmz-gmx
-        jsr minc
+        beq :++
+        lda gmz
+        clc
+        adc #MSTEP
+        cmp #8*NPITCH
+        bcc :+
+        lda #8*NPITCH-1
+:       sta gmz
 :       lda gkb
         and #8
-        beq :+
-        ldx #gmz-gmx
-        jsr mdec
+        beq :++
+        lda gmz
+        sec
+        sbc #MSTEP
+        bcs :+
+        lda #0
+:       sta gmz
 :       lda ctim                   ; crashed: the dots only, then the pad
         beq @fly
         dec ctim
@@ -513,25 +531,44 @@ step:   lda gkb                     ; the virtual mouse
         ror gt0
         dey
         bne :-
-        lda gvx,x
+        jsr @ds                    ; (v >> 6, then v >> 8: 1.25 v >> 6)
+        lda gt1
+        cmp #$80
+        ror gt1
+        ror gt0
+        lda gt1
+        cmp #$80
+        ror gt1
+        ror gt0
+        jsr @ds
+        inx
+        inx
+        cpx #6
+        bne @dg
+        beq @th
+@ds:    lda gvx,x
         sec
         sbc gt0
         sta gvx,x
         lda gvx+1,x
         sbc gt1
         sta gvx+1,x
-        inx
-        inx
-        cpx #6
-        bne @dg
+        rts
+@th:
         lda thr                    ; thrust: THX, THY, THZ for (gp, gk), << THRS
-        beq @nt                    ; (full) or HOVS (hover), fuel 4 or 2 a step
-        lsr a
+        beq @nt                    ; (full) or HOVS (hover), 1.25 (tadd); fuel 5
+        lsr a                      ; or 2.5 a step
         lda #THRS
-        ldy #4
-        bcs :+
-        lda #HOVS
+        ldy #5
+        bcs :++
+        lda hpar
+        eor #1
+        sta hpar
         ldy #2
+        lsr a
+        bcc :+
+        iny
+:       lda #HOVS
 :       sta gt5
         sty gt4
         lda fuel
@@ -555,14 +592,14 @@ step:   lda gkb                     ; the virtual mouse
         tay
         lda THX,y
         ldx #gvx-gvx
-        jsr vadd
+        jsr tadd
         lda THZ,y
         ldx #gvz-gvx
-        jsr vadd
+        jsr tadd
         ldy gp
         lda THY,y
         ldx #gvy-gvx
-        jsr vadd
+        jsr tadd
         jsr emit
 @nt:    lda landed                 ; landed: still, refuelling
         beq @mv
@@ -685,91 +722,40 @@ step:   lda gkb                     ; the virtual mouse
         sta gvy+1
 :       jmp parts
 
-; The virtual mouse (gmx or gmz: X) a step either way, within MMAX.
-minc:   lda gmx,x
-        clc
-        adc #MSTEP
-        cmp #MMAX+1
-        bmi :+
-        lda #MMAX
-:       sta gmx,x
-        rts
-mdec:   lda gmx,x
-        sec
-        sbc #MSTEP
-        cmp #<-MMAX
-        bpl :+
-        lda #<-MMAX
-:       sta gmx,x
+
+; The ship's attitude: pitch then yaw (Lander's), straight from the keys'.
+attit:  lda gmz
+        lsr a
+        lsr a
+        lsr a
+        sta gp
+        lda gmx
+        lsr a
+        lsr a
+        lsr a
+        sta gk
         rts
 
-; The ship's attitude towards the mouse's: Lander's halving (at least a step).
-attit:  lda gmx                     ; |gmx| >> 2, |gmz| >> 2: ATQ, MAGT's index
-        bpl :+
-        eor #$FF
-        clc
-        adc #1
-:       lsr a
-        lsr a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta gt0
-        lda gmz
-        bpl :+
-        eor #$FF
-        clc
-        adc #1
-:       lsr a
-        lsr a
-        ora gt0
-        tay
-        lda MAGT,y                 ; the pitch: a step towards
-        cmp gp
-        beq :++
-        bcc :+
-        inc gp
-        bcs :++
-:       dec gp
-:       lda ATQ,y                  ; the angle (32nds, from +x towards +z):
-        ldx gmx                     ; folded by the quadrant
-        bpl :+
-        eor #$FF                   ; (gmx < 0: 16 - a)
+; v (X) += 1.25 (A << gt5): A << gt5, then A << (gt5 - 2) (gt5 1: A asr 1).
+; Y kept.
+tadd:   sta tt0
+        jsr vadd
+        lda gt5
+        sta tt1
         sec
-        adc #16
-:       ldx gmz
-        bpl :+
-        eor #$FF                   ; (gmz < 0: - that)
-        clc
-        adc #1
-:       eor #$FF                   ; the direction: - angle (k 8 faces -z)
-        clc
-        adc #1
-        and #31
-        sec                        ; the shortest way, half of it (at least 1)
-        sbc gk
-        and #31
-        beq @d
-        cmp #16
-        bcs @n
-        lsr a
-        adc #0
-        clc
-        adc gk
-        and #31
-        sta gk
+        sbc #2
+        bcs :+
+        lda tt0                    ; (A asr 1)
+        cmp #$80
+        ror a
+        sta tt0
+        lda #0
+:       sta gt5
+        lda tt0
+        jsr vadd
+        lda tt1
+        sta gt5
         rts
-@n:     eor #31                    ; (32 - d - 1)
-        lsr a
-        adc #0
-        sta gt0
-        lda gk
-        sec
-        sbc gt0
-        and #31
-        sta gk
-@d:     rts
 
 ; v (X: gvx, gvy or gvz's offset) += A (signed) << gt5.
 vadd:   sta gt0
@@ -796,7 +782,8 @@ vadd:   sta gt0
         sta gvx+1,x
         rts
 
-; Position (Y: sx, sy or sz's offset) += 4 v (X: its v's offset), 24 bits.
+; Position (Y: sx, sy or sz's offset) += 5 v (X: its v's offset), 24 bits
+; (4 v Lander's step, 1.25 of it a step here).
 pmove:  lda gvx,x
         sta gt0
         lda gvx+1,x
@@ -806,12 +793,23 @@ pmove:  lda gvx,x
         bpl :+
         lda #$FF
 :       sta gt2
+        sta gt3
         asl gt0
         rol gt1
         rol gt2
         asl gt0
         rol gt1
         rol gt2
+        lda gt0                    ; + v
+        clc
+        adc gvx,x
+        sta gt0
+        lda gt1
+        adc gvx+1,x
+        sta gt1
+        lda gt2
+        adc gt3
+        sta gt2
         lda sx,y
         clc
         adc gt0
@@ -876,7 +874,7 @@ emit:   ldx pnext
         jsr dot0
         jsr rand
         and #7
-        adc #8
+        adc #6                     ; (6..13 steps)
         sta plife,x
         lda gp                     ; the exhaust: - thrust / 2 (x, z), - 8 thrust (y)
         asl a
@@ -1001,7 +999,7 @@ dot0:   lda sx+1
         sta ppy,x
         lda su+1
         sec
-        sbc #6
+        sbc #UNDER
         sta ppyh,x
         rts
 
@@ -1010,7 +1008,7 @@ burst:  ldx #NPART-1
 @b:     jsr dot0
         jsr rand
         and #15
-        adc #20
+        adc #16                    ; (16..31 steps)
         sta plife,x
         jsr rand
         and #127
@@ -1041,26 +1039,35 @@ parts:  ldx #NPART-1
 @p:     lda plife,x
         beq @n
         dec plife,x
+        lda pvx,x                  ; (each += 1.25 v)
+        ldy pvxh,x
+        jsr q5
         lda ppx,x
         clc
-        adc pvx,x
+        adc gt0
         sta ppx,x
         lda ppxh,x
-        adc pvxh,x
+        adc gt1
         sta ppxh,x
+        lda pvz,x
+        ldy pvzh,x
+        jsr q5
         lda ppz,x
         clc
-        adc pvz,x
+        adc gt0
         sta ppz,x
         lda ppzh,x
-        adc pvzh,x
+        adc gt1
         sta ppzh,x
+        lda pvy,x
+        ldy pvyh,x
+        jsr q5
         lda ppy,x
         clc
-        adc pvy,x
+        adc gt0
         sta ppy,x
         lda ppyh,x
-        adc pvyh,x
+        adc gt1
         sta ppyh,x
         lda pvy,x
         sec
@@ -1072,10 +1079,39 @@ parts:  ldx #NPART-1
         bpl @p
         rts
 
+; gt1:gt0 = 1.25 (Y:A), signed.  X kept.
+q5:     sta gt2
+        sty gt3
+        sta gt0
+        sty gt1
+        ldy #2
+:       lda gt1
+        cmp #$80
+        ror gt1
+        ror gt0
+        dey
+        bne :-
+        lda gt0
+        clc
+        adc gt2
+        sta gt0
+        lda gt1
+        adc gt3
+        sta gt1
+        rts
+
 ; ---------------------------------------------------------------- post
 ; After the ship: the dots (each a pixel, the column's TOPS, BOTS widened over
 ; it so the strips take it off), the map's dot, the status.
-gpost:  lda scrb
+gpre:   jsr dset                   ; (before the ship) the dots beyond it in z
+        lda #0
+        beq dots
+gpost:  jsr dset                   ; (after it) the rest; the map's dot, the
+        lda #$80                   ; status
+        jsr dots
+        jsr marker
+        jmp status
+dset:   lda scrb
         sta scrg
         ldx back                   ; this screen's TOPS, BOTS
         ldy sidx,x
@@ -1087,15 +1123,22 @@ gpost:  lda scrb
         sta bsg
         lda setBh,y
         sta bsg+1
-        jsr units
+        jmp units
+; The live dots beyond the ship in z (A 0) or not (A $80).
+dots:   sta dpass
         ldx #NPART-1
 @d:     lda plife,x
         beq @n
+        lda ppz,x                  ; (its z less the ship's: its sign, dpass's)
+        cmp sz+1
+        lda ppzh,x
+        sbc sz+2
+        eor dpass
+        bmi @n
         jsr pdraw
 @n:     dex
         bpl @d
-        jsr marker
-        jmp status
+        rts
 
 ; Dot X: x 128 + (its x less the ship's) * 16, y the ship's + its height under
 ; the ship's (a unit a line) - its z beyond the ship's * 4.
@@ -1366,8 +1409,8 @@ BARB:   .byte $00, $88, $CC, $EE, $FF
 PIXG:   .byte $88, $44, $22, $11   ; a pixel's bits (LAND's PIXM is in bank 4)
 
 ; ---------------------------------------------------------------- state
-gmx:     .byte 0                    ; the virtual mouse (signed)
-gmz:     .byte 0
+gmx:     .byte 0                    ; the yaw, 8 a direction (wrapping)
+gmz:     .byte 0                    ; the pitch, 8 a step (0 .. 8 NPITCH - 1)
 gkb:     .byte 0                    ; the keys held
 gk:     .byte 0                    ; the ship's direction (0..31), pitch (0..7)
 gp:     .byte 0
@@ -1383,6 +1426,10 @@ gvz:     .res 2
 su:     .res 2                     ; (units' height, 8.8)
 fuel:   .res 2
 fkey:   .byte 0                    ; (F held last time)
+hpar:   .byte 0                    ; (hover's half unit of fuel)
+dpass:  .byte 0                    ; (dots': $80 the near ones)
+tt0:    .byte 0                    ; (tadd's)
+tt1:    .byte 0
 sctl:   .byte $FF                  ; (the noise channel as last written)
 satt:   .byte $FF
 nland:  .byte 0                    ; (BCD)

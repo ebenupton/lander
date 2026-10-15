@@ -1114,15 +1114,17 @@ t_next: ldx tj
 t_nx:   inx                        ; (X = tj already)
         cpx np1
         bcs t_end
-t_seg:  stx tj
+t_seg:  lda BY+1,x                 ; (tyv: BY,x already, every way here)
+        cmp BY,x
+        beq t_nx                   ; (level, or a level margin: the run pending goes on)
+        stx tj
         lda BX+1,x                 ; (tx1: t_fl0's, for t_old and t_steep)
         sec
         sbc BX,x
         beq t_dx0
         sta terr                   ; dx
-        lda BY+1,x                 ; (tyv: BY,x already, every way here)
+        lda BY+1,x
         sbc BY,x                   ; (C set: dx > 0, the row's x non-decreasing)
-        beq t_nx                   ; (level: the run pending goes on)
         ldy #$E6                   ; INC zp
         bcs :+
         eor #$FF                   ; rising: |dy|, DEC
@@ -1361,7 +1363,6 @@ divs:   lda dva
 :       sty rq
         sta rrem
         jmp dv2
-        .res 3                     ; (keeps the layout: DRT's 2r saved 3 bytes)
 divt:   ldy dva                    ; (D div a, D mod a: q2, and q, rem, r2 from them)
         lda DVH,y
         sta @q+2
@@ -1381,7 +1382,6 @@ divt:   ldy dva                    ; (D div a, D mod a: q2, and q, rem, r2 from 
 :       lsr a
         sta rrem
         rts
-        .res 3                     ; (keeps the layout)
 dv2:    asl a                      ; 2D = 2q (2a) + 2 rem
         sta rr2
         lda rq

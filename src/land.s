@@ -1487,8 +1487,8 @@ rg_r:     stx tj
         bne :+
         sta LO,x                   ; upright: none (its sentinel only)
         sta HI,x
-        eor #$FF                   ; RTP = alloc - LO
-        sec
+        eor #$FF                   ; RTP = alloc - LO - 1
+        clc
         adc alloc
         sta RTPL,x
         lda alloc+1
@@ -1511,8 +1511,8 @@ rg_rz:    cmp #1
         sta dva                    ; (a)
         lda TX,x
         sta LO,x
-        eor #$FF                   ; RTP = alloc - LO
-        sec
+        eor #$FF                   ; RTP = alloc - LO - 1
+        clc
         adc alloc
         sta RTPL,x
         lda alloc+1
@@ -1520,8 +1520,8 @@ rg_rz:    cmp #1
         sta RTPH,x
         jmp rfastr                 ; (bank 4: a <= RFA, D < 16; else back,
 rg_lft:   sta LO,x                   ; leaning left: xb .. xt-1
-        eor #$FF                   ; RTP = alloc - LO
-        sec
+        eor #$FF                   ; RTP = alloc - LO - 1
+        clc
         adc alloc
         sta RTPL,x
         lda alloc+1
@@ -2459,7 +2459,7 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         cmp TX,x
         bcs fs_nr
         lda RTPL,x                 ; leaning left: x4 + bpos - 1, bpos - 1 after
-        sbc #1                     ; (C clear: - 2)
+        sbc #0                     ; (C clear: - 2)
         sta rbl
         lda RTPH,x
         sbc #0
@@ -2475,10 +2475,8 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         sec
         bcs fs_nj
 fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
-        sbc #1                     ; changes, bpos + 1 after (- 1; C set)
-        sta rbl
+        sta rbl                    ; changes, bpos + 1 after (- 1; C set)
         lda RTPH,x
-        sbc #0
         sta rbh
         lda #OP_INX
         cmp fst_e
@@ -2679,7 +2677,7 @@ sp_ln:  sty bpos
 ; A, ended by $FF; A: LM of its position in the column at the top (p0).
 mktr:   sta tj
         lda RTPL,x                 ; (rtp: RTP + x4, by position)
-        clc
+        sec
         adc x4
         sta rtp
         lda RTPH,x
@@ -4080,6 +4078,7 @@ slow:   ldx #0
         sta rtp+1
         sty tmp
         ldy tx1
+        iny
         lda (rtp),y
         ldy tmp
         sta STL,y

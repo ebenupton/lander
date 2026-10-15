@@ -1174,9 +1174,8 @@ tv_h1:  lda TENH4+1,y
         txa
         sec
         sbc tcnt
-        tay
-        cpy #TNB+1
-        bcs t_fl1
+        tay                        ; (TNB = $80: N, Y > TNB, or $80, t_flo's alike)
+        bmi t_fl1
         lda TENL,y
         sta tf_j+1
 tf_h:   lda TENH4,y
@@ -1184,16 +1183,15 @@ tf_h:   lda TENH4,y
         ldy dva                    ; (Y: the runs left after this one)
         lda tyv
 tf_j:   jmp t_back
-        .res 5
+        .res 7
 t_one:  lda terr
         lsr a                      ; |dy| 1: the first run to x0 + ceil(dx / 2)
         adc BX,x
         tax
         sec
         sbc tcnt
-        tay
-        cpy #TNB+1
-        bcs t_fl1
+        tay                        ; (TNB = $80: N, Y > TNB, or $80, t_flo's alike)
+        bmi t_fl1
         lda TENL,y
         sta tf_j+1
 t1_h:   lda TENH4,y
@@ -1203,7 +1201,7 @@ t1_h:   lda TENH4,y
         jmp tf_j
 t_fl1:  ldy dva                    ; (longer)
         jmp t_flo
-        .res 2                     ; (the layout kept)
+        .res 4                     ; (the layout kept)
 t_fl0:  lda tyv                    ; the run pending to x0 (not including), and
         pha                        ; back (tyv kept, X = tj)
         ldx tj

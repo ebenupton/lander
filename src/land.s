@@ -2384,8 +2384,19 @@ fe_r:   lda BE,x                   ; the floor's run
         ldy flr1
         jmp run2                   ; (on to c_next)
 ff_d:   jmp c_np                   ; (c_next; s2v's: s2ov)
-fs_ee:  lda BE                     ; (fs_new's: the rung's two boxes' even
-        sta BE+1                   ; bytes alike)
+fs_new: lda CE-1,x                 ; (split's, s2v's: as fs_ns, a new rung)
+        sta BE+4
+        eor CE,x
+        bne fs_dif
+        beq fs_e0
+fs_s1:  lda CO-1,x                 ; (the evens alike: the odds too? one box)
+        cmp CO,x
+        bne fs_e0
+        jmp c_ld
+fs_e0:  stx lastri                 ; (the rung's two boxes' even bytes alike:
+        lda BE+4                   ; BE..BE+3 = BE+4)
+        sta BE
+        sta BE+1
         sta BE+2
         sta BE+3
         jmp fs_co
@@ -2395,20 +2406,14 @@ fs_oe:  lda BO                     ; (the odd alike)
         sta BO+3
         jmp fs_ln
 fs_ns:  lda CE-1,x                 ; (fsplit's, a new rung: its boxes the same, the
-        cmp CE,x                   ; column one box: c_ld's, V clear)
-        bne fs_new
-        lda CO-1,x
-        cmp CO,x
-        bne fs_new
-        jmp c_ld
-fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
-        lda CE-1,x                 ; 4 the left (Y: the two EORed)
-        sta BE+4
-        lda CE,x
-        sta BE
+        sta BE+4                   ; column one box: c_ld's, V clear)
+        eor CE,x
+        beq fs_s1
+fs_dif: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
+        tay                        ; 4 the left (Y: the two EORed)
         eor BE+4
-        beq fs_ee                  ; (the two boxes alike: BE+1..3 = BE)
-        tay
+        sta BE
+        tya
         and #$88
         eor BE
         sta BE+1

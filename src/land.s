@@ -2886,35 +2886,17 @@ bytes2: lda me
 
 LM:     .byte $00, $88, $CC, $EE, $FF
 
-; Lines X .. Y-1 (X < Y) of the column: ve on even lines, vo odd, through STAB
-; (STA line,Y / LDA vo or TXA), from line X's entry to an RTS planted at line
-; Y's (pp: put back by the next run).
-run:    lda EXLB,x
-        sta r_j+1
-r_eh2:  lda EXHB0,x                 ; (sethalf: the STAB's own)
-        sta r_j+2
-        ldx #0
-        lda #OP_STAY               ; the last back
-        sta (pp,x)
-        lda ENTL,y
-        sta pp
-r_eh1:  lda ENTB0,y
-        sta pp+1
-        lda #OP_RTS
-        sta (pp,x)
-        ldx ve                     ; (X: ve, for the odd lines' TXA)
-        txa
-        ldy coff
-r_j:    jmp $FFFF                  ; (its RTS returns from run)
-dummy:  .byte 0
-
 ; Lines X .. Y-1 (X < Y), as run, in two passes: the even lines (ve), then the
 ; odd (vo), each through its table for the screen and half (tools/landgen.py's,
 ; sethalf's pages: pr0, pp0, je; pr1, pp1, jo), from EIN, OIN + X to an RTS
 ; planted at EIN, OIN + Y (OIN = EIN - 1; rE, rO; pY: the line they are for,
 ; kept while the next run2's end is the same; put back by the next run2's that
 ; ends elsewhere, or sethalf).
-run2:   lda EINL,x
+run2:
+pX:     cpx #$FF                   ; (je, jo already X's)
+        beq pY
+        stx pX+1
+        lda EINL,x
         sta je+1
         lda EINL-1,x                ; (OIN)
         sta jo+1
@@ -2936,6 +2918,28 @@ pY_k:   lda ve
 je:     jsr $FFFF
         lda vo
 jo:     jmp $FFFF                  ; (its RTS returns from run2)
+
+; Lines X .. Y-1 (X < Y) of the column: ve on even lines, vo odd, through STAB
+; (STA line,Y / LDA vo or TXA), from line X's entry to an RTS planted at line
+; Y's (pp: put back by the next run).
+run:    lda EXLB,x
+        sta r_j+1
+r_eh2:  lda EXHB0,x                 ; (sethalf: the STAB's own)
+        sta r_j+2
+        ldx #0
+        lda #OP_STAY               ; the last back
+        sta (pp,x)
+        lda ENTL,y
+        sta pp
+r_eh1:  lda ENTB0,y
+        sta pp+1
+        lda #OP_RTS
+        sta (pp,x)
+        ldx ve                     ; (X: ve, for the odd lines' TXA)
+        txa
+        ldy coff
+r_j:    jmp $FFFF                  ; (its RTS returns from run)
+dummy:  .byte 0
 
 ; record's, c_rec's (a rung in the column): on to c_srx (c_coly's tests made,
 ; ri and Y kept), or the black above (rare) as record's.

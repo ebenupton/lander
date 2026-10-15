@@ -871,6 +871,27 @@ bclip:  lda BCL                    ; (setup's: a point past YGND seen)
 :       iny
         bne :--
         rts
+; c_coly's tests for rung X (ri): its HI, and its LO's byte column (x4 a
+; multiple of 4: LO <= x4 + 3 iff LO & $FC <= x4).
+rpatch: lda HI,x
+        sta c_hi+1
+        lda LO,x
+        and #$FC
+        sta c_lo+1
+        rts
+c_rix:
+        ldx ri
+        tya
+:       inx                        ; (the next rung)
+        cmp HI,x
+        bcs :-
+        stx ri
+        lda HI,x                   ; (rpatch, inline)
+        sta c_hi+1
+        lda LO,x
+        and #$FC
+        sta c_lo+1
+        jmp c_lo
 ; (c_lv's, for a strip whose bottom row bclip held: the floor's line after, at
 ; most YGND+1.)
 flrc:   tax
@@ -1715,8 +1736,9 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
 :       sta ph_lo+1
         lda xrp
         sta ph_hi+1
-        lda #0
-        sta ri
+        ldx #0
+        stx ri
+        jsr rpatch                 ; (c_coly's: rung 0's)
         lda #$FF                   ; (c_one's ve, vo: none this strip yet)
         sta c_vri+1
         lda xl
@@ -1804,6 +1826,8 @@ c_ri:   inx                        ; (the next rung)
         cmp HI,x
         bcs c_ri
         stx ri
+        jsr rpatch
+        tya
         jmp c_rr
 c_ld:   stx c_vri+1
         lda CE-1,x
@@ -1880,13 +1904,11 @@ c_xt:   tay
         sta coff
         beq c_nh
 c_coly:                            ; (V clear: the adc #4 above, or sethalf's
-        ldx ri                     ; last sbc) the rungs: past those wholly left
-        tya
-        cmp HI,x
+                                   ; last sbc) the rungs: past those wholly left
+c_hi:   cpy #0                     ; (rpatch's: rung ri's HI)
         bcs c_ri0
-c_rr0:  ora #3
-        cmp LO,x
-        bcs c_sp                   ; (LO <= x4 + 3: a rung in the column)
+c_lo:   cpy #0                     ; (rpatch's: its LO & $FC; LO <= x4 + 3,
+        bcs c_sp                   ; a rung in the column)
                                    ; one box: no vertex of either row inside it
                                    ; (rungs ri-1 and before: at or left of x4;
                                    ; ri on: right of x4 + 3), so each row
@@ -1944,11 +1966,7 @@ obz:    lda ROWB+3,y               ; the lowest
         dec flr
 :       stx flr1
         jmp o_rec
-c_ri0:  inx                        ; (the next rung)
-        cmp HI,x
-        bcs c_ri0
-        stx ri
-        jmp c_rr0
+c_ri0:  jmp c_rix                   ; (in reach)
 
 c_sp:                              ; a rung in the column: the top level?
 pt0:    lda ROWA,y

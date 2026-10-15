@@ -366,6 +366,7 @@ setback:
         sta scrb
         lda back
         asl a
+        sta sh_b+1                 ; (sethalf's: 2 * back)
         asl a
         adc #>STAB
         sta stb0
@@ -2206,18 +2207,13 @@ gn_d:   stx tj
 
 ; The column's half of the screen: A (0 left, 1 right).
 sethalf:
-        pha
-        clc
-        adc scrb
+sh_b:   ora #0                     ; t: the STAB (its ENTBt, EXHBt, LAHSBt):
+        tay                        ; 2 * back + half (setback's)
+        lda shs,y
         sta scrh
-        pla
-        asl a
-        adc stb0
+        lda sht,y
         sta stbh
-        sec                        ; t: the STAB (its ENTBt, EXHBt, LAHSBt)
-        sbc #>STAB
-        lsr a
-        tay
+        clv                        ; (c_coly's)
         lda enthl,y
         sta r_eh1+1
         lda enthh,y
@@ -2257,6 +2253,8 @@ sh_2:   sta TPO0*256,x
         sta np_h2+2
         sta rc_h+2
         rts
+shs:    .byte $30, $31, $58, $59   ; (scrb + half, by t)
+sht:    .byte >STAB, (>STAB)+2, (>STAB)+4, (>STAB)+6 ; (stb0 + 2 * half)
 tpe:    .byte TPE0, TPE1, TPE2, TPE3 ; (tools/landgen.py's)
 tpo:    .byte TPO0, TPO1, TPO2, TPO3
 exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3)

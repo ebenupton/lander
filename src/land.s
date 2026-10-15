@@ -144,6 +144,8 @@ OP_RTS  = $60
 OP_JMP  = $4C
 OP_INY  = $C8
 OP_DEY  = $88
+OP_INX  = $E8
+OP_DEX  = $CA
 
         .zeropage
 cxt:    .res 1                     ; the camera: tile and step (0-15), x and z
@@ -2153,107 +2155,105 @@ fs_nt:  jmp fs_new
 ; jumps here, back to c_next.)
 fsplit: cpx lastri
         bne fs_nt
-fs_c:   lda #0                     ; (C set) rtp = RTP + x4 (- 1 leaning left)
-rbl     = *-1                      ; (fs_new's: the rung's transitions, less 1
-        adc x4                     ; (2 leaning left), as operands)
-        sta rtp
+fs_c:   lda #0                     ; (C set) fl_e, fl_o's operands = RTP + x4
+rbl     = *-1                      ; (- 1 leaning left) (fs_new's: the rung's
+        adc x4                     ; transitions, less 1 (2 leaning left))
+        sta fl_e+1
+        sta fl_o+1
         lda #0
 rbh     = *-1
         adc #0
-        sta rtp+1                  ; (C clear)
+        sta fl_e+2
+        sta fl_o+2                 ; (C clear)
         lda TX,x                   ; bpos: TX - x4, clamped to 0..4
         sbc x4
-        tax                        ; (X reloaded below)
-        ldy CLMP1,x
-fs_w:   lda coff                   ; the walker's stores: the column's, X's row
-        sta f_wse+1
-        sta f_wso+1
-        ldx mx
-fs_h:   lda LAHSB0,x               ; (sethalf: the screen and half's)
-        sta f_wse+2
-        sta f_wso+2
-        lda RSMT,x
+        tay
+        ldx CLMP1,y
+fs_w:   lda coff                   ; the walker's stores: (zp_),y, the column's,
+        sta zp_                    ; Y's row
+        ldy mx
+fs_h:   lda LAHSB0,y               ; (sethalf: the screen and half's)
+        sta zp_+1
+        lda RSMT,y
         sta rsm                    ; (the row's first line - 1)
-        txa
+        tya
         and #7
-        tax                        ; X: the line in its row
+        tay                        ; Y: the line in its row
         lsr a                      ; (by its parity: fl_e, fl_o)
         bcc fl_e
         bcs fl_o
-fw_c:   lda f_wse+2                ; the next row (C set): + 2
+fw_c:   lda zp_+1                  ; the next row (C set): + 2
         adc #1
-        sta f_wse+2
-        sta f_wso+2
+        sta zp_+1
         lda rsm                    ; (C clear)
         adc #8
         sta rsm
-        ldx #0
+        ldy #0
         lda fwe
         sbc #7                     ; (C clear) - 8
         sta fwe
         beq fn_e
-fw_e:   lda BE,y                   ; an even line
-f_wse:  sta $FF00,x                ; (the row's line X: operand the row, coff)
-        inx
-        cpx fwe
+fw_e:   lda BE,x                   ; an even line
+        sta (zp_),y                ; (the row's line Y)
+        iny
+        cpy fwe
         beq fn_o
-fw_o:   lda BO,y                   ; an odd line
-f_wso:  sta $FF00,x
-        inx
-        cpx #8
+fw_o:   lda BO,x                   ; an odd line
+        sta (zp_),y
+        iny
+        cpy #8
         beq fw_c                   ; (the row's end)
-        cpx fwe
+        cpy fwe
         bne fw_e
-fn_e:                              ; X even
-fst_e:  iny                        ; (or DEY: fs_new)
-fen_e:  cpy #4                     ; (or 0)
+fn_e:                              ; Y even
+fst_e:  inx                        ; (or DEX: fs_new)
+fen_e:  cpx #4                     ; (or 0)
         beq fe_x
-fl_e:   lda (rtp),y                ; the transition's line, t
+fl_e:   lda $FFFF,x                ; the transition's line, t (operand: fs_c's)
         cmp flr1
         bcs fe_x
         sbc rsm                    ; (C clear) t, in the row (fwe)
         sta fwe
-        cpx fwe
-        bcs fn_e                   ; (at or above X: bpos only)
+        cpy fwe
+        bcs fn_e                   ; (at or above Y: bpos only)
         cmp #8+FSRJ
         bcc fw_e                   ; (walked, crossing a row at most)
         bcs fr
-fn_o:                              ; X odd
-fst_o:  iny                        ; (or DEY: fs_new)
-fen_o:  cpy #4                     ; (or 0)
+fn_o:                              ; Y odd
+fst_o:  inx                        ; (or DEX: fs_new)
+fen_o:  cpx #4                     ; (or 0)
         beq fe_x
-fl_o:   lda (rtp),y
+fl_o:   lda $FFFF,x
         cmp flr1
         bcs fe_x
         sbc rsm
         sta fwe
-        cpx fwe
+        cpy fwe
         bcs fn_o
         cmp #8+FSRJ
         bcc fw_o
-fr:     sty bpos                   ; (C set) lines X .. t-1, a run
+fr:     stx bpos                   ; (C set) lines Y .. t-1, a run
         adc rsm
         sta fwu                    ; t
-        lda BE,y
+        lda BE,x
         sta ve
-        lda BO,y
+        lda BO,x
         sta vo
-        txa
+        tya
         sec
         adc rsm                    ; the line
         tax
         ldy fwu
         jsr run2
-        ldx fwu
-fr_h:   lda LAHSB0,x               ; (sethalf) the walker from t
-        sta f_wse+2
-        sta f_wso+2
-        lda RSMT,x
+        ldy fwu
+fr_h:   lda LAHSB0,y               ; (sethalf) the walker from t
+        sta zp_+1
+        lda RSMT,y
         sta rsm
-        txa
+        tya
         and #7
-        tax
-        ldy bpos
+        tay
+        ldx bpos
         lsr a
         bcc fn_e
         bcs fn_o
@@ -2261,35 +2261,29 @@ fe_x:   lda flr1                   ; the floor: the rest at bpos
         clc
         sbc rsm
         cmp #8
-        bcs fe_r                   ; (beyond the row: a run; X < 8 here)
+        bcs fe_r                   ; (beyond the row: a run; Y < 8 here)
         sta fwe                    ; (the floor in the row)
-        cpx fwe
+        cpy fwe
         bcs ff_d
-        txa                        ; (in it: walked, by the walker's copy)
+        tya                        ; (in it: walked, by the walker's copy)
         lsr a
-        lda f_wse+2
-        sta ff_se+2
-        sta ff_so+2
-        lda coff
-        sta ff_se+1
-        sta ff_so+1
         bcs ff_o
-ff_e:   lda BE,y
-ff_se:  sta $FF00,x
-        inx
-        cpx fwe
+ff_e:   lda BE,x
+        sta (zp_),y
+        iny
+        cpy fwe
         beq ff_d
-ff_o:   lda BO,y
-ff_so:  sta $FF00,x
-        inx
-        cpx fwe
+ff_o:   lda BO,x
+        sta (zp_),y
+        iny
+        cpy fwe
         bne ff_e
 ff_d:   jmp c_next
-fe_r:   lda BE,y                   ; the floor's run
+fe_r:   lda BE,x                   ; the floor's run
         sta ve
-        lda BO,y
+        lda BO,x
         sta vo
-        txa
+        tya
         sec
         adc rsm
         tax
@@ -2340,7 +2334,7 @@ fs_new: stx lastri                 ; the rung's bytes by bpos: 0 the right box,
         lda RTPH,x
         sbc #0
         sta rbh
-        lda #OP_DEY                ; (the last rung's lean, kept)
+        lda #OP_DEX                ; (the last rung's lean, kept)
         cmp fst_e
         beq fs_nj                  ; (C set)
         sta fst_e
@@ -2356,7 +2350,7 @@ fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
         lda RTPH,x
         sbc #0
         sta rbh
-        lda #OP_INY
+        lda #OP_INX
         cmp fst_e
         beq fs_nj                  ; (C set)
         sta fst_e
@@ -2466,16 +2460,20 @@ sp_r:   lda #<fs_c                 ; (C set) fs_new's own again
 sp_c:   lda rbl                    ; (C set) as fs_c
         adc x4
         sta rtp
+        sta fl_e+1
+        sta fl_o+1
         lda rbh
         adc #0
         sta rtp+1
+        sta fl_e+2
+        sta fl_o+2
         lda TX,x
         sbc x4
         tax                        ; (X reloaded below)
         ldy CLMP1,x
         ldx mn
         lda fst_e
-        cmp #OP_INY
+        cmp #OP_INX
         bne sp_lz
 sp_rz:  cpx mx                     ; leaning right (or upright)
         bcs sp_zd
@@ -2505,7 +2503,9 @@ sp_lc:  cpy #0
 sp_lb:  jsr sp_ln
         inx
         bne sp_lz
-sp_zd:  jmp fs_w
+sp_zd:  tya                        ; (fs_w's: X = bpos)
+        tax
+        jmp fs_w
 ; Line X of the zone at bpos Y (X, Y kept).
 sp_ln:  sty bpos
         jsr pmask

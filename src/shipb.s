@@ -1,59 +1,83 @@
 ; ============================================================================
-; shipb.s -- LAND's bank 6 (SHIPB, sideways RAM at $8000): the keys and the
-; ship.  LAND calls B6_KEYS ($8000) before projecting and B6_SHIP ($8003)
-; after the strips (call6 pages this bank in, and bank 4 back after).
+; shipb.s -- SHIPB, LAND's bank 6: sideways RAM at $8000.  build.sh assembles
+; it (ca65; it includes landsyms.inc, shipspan.s and shipspan.inc) and links
+; it with shipb.cfg (CODE at $8000, then SPANS, TAIL, and DTAB on a page
+; boundary); LANDS loads the file into bank 6.  Two entry points, the jmps at
+; the bank's start, each reached through LAND's call6 (A = the low byte; bank
+; 6 paged in for the call, bank 4 back after):
+;   B6_KEYS ($8000): each frame after the game's step (bank 5, game.s) and
+;     before LAND projects.  Copies the ship's direction, pitch and screen
+;     centre from the game's low-RAM bytes GSHK, GSHP, GSHX, GSHY ($07DB-
+;     $07DE) into shk, shp, shx, shy.  (GSHV, $07DF, is read by LAND, which
+;     calls B6_SHIP only while it is nonzero.)  No zero page.
+;   B6_SHIP ($8003): after the strips have drawn screen scrb and the game has
+;     drawn its dots beyond the ship.  Draws the ship there (shipspan.s's
+;     shipdraw), then widens that screen's column records to the ship's box
+;     so the strips repaint its rows the next time they draw the screen.
 ;
-; B6_KEYS (once the keys; now the game's, game.s, in bank 5): the ship's
-; direction, pitch and centre copied in from low RAM (GSHK..GSHY).
+; Memory: CODE $8000-$875C (keys and ship here, then shipspan.s's walker, its
+; tables and FCE, FCX); SPANS $875D-$B46C (the orientations' streams); TAIL
+; $B46D-$B59F (spdec); DTAB $B600-$BFD2 (DL4, DH4, shipspan.inc's tables).
+; Main RAM: DBUF ($2F00, at most 128 bytes), the current orientation's lines,
+; kept across frames (dlast).  Zero page, shipdraw's only: LAND's $8E-$9F
+; (project's HPZ, bank 7's and the strips' scratch, all finished when
+; B6_SHIP runs and set afresh each frame) for c0+1..6, x0+1..6, ptr, dp, lim,
+; bl and spdec's dc .. dtmp; TRL+0..15 (LAND's TRL and the first four of TRB:
+; a split column's transitions, dead after the strips) for the rest; $8D,
+; c0 itself, is never touched.
 ;
-; The ship: drawn at (shx, shy) on the screen just drawn (scrb), over the land
-; (shiprast.s); then that screen's TOPS, BOTS (the set the strips recorded in:
-; sidx) widened over its box, so the strips that next draw this screen take it
-; off as they take off land that has gone.  It must stay within lines
-; YSKY..YGND (the STABs') and on the screen: |dx| <= 17, |dy| <= 18.
-;
-; Zero page: LAND's spare ($8E-$9F) and TRL, TRB (split columns' scratch).
-; DQT, DRT (D div a, mod a): this bank's own, as tools/landgen.py's.
+; Data: shk the direction (0..31, the game's gk), shp the pitch (0..12), shx,
+; shy the centre.  The game holds GSHX at 128 and GSHY within YSKY+14 ..
+; YGND-16, so the ship's lines (shy - 14 .. shy + 16 at most) stay on the
+; land's lines YSKY..YGND and its columns (shx - 17 .. shx + 16) on the
+; screen.  The box bxl, bxr, byt, byb: first and last pixel column, first
+; and last line, inclusive.  LAND's column records: three sets (TOPS, BOTS;
+; TOPS+64, BOTS+64; CURT, CURB), each column's highest and lowest land line,
+; their addresses in setTl/h, setBl/h; sidx[back] names the set the strips
+; have just recorded the screen being drawn in.
 ; ============================================================================
         .setcpu "6502"
-        .include "landsyms.inc"    ; (LAND's symbols, L_ before each)
+        .include "landsyms.inc"    ; LAND's labels, L_ before each (build.sh):
+                                   ; TRL, back, scrb, sidx, setTl, setTh,
+                                   ; setBl, setBh (TRB is reached as TRL+12)
 
-scrb    = L_scrb
-c0      = $8D                      ; (LAND's spare: $8E-$9F; c0, x0 + 1..6)
-x0      = $93
-ptr     = $9A
-dp      = $9C
-lim     = $9E
-bl      = $9F
-t       = L_TRL                    ; (TRL, TRB: 24 bytes)
-al      = L_TRL+1
-alx     = L_TRL+2
-k       = L_TRL+3
-nn      = L_TRL+4
-ee      = L_TRL+5
-tmp     = L_TRL+6
-dq      = L_TRL+7
-pm      = L_TRL+9
-mk      = L_TRL+10
-np1     = L_TRL+11
-nb      = L_TRL+12
-dpb     = L_TRL+13
-ptb     = L_TRL+14
-        .assert ptb+2 <= L_TRL+24, error, "TRL, TRB: 24 bytes"
+scrb    = L_scrb                   ; the high byte of the screen being drawn
+c0      = $8D                      ; c0+j, j 1..6 ($8E-$93): slot j's dither for
+x0      = $93                      ; the pass; x0+j ($94-$99): its even ^ odd
+ptr     = $9A                      ; the line's screen byte; ship's TOPS pointer
+dp      = $9C                      ; the line's bytes in DBUF
+lim     = $9E                      ; LIM's for the last boundary (is the next in
+bl      = $9F                      ; its byte?); lines left in the pass
+t       = L_TRL                    ; scratch
+al      = L_TRL+1                  ; shx & 3
+alx     = L_TRL+2                  ; al, or - al mirrored
+k       = L_TRL+3                  ; scratch
+nn      = L_TRL+4                  ; (unused)
+ee      = L_TRL+5                  ; the orientation's entry, 17 shp + kk
+tmp     = L_TRL+6                  ; ship's last column
+dq      = L_TRL+7                  ; BOTS (ship)
+pm      = L_TRL+9                  ; $FF if pass A's lines are odd
+mk      = L_TRL+10                 ; lk's mask on n: 0, or $FF mirrored
+np1     = L_TRL+11                 ; (unused)
+nb      = L_TRL+12                 ; pass B's lines ($80: none, a one-line band)
+dpb     = L_TRL+13                 ; (unused)
+ptb     = L_TRL+14                 ; pass B's first line's screen byte
+        .assert ptb+2 <= L_TRL+24, error, "the TRL names must fit TRL, TRB: 24 bytes"
 
-SHIP_TILT = 3                      ; the pitch while moving
-SVIA_ORB = $FE40
+SHIP_TILT = 3                      ; (unused)
+SVIA_ORB = $FE40                   ; the system VIA (the KEY macro's: unused)
 SVIA_DDRA = $FE43
 SVIA_ORA_NH = $FE4F
 
         .code
-        .assert * = $8000, error, "bank 6 at $8000"
-        jmp keys                   ; B6_KEYS
-        jmp ship                   ; B6_SHIP
+        .assert * = $8000, error, "bank 6 starts at $8000: B6_KEYS, B6_SHIP"
+        jmp keys                   ; B6_KEYS ($8000)
+        jmp ship                   ; B6_SHIP ($8003)
 
 ; ---------------------------------------------------------------- keys
-; Arrows: left and right in x, up and down (away and towards) in z.  Read
-; from the keyboard directly (the system VIA, its auto-scan off a moment).
+; KEY code, routine: read one key straight from the keyboard through the
+; system VIA (the key's code written to port A, bit 7 read back set if it is
+; down) and jsr routine if so.  Unused: nothing invokes it.
 .macro KEY code, routine
         .local no
         lda #code
@@ -63,17 +87,26 @@ SVIA_ORA_NH = $FE4F
         jsr routine
 no:
 .endmacro
-keys:   ldx #3                     ; (B6_KEYS) the ship as the game left it (game.s:
-:       lda $07DB,x                ; GSHK, GSHP, GSHX, GSHY)
+; keys (B6_KEYS): shk, shp, shx, shy = GSHK, GSHP, GSHX, GSHY, the ship as
+; the game's step left it.  Clobbers A, X.
+keys:   ldx #3
+:       lda $07DB,x                ; GSHK, GSHP, GSHX, GSHY (game.s)
         sta shk,x
         dex
         bpl :-
         rts
-        .res $E0-(*-keys)             ; (keeps the ship's layout: its chains' pages)
+        .res $E0-(*-keys)          ; padding to $80E6: ship and everything after
+                                   ; it keep their addresses (shipspan.s's page
+                                   ; asserts check the layout that results)
 
 ; ---------------------------------------------------------------- ship
-ship:   jsr shipdraw               ; (and its box: bxl, bxr, byt, byb)
-@w:     ldx L_back                 ; this screen's TOPS, BOTS: its set
+; ship (B6_SHIP): draw the ship, then widen this screen's column records to
+; its box: for each column c of bxl >> 2 .. bxr >> 2, TOPS[c] = min(TOPS[c],
+; byt) and BOTS[c] = max(BOTS[c], byb), TOPS and BOTS the set sidx[back]
+; names.  In: shk, shp, shx, shy, scrb, back.  Clobbers A, X, Y, shipdraw's
+; zero page, and ptr, dq, tmp.
+ship:   jsr shipdraw               ; the ship; bxl, bxr, byt, byb its box
+@w:     ldx L_back                 ; ptr = this screen's TOPS, dq its BOTS
         ldy L_sidx,x
         lda L_setTl,y
         sta ptr
@@ -83,7 +116,7 @@ ship:   jsr shipdraw               ; (and its box: bxl, bxr, byt, byb)
         sta dq
         lda L_setBh,y
         sta dq+1
-        lda bxr                    ; its columns: bxl/4 .. bxr/4
+        lda bxr                    ; columns bxl / 4 .. bxr / 4 (tmp the last)
         lsr a
         lsr a
         sta tmp
@@ -91,29 +124,30 @@ ship:   jsr shipdraw               ; (and its box: bxl, bxr, byt, byb)
         lsr a
         lsr a
         tay
-@c:     lda byt                    ; the highest line: the box's if higher
+@c:     lda byt                    ; TOPS[c] up to the box's top if higher
         cmp (ptr),y
         bcs :+
         sta (ptr),y
-:       lda byb                    ; the lowest: the box's if lower
+:       lda byb                    ; BOTS[c] down to its bottom if lower
         cmp (dq),y
         bcc :+
         sta (dq),y
-:       cpy tmp
+:       cpy tmp                    ; (through tmp inclusive)
         iny
         bcc @c
         rts
 
-kmv:    .byte 0                    ; (unused: keeps the layout)
-shk:    .byte 0                    ; the ship: direction, pitch, centre
-shp:    .byte 0
+kmv:    .byte 0                    ; (unused: padding)
+shk:    .byte 0                    ; the ship: direction (0..31), pitch (0..12),
+shp:    .byte 0                    ; centre x, y (B6_KEYS: the game's copied)
 shx:    .byte 128
 shy:    .byte 98
-mir:    .byte 0                    ; (shipdraw's)
-bxl:    .byte 0                    ; the box
-bxr:    .byte 0
+mir:    .byte 0                    ; shipdraw's: $FF when drawn mirrored
+bxl:    .byte 0                    ; the box: first and last pixel column, first
+bxr:    .byte 0                    ; and last line (inclusive)
 byt:    .byte 0
 byb:    .byte 0
 
-        .include "shipspan.s"
-        .include "shipspan.inc"
+        .include "shipspan.s"      ; the walker (CODE), spdec (TAIL), DL4, DH4
+        .include "shipspan.inc"    ; shipgen's tables: DTAB (still current),
+                                   ; SPANS, DTAB again

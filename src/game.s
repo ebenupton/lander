@@ -1,103 +1,159 @@
 ; ============================================================================
-; game.s -- the game (bank 5, from $A100; .included by land.s, segment B5GAME):
-; Lander's flight over LAND's landscape.  ref/lander/NOTES.md has Lander's
-; model; this is it a step a frame, as Lander's main loop (the frame rate held
-; to 12.5 at most by LAND's flip: Zarch, the same engine, averaged 12.5 frames
-; a second on the ARM2), scaled to LAND's units.
+; game.s -- the game: Lander's flight over LAND's landscape.  Assembled into
+; sideways RAM bank 5 from $A100 (segment B5GAME, .included at the end of
+; land.s; build.sh lays the segment into TABLES2, which LANDS loads into bank
+; 5).  Four entries, a jump table; land.s's main loop reaches them through
+; call5 (bank 5 paged in for the call, bank 4 back after):
+;   G_INIT  $A100  once, after LAND's init: the map and the FUEL label on
+;                  both screens, the state cleared, the sound chip quiet, the
+;                  ship on the pad, the camera set (gout)
+;   G_STEP  $A103  first in each frame: the keys, the sound, one step of the
+;                  flight model, then the camera for LAND and the ship for
+;                  bank 6
+;   G_PRE   $A109  after the strips, before the ship: the dots beyond the
+;                  ship in z
+;   G_POST  $A106  after the ship: the dots nearer than it, the map's ship
+;                  marker, the fuel bar
+; Between G_STEP and G_PRE LAND projects and draws the land; bank 6 (shipb.s)
+; copies GSHK..GSHY at B6_KEYS and draws the ship at B6_SHIP, which land.s
+; skips while GSHV is 0 (crashed).  Bank 4 (LAND's tables) is paged out while
+; the game runs, so the game carries its own pixel masks (PIXG) and its tables
+; (build/gametab.inc, from tools/gamegen.py).  The game's letters sit at GLY5
+; ($BE00) in this bank, put there by LANDS's glyphs5: the code and tables must
+; end below them.
 ;
-; Controls: the attitude as Lander's, pitch then yaw: K or up tips the nose
-; down, M or down up, a step (7.5 degrees) a tick, 45 degrees either way at
-; most; Z or left, X or right turn it; SPACE or SHIFT thrust.  Fuel burns while thrusting; landing
-; slowly on the pad (tiles 0..PADN-1 in x and z; Lander's 8) refuels.  Touching the
-; ground anywhere else, or the pad too fast, crashes: a burst of dots, then the
-; ship back on the pad.
+; Shared low RAM, $07D6, $07D7 and $07DB..$07DF: CAME (written here, read by
+; LAND's projection:
+; the camera raised above CAMH, 0..EMAX height units), HGV (written by LAND's
+; hgnd each frame: the ground under the ship in whole height units, read
+; here), GSHK, GSHP, GSHX, GSHY (the ship's direction, pitch, screen x and
+; line, for bank 6) and GSHV (1: the ship is drawn; land.s reads it).  LAND's
+; own used here: cxt, cxs, czt, czs (the camera, written by gout), PY, np, nr
+; (the last frame's projected rows, read by landoff), back, scrb, sidx,
+; setTl..setBh (the screen being drawn and its TOPS, BOTS), fpson (the
+; frame-rate readout's switch), GLY (the readout's characters: putd, unused).
+; Zero page $8E..$9B (g0, g1, gt0..gt5, tsg, bsg) is LAND's spare, scratch
+; within a single call.
 ;
-; Units: positions 24 bits, 65536 a tile (x, z: the tile byte the map's, mod
-; 64; y up, its height units 4096 each: LAND's 16 a tile); velocities 16 bits,
-; 16384 a tile a step.
+; Controls (the keyboard read directly through the system VIA): Z or left and
+; X or right turn the ship (gk: 32 directions, one a frame while held); K or
+; up tips the nose down, M or down up (gp: 13 pitches 10 degrees apart, 60
+; either way at most, one a frame while held); SPACE or SHIFT thrust (both
+; full thrust; thrust goes the way the ship is tilted, so nose down flies
+; forward); F toggles LAND's frame-rate readout.  Fuel burns while thrusting.
+; Touching the ground over the pad (tiles 0..PADN-1 in x and z) slowly and
+; within a pitch step of level lands: the ship sits still and refuels.
+; Touching it anywhere else, or too fast or too tilted, crashes: CRASHT steps
+; of dots with the ship gone, then the ship back on the pad.
 ;
-; The camera: Lander's, at the ship's x, ZSHIP (13) tiles behind it in z (LAND's camera
-; point is the ship less 128 in x, ZSHIP tiles in z); its height Lander's rule
-; (min(ship, 0): it follows the ship up) within what the strips allow: CAMH
-; (6 tiles) above the ground under the ship, or more to keep the ship KOFF
-; units below it (so the ship stays at line ~81 on screen as it climbs), it
-; always following: LAND drawn at most EMAX higher (CAME: by then every row is
-; below the screen, its y's held at 254).  The
-; engines cut out once the land has gone from the screen (Lander's
-; HIGHEST_ALTITUDE); it coasts up and falls back, no ceiling.
+; Units.  Positions sx, sz, sy are 24-bit, 65536 a tile (byte 2 the tile,
+; byte 1 the 1/256 fraction; x and z wrap at 64 tiles, the map's); y is up,
+; in height units of 4096 (16 a tile, LAND's HSCALE; su is y in units, 8.8).
+; Velocities gvx, gvy, gvz are 16-bit in Lander's units: 16384 a tile per
+; Lander step (a Lander step moves a position 4 v, in 65536ths).  Lander runs a
+; step per main-loop iteration; here a step is a frame at 10 a second (LAND's
+; flip allows 12.5 at most) and each step is taken as 1.25 of Lander's:
+; positions move 5 v, gravity, thrust, drag and fuel are 1.25 times Lander's
+; per step, and the velocities stay in Lander's units, so LANDV is Lander's
+; unchanged.  Directions k: 0 faces +x, 8 towards the camera (-z), 16 -x, 24
+; away (+z).  Pitches p: PFLAT (6) level, more nose down, less nose up.
 ;
-; The screen's top 64 lines are the game's (LAND draws from YSKY, 64): the
-; FUEL (a bar, row 0), the frame rate (row 2: F toggles it, LAND's readout); the
-; map (64 x 64 pixels, a tile each, the pad in the middle) at the top right, the
-; ship a 2 x 2 magenta dot on it.
+; The camera (gout) is half a tile left of the ship in x (LAND's screen centre
+; is half a tile right of its camera x), ZSHIP tiles behind it in z, and
+; CAMH + CAME height units above the ground under the ship.  CAME rises with
+; the ship so the camera stays at least KOFF units above it, which holds the
+; ship at screen line HORIZON + SHYT[KOFF] = 81 once it is CAMH - KOFF (17)
+; units above the ground.  Past CAME = EMAX LAND draws every row below the
+; screen, so the land vanishes and the ship stays at that line.  The engines
+; cut out once the land has left the screen (Lander's HIGHEST_ALTITUDE in
+; effect); there is no ceiling: the ship coasts up and falls back.
+;
+; The top 64 lines of each screen are the game's (LAND draws from YSKY): the
+; FUEL bar on character row 0, LAND's frame-rate readout on row 2, the map
+; (64 x 64 pixels, a tile each, the pad in the middle) at the top right, with
+; the ship a 2 x 2 magenta dot on it.
 ; ============================================================================
 
-GSHK    = $07DB                    ; the ship for bank 6's B6_SHIP (B6_KEYS copies
-GSHP    = $07DC                    ; these four into its own): direction, pitch,
-GSHX    = $07DD                    ; centre
+GSHK    = $07DB                    ; the ship for bank 6 (B6_KEYS copies these
+GSHP    = $07DC                    ; four): direction, pitch, screen x (128),
+GSHX    = $07DD                    ; screen line
 GSHY    = $07DE
-GSHV    = $07DF                    ; drawn (0: crashed)
-GLY5    = $BE00                    ; the labels' letters (LANDS's glyphs5): FUELANDCRSH
+GSHV    = $07DF                    ; 1: the ship is drawn (0 while crashed)
+GLY5    = $BE00                    ; the labels' letters, 16 bytes each, in this
+                                   ; bank (LANDS's glyphs5: "FUELANDCRSH")
 
-g0      = $8E                      ; (zero page: the ship's scratch, free between parts)
-g1      = $90
+g0      = $8E                      ; zero page (LAND's spare $8E..$9F): two
+g1      = $90                      ; pointers and six scratch bytes
 gt0     = $92
 gt1     = $93
 gt2     = $94
 gt3     = $95
 gt4     = $96
 gt5     = $97
-tsg     = $98                      ; (gpost's: this screen's TOPS, BOTS)
-bsg     = $9A
+tsg     = $98                      ; (gpre's and gpost's: this screen's TOPS
+bsg     = $9A                      ; and BOTS)
 
-SVIA_ORB = $FE40
-SVIA_DDRA = $FE43
-SVIA_ORA_NH = $FE4F
+SVIA_ORB = $FE40                   ; the system VIA: port B (bits 0-2 pick a
+SVIA_DDRA = $FE43                  ; latch bit, bit 3 sets it), port A's
+SVIA_ORA_NH = $FE4F                ; direction and port A without handshake
 
-; (Lander's figures are a step at 12.5 frames a second, Zarch's ARM2 rate;
-; here a step is a frame at 10: each step is 1.25 of Lander's, velocities
-; kept in its units: positions move 1.25 v, accelerations and drag 1.25 as
-; much, fuel likewise, times 0.8 as many steps.)
-SPAWNK  = (24+12) & 31             ; the start: 135 degrees round from facing into
-SPAWNP  = PFLAT                    ; the screen (k 24, a step 11.25), level
-GRAV    = 240                      ; Lander's gravity (&30000: 0.0117 tiles a step^2), 1.25
-THRS    = 3                        ; full thrust: THX.. << THRS (1016: 0.062, Lander's)
-HOVS    = 1                        ; hover: << HOVS (Lander's quarter); each 1.25 (tadd)
-LANDV   = 2048                     ; Lander's LANDING_SPEED: |gvx| + |gvy| + |gvz| below
-UNDER   = 4                        ; Lander's UNDERCARRIAGE_Y (0.39 tiles) at the ship's
-                                   ; size here (14 / R(ZSHIP) of Lander's): height units
-EOFF    = 60                       ; (the camera raise below which the land can't
-                                   ; all be below the screen: landoff not needed)
-KOFF    = 79                       ; the camera this far above the ship, or more
-FUEL0   = 3413                     ; Lander's fuel: at the start; most (refuelling)
-FUELMX  = 5120
-REFUEL  = 40                       ; on the pad, a step
-CRASHT  = 40                       ; steps the crash lasts
-PLIFE   = 19                       ; a dot's life, steps: the land's 96 lines at the
-                                   ; exhaust's speed (THY 8 / 256 units, 1.25 a step:
-                                   ; ~5 lines a step)
-NPART   = 20                       ; dots (one a step: none reused alive)
-SNTH    = $E6                      ; the engine: white noise, the low rate
-SATF    = 13                       ; its attenuation (full thrust, SPACE or SHIFT)
-SATH    = 13                       ; (hover's: unused, SHIFT full thrust too)
-SNCR    = $E7                      ; the crash: white noise at tone 2's rate
-SCRN    = $180                     ; (its period: EXNL, EXNH a step; this at first)
-PGRAV   = 60                       ; a dot's gravity (height units / 256 a step^2)
-PADX    = PADN/2                   ; the pad's middle: the start
-FUELR   = 0                        ; FUEL's row (lines 0..7), its bar's lines and
-FBL     = 2                        ; columns (bytes 10..29: 80 pixels, fuel >> 6)
+; Lander's constants are per main-loop step; here a step is a frame at 10 a
+; second, taken as 1.25 Lander steps, and the velocities keep Lander's units
+; (16384 a tile per Lander step).
+SPAWNK  = (24+12) & 31             ; the start direction: 4, 135 degrees on
+SPAWNP  = PFLAT                    ; k 24 (facing away), as Lander's; level
+GRAV    = 240                      ; gravity a step: Lander's &30000 (of 2^24)
+                                   ; a tile per step^2 is 192 here, times 1.25
+THRS    = 3                        ; full thrust: THX, THZ, THY (127 a unit)
+                                   ; << 3: 1016 at most (Lander's 1024); tadd
+                                   ; then makes it 1.25 as much
+HOVS    = 1                        ; hover's shift, Lander's quarter (step's
+                                   ; hover path is unreachable: the keys never
+                                   ; produce thr 2)
+LANDV   = 2048                     ; Lander's LANDING_SPEED, 1/8 tile a step:
+                                   ; |gvx| + |gvy| + |gvz| must be below it
+UNDER   = 4                        ; the ship's centre above its underside, in
+                                   ; height units: a quarter tile
+EOFF    = 60                       ; CAME below this: the land is on the screen,
+                                   ; landoff's scan skipped
+KOFF    = 79                       ; the camera's least height above the ship,
+                                   ; height units: SHYT[KOFF] = 97, line 81
+FUEL0   = 3413                     ; Lander's initialFuelLevel (unused: spawn
+                                   ; fills the tank)
+FUELMX  = 5120                     ; Lander's refuel limit (&1400): full
+REFUEL  = 40                       ; a step on the pad (1.25 of Lander's &20)
+CRASHT  = 40                       ; steps a crash lasts (4 seconds)
+PLIFE   = 19                       ; a dot's life, steps: the land's 96 lines at
+                                   ; the exhaust's speed (8 THY / 256 units a
+                                   ; Lander step, 1.25 a step: about 5 lines)
+NPART   = 20                       ; dots (emit uses one a step, each in turn)
+SNTH    = $E6                      ; the engine: noise register, white noise at
+                                   ; the lowest fixed rate
+SATF    = 13                       ; its attenuation (2 dB a step, 15 silent)
+SATH    = 13                       ; hover's (unreachable: see HOVS)
+SNCR    = $E7                      ; the crash: white noise clocked by tone 2
+SCRN    = $180                     ; tone 2's period at init (the crash sets it
+                                   ; every step: EXNL, EXNH)
+PGRAV   = 60                       ; a dot's gravity, 256ths of a unit a step^2
+                                   ; (GRAV in the dots' units, 4 times coarser)
+PADX    = PADN/2                   ; the pad's middle tile: the start
+FUELR   = 0                        ; the fuel bar: character row 0, lines 2..5,
+FBL     = 2                        ; byte columns 10..29 (80 pixels: fuel >> 6)
 FBC     = 10
 
         .segment "B5GAME"
-        .assert * = $A100, error, "the game's entries at $A100"
+        .assert * = $A100, error, "the game's entries at $A100 (G_INIT..G_PRE)"
         jmp ginit                  ; G_INIT
         jmp gstep                  ; G_STEP
         jmp gpost                  ; G_POST
         jmp gpre                   ; G_PRE
 
 ; ---------------------------------------------------------------- init
-; (after LAND's init: the screens black) The map and labels on both screens;
-; the counts; the ship on the pad.
+; ginit (G_INIT): once, after LAND's init has blacked both screens.  The map
+; and the FUEL label on both screens; the counters and marks cleared; every
+; dot dead; the sound chip silenced with tone 2's period set; the ship spawned
+; on the pad; then gout, so LAND's first projection has the camera and bank 6
+; the ship.  Clobbers A, X, Y, g0, g1, gt0, gt2..gt4, su, scrg.
 ginit:  lda #$30
         jsr gscr
         lda #$58
@@ -107,7 +163,7 @@ ginit:  lda #$30
         sta ncrash
         sta gmx
         sta gmz
-        lda #$FF
+        lda #$FF                   ; $FF: nothing drawn yet on either screen
         sta mkl
         sta mkl+1
         sta fdr
@@ -116,47 +172,52 @@ ginit:  lda #$30
         sta dl+1
         sta dc
         sta dc+1
-        lda #$5A
+        lda #$5A                   ; (the LFSR's seed: never 0)
         sta rnd
         ldx #NPART-1
         lda #0
 :       sta plife,x
         dex
         bpl :-
-        ldx #SININ-1               ; the sound chip: all quiet, tone 2 the
-:       lda SINI,x                 ; crash noise's clock
+        ldx #SININ-1               ; SINI to the sound chip, last byte first:
+:       lda SINI,x                 ; four channels off, then tone 2's period
         jsr psg
         dex
         bpl :-
-        lda #$FF
-        sta sctl
+        lda #$FF                   ; (noise control and attenuation as written:
+        sta sctl                   ; $FF is the attenuation off)
         sta satt
         jsr spawn
         jmp gout
-SINI:   .byte $18, $C0|SCRN & 15   ; (written last first) tone 2: SCRN
-        .byte $FF, $DF, $BF, $9F   ; the four channels silent
+SINI:   .byte $18, $C0|SCRN & 15   ; tone 2's period SCRN, sent (in reverse) as
+                                   ; the latch byte $C0 | low 4 bits, then the
+                                   ; data byte, the high 6
+        .byte $FF, $DF, $BF, $9F   ; noise, tone 2, 1, 0: attenuation 15 (off)
 SININ   = * - SINI
 
-; Screen A's top: the map (MAPI) at columns 48..63, lines 0..63; the labels.
+; gscr: the top of screen A (its high byte, $30 or $58): the map, MAPI's 64
+; lines of 16 bytes, at byte columns 48..63 of character rows 0..7; then the
+; labels (LABT) in GLY5's letters.  Out: scrg = A.  Clobbers A, X, Y, g0, g1,
+; gt0, gt2, gt3, gt4.  Called by ginit.
 gscr:   sta gt4
         lda #<MAPI
         sta g1
         lda #>MAPI
         sta g1+1
-        ldx #0                     ; (the line)
-@l:     txa
-        and #7
-        ora #$80                   ; (+ 48 * 8 = $180)
+        ldx #0                     ; X: the map line, 0..63
+@l:     txa                        ; the line's first byte: screen + $200 (line
+        and #7                     ; >> 3) + $180 (column 48) + (line & 7)
+        ora #$80
         sta g0
         txa
         lsr a
         lsr a
-        and #$FE
-        sec                        ; (+ 1)
+        and #$FE                   ; 2 (line >> 3), plus 1 for $180's $100
+        sec
         adc gt4
         sta g0+1
         ldy #0
-:       sty gt0
+:       sty gt0                    ; byte Y to column 48 + Y: 8 Y on
         lda (g1),y
         pha
         tya
@@ -179,14 +240,14 @@ gscr:   sta gt4
 :       inx
         cpx #64
         bne @l
-        lda gt4                    ; the labels
-        sta scrg
-        ldx #0
+        lda gt4                    ; the labels: each LABT entry a row, a column
+        sta scrg                   ; and letters up to $FF; a row of $FF ends
+        ldx #0                     ; the list
 @t:     lda LABT,x
         bmi @td
-        sta gt2                    ; (row)
+        sta gt2
         lda LABT+1,x
-        sta gt3                    ; (column)
+        sta gt3
         inx
         inx
 :       lda LABT,x
@@ -198,10 +259,12 @@ gscr:   sta gt4
 :       inx
         bne @t
 @td:    rts
-LABT:   .byte FUELR, 0, 0, 1, 2, 3, $FF                ; FUEL
+LABT:   .byte FUELR, 0, 0, 1, 2, 3, $FF                ; "FUEL": row 0, column 0
         .byte $FF
 
-; Letter A (GLY5) at row gt2, column gt3 (8 pixels) of screen scrg.
+; putl: letter A of GLY5 (16 bytes each) at character row gt2, column gt3
+; (0..15, 8 pixels wide) of screen scrg.  Clobbers A, Y, g0, g1.  Called by
+; gscr.
 putl:   asl a
         asl a
         asl a
@@ -213,15 +276,18 @@ putl:   asl a
         adc #0
         sta g1+1
         jmp putc
-; Digit A (LAND's GLY) likewise.
+; putd: digit A of LAND's GLY likewise.  (Unused.)
 putd:   asl a
         asl a
         asl a
         asl a
-        sta g1                     ; (GLY: page-aligned)
+        sta g1                     ; (GLY is page-aligned)
         lda #>GLY
         sta g1+1
-putc:   lda gt3                    ; 16 bytes: (g1) to row gt2, column gt3
+; putc: the 16 bytes at (g1) to row gt2, column gt3 of screen scrg: the cell
+; is two byte columns of 8 lines, 16 consecutive bytes at scrg + $200 row +
+; 16 column (the column 0..15: 16 column is a byte).  Clobbers A, Y, g0.
+putc:   lda gt3
         asl a
         asl a
         asl a
@@ -238,7 +304,9 @@ putc:   lda gt3                    ; 16 bytes: (g1) to row gt2, column gt3
         bpl :-
         rts
 
-; The ship on the pad, still, landed, fuelled.
+; spawn: the ship on the pad, still, landed, level, facing SPAWNK, the tank
+; full, drawn, no thrust; HGV set to the pad's height for gout before hgnd
+; has run.  Clobbers A.  Called by ginit and by step when a crash ends.
 spawn:  lda #0
         sta sx
         sta sx+1
@@ -252,44 +320,47 @@ spawn:  lda #0
         sta gvz
         sta gvz+1
         sta ctim
-        lda #PFLAT                 ; (level)
+        lda #PFLAT                 ; (set again below, from SPAWNP)
         sta gp
-        lda #0
-        lda #PADX
+        lda #0                     ; (unused load)
+        lda #PADX                  ; the pad's middle tile in x and z
         sta sx+2
         sta sz+2
-        lda #(PADH+UNDER)<<4 & 255 ; y: (PADH + UNDER) units
-        sta sy+1
+        lda #(PADH+UNDER)<<4 & 255 ; y = (PADH + UNDER) units: bytes 1 and 2 of
+        sta sy+1                   ; units * 4096
         lda #(PADH+UNDER)>>4
         sta sy+2
-        lda #SPAWNK                ; (135 degrees from facing in, level)
+        lda #SPAWNK
         sta gk
         lda #SPAWNP
         sta gp
-        lda #PADH                  ; the ground under it, now (HGV is the last
-        sta HGV                    ; frame's: the ship's line from it)
-        lda #<FUELMX               ; (full)
+        lda #PADH                  ; the ground under it (hgnd's from then on)
+        sta HGV
+        lda #<FUELMX
         sta fuel
         lda #>FUELMX
         sta fuel+1
-        lda #0                     ; (no thrust: snd's next is silent, not the
-        sta thr                    ; crash's last)
+        lda #0                     ; (snd's next frame: silence, not the crash's
+        sta thr                    ; last step)
         lda #1
         sta landed
         sta GSHV
         rts
 
 ; ---------------------------------------------------------------- step
-; Before projecting: the keys; a step (one a frame, as Lander's main loop: LAND's
-; flip holds the frame rate to 12.5 at most); then the camera and the ship for
-; LAND and bank 6.
+; gstep (G_STEP): first in each frame.  The keys; the sound for the state the
+; last step left (thr, ctim); a step of the model; then gout.  Clobbers A, X,
+; Y, g0, g1, gt0..gt5, su, tt0, tt1.
 gstep:  jsr keys
-        jsr snd                    ; (last frame's thrust or crash)
+        jsr snd
         jsr step
-        ; fall into gout
-; The camera from the ship: x less 128 (1/256 tiles), z less 15 tiles; CAME;
-; the ship's place on the screen.
-gout:   lda sx+1                   ; camera x (8.8): ship's less 128
+        ; falls into gout
+; gout: the camera and the ship's place on the screen, from the ship.  Out:
+; cxt, cxs (camera x: the ship's less 128/256 tile, as a tile 0..63 and a
+; sixteenth 0..15), czt, czs (camera z: ZSHIP tiles behind the ship), su (the
+; ship's height in units, 8.8), CAME, GSHY, GSHX (128), GSHK, GSHP.  Reads
+; sx, sz, sy, gk, gp, HGV.  Clobbers A, X, Y, gt0.  Called by gstep and ginit.
+gout:   lda sx+1
         sec
         sbc #128
         sta gt0
@@ -303,7 +374,7 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         lsr a
         lsr a
         sta cxs
-        lda sz+2                   ; z: less ZSHIP tiles
+        lda sz+2
         sec
         sbc #ZSHIP
         and #63
@@ -314,40 +385,40 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         lsr a
         lsr a
         sta czs
-        jsr units                  ; (su: the ship's height, units 8.8)
-        lda sy+2                   ; (16 tiles up or more: past su's byte, rel the
-        bmi gr_lo                  ; most)
-        cmp #16
-        bcc gr_lo
-        lda #$FF
-        bne gr_st
-gr_lo:  lda su+1                   ; above the ground under it: rel (0 below it:
-        sec                        ; crashing)
+        jsr units
+        lda sy+2                   ; rel: the ship above the ground under it, in
+        bmi gr_lo                  ; whole units, 0..255: 255 from 16 tiles up
+        cmp #16                    ; (su's whole byte has wrapped), 0 when below
+        bcc gr_lo                  ; HGV (y below 0, only while crashed, takes
+        lda #$FF                   ; the gr_lo path with su's byte wrapped: a
+        bne gr_st                  ; large rel, so CAME = EMAX)
+gr_lo:  lda su+1
+        sec
         sbc HGV
         bcs gr_st
         lda #0
 gr_st:  sta gt0
-        sec                        ; CAME: rel - (KOFF - CAMH), 0..EMAX
-        sbc #CAMH-KOFF
-        bcs :+
+        sec                        ; CAME = rel - (CAMH - KOFF), in 0..EMAX:
+        sbc #CAMH-KOFF             ; the camera is then max(CAMH - rel, KOFF)
+        bcs :+                     ; above the ship
         lda #0
 :       cmp #EMAX+1
         bcc :+
-        lda #EMAX                  ; (past it the camera still follows: LAND drawn
-        sta CAME                   ; at EMAX, every row below the screen; the ship
-        lda #KOFF                  ; KOFF below the camera)
+        lda #EMAX                  ; past EMAX: LAND drawn at EMAX (every row
+        sta CAME                   ; below the screen) and the ship kept at KOFF
+        lda #KOFF                  ; below the camera
         bne gsy
 :       sta CAME
-        clc                        ; the ship's line: HORIZON + SHYT (camera - ship),
-        adc #CAMH                  ; the camera CAMH + CAME above the ground (d R / 16,
-        sec                        ; R the landscape's at ZSHIP)
+        clc                        ; d = CAME + CAMH - rel: the camera above the
+        adc #CAMH                  ; ship, units
+        sec
         sbc gt0
-gsy:    tax
-        lda SHYT,x                 ; (held so the ship's lines, 14 up and 16 down,
-        cmp #YSKY+14-HORIZON       ; stay within YSKY..YGND)
-        bcs :+
-        lda #YSKY+14-HORIZON
-:       cmp #YGND-16-HORIZON
+gsy:    tax                        ; the ship's line: HORIZON + SHYT[d] (d R /
+        lda SHYT,x                 ; 16, R = 19.7 the land's pixels a tile at
+        cmp #YSKY+14-HORIZON       ; depth ZSHIP), held so 14 lines up, 16 down,
+        bcs :+                     ; stay within YSKY..YGND (d is 79..96 in
+        lda #YSKY+14-HORIZON       ; play: lines 81..102, so the holds never
+:       cmp #YGND-16-HORIZON       ; bite)
         bcc :+
         lda #YGND-16-HORIZON
 :       clc
@@ -361,8 +432,9 @@ gsy:    tax
         sta GSHP
         rts
 
-; su: the ship's height in units, 8.8 (sy >> 4).
-units:  lda sy                     ; (X kept)
+; units: su = sy >> 4, the ship's height in units as 8.8 (su+1 whole units,
+; valid below 16 tiles).  Clobbers A, Y; X kept.
+units:  lda sy
         sta su
         lda sy+1
         sta su+1
@@ -376,39 +448,46 @@ units:  lda sy                     ; (X kept)
         rts
 
 ; ---------------------------------------------------------------- keys
+; KEYB code, bit: key `code` (its internal number, bit 7 clear) written to
+; port A with the auto-scan off; bit 7 reads back set if it is down, and then
+; `bit` is set in gkb.
 .macro KEYB code, bit
         .local no
         lda #code
         sta SVIA_ORA_NH
-        lda SVIA_ORA_NH            ; (bit 7: pressed)
+        lda SVIA_ORA_NH
         bpl no
         lda gkb
         ora #bit
         sta gkb
 no:
 .endmacro
+; keys: gkb from the keyboard: 1 Z or left, 2 X or right, 4 K or up, 8 M or
+; down, 16 SPACE, 32 SHIFT, 64 F; F toggles fpson as it goes down (fkey:
+; its state last time).  Interrupts off while the VIA is ours.  Clobbers A,
+; X.  Called by gstep.
 keys:   lda #0
         sta gkb
         sei
-        lda #$7F                   ; bits 0-6 out: the key to test
-        sta SVIA_DDRA
-        lda #3                     ; keyboard auto-scan off
+        lda #$7F                   ; port A: bits 0-6 out (the key's number),
+        sta SVIA_DDRA              ; bit 7 in (pressed)
+        lda #3                     ; latch bit 3 low: keyboard auto-scan off
         sta SVIA_ORB
-        KEYB $61, 1                ; Z, left: mouse left
+        KEYB $61, 1                ; Z, left
         KEYB $19, 1
         KEYB $42, 2                ; X, right
         KEYB $79, 2
-        KEYB $46, 4                ; K, up: forward
+        KEYB $46, 4                ; K, up
         KEYB $39, 4
-        KEYB $65, 8                ; M, down: back
+        KEYB $65, 8                ; M, down
         KEYB $29, 8
-        KEYB $62, 16               ; SPACE: thrust
-        KEYB $00, 32               ; SHIFT: hover
-        KEYB $43, 64               ; F: the frame rate on / off
-        lda #$0B                   ; and on
+        KEYB $62, 16               ; SPACE
+        KEYB $00, 32               ; SHIFT
+        KEYB $43, 64               ; F
+        lda #$0B                   ; auto-scan back on
         sta SVIA_ORB
         cli
-        lda gkb                    ; (F: toggles as it goes down)
+        lda gkb
         and #64
         cmp fkey
         beq :+
@@ -421,18 +500,20 @@ keys:   lda #0
 :       rts
 
 ; ---------------------------------------------------------------- sound
-; Zarch's two (Lander has none): the engine a low white-noise roar while
-; thrusting (hover quieter), the crash a deeper rumble dying away.  The noise
-; channel only, the SN76489 written directly (through the system VIA's port A)
-; and only when what it should play changes: nothing most frames.
+; snd: the noise channel of the SN76489 for this frame, written only where it
+; changes (sctl, satt hold the control and attenuation bytes last written).
+; Crashed (ctim): the step's crack-to-rumble, tone 2's period from EXNL, EXNH
+; (written every step) and its attenuation from EXA, with SNCR (noise clocked
+; by tone 2).  Flying: SNTH at SATF while thr is set, else attenuation 15.
+; Reads ctim, thr.  Clobbers A, X, Y, sstp.  Called by gstep.
 snd:    lda ctim
         beq @t
-        lda #CRASHT                ; crashed: SNCR, tone 2's period and the
-        sec                        ; attenuation by the step (EXNL, EXNH, EXA:
-        sbc ctim                   ; a crack falling to a rumble, dying away)
+        lda #CRASHT                ; sstp = the crash's step, 0..CRASHT-1
+        sec
+        sbc ctim
         sta sstp
         tay
-        lda EXNL,y
+        lda EXNL,y                 ; tone 2's period: latch byte, then data byte
         jsr psg
         ldy sstp
         lda EXNH,y
@@ -441,46 +522,63 @@ snd:    lda ctim
         ldx EXA,y
         lda #SNCR
         bne @c
-@t:     ldx #15                    ; (silent)
+@t:     ldx #15                    ; silent unless thrusting
         lda thr
         beq @v
-        ldx #SATF                  ; full thrust
-        lsr a
-        bcs :+
-        ldx #SATH                  ; hover
+        ldx #SATF
+        lsr a                      ; (thr 1: C set, full; thr 2 would be hover:
+        bcs :+                     ; never produced)
+        ldx #SATH
 :       lda #SNTH
-@c:     cmp sctl
+@c:     cmp sctl                   ; the noise control byte, if changed
         beq @v
         sta sctl
         jsr psg
-@v:     txa                        ; the noise channel's attenuation
+@v:     txa                        ; noise attenuation, %1111aaaa, if changed
         ora #$F0
         cmp satt
         beq :+
         sta satt
         jmp psg
 :       rts
-; A to the sound chip (X kept).
+; psg: byte A to the sound chip: port A all outputs with the byte on it, the
+; chip's write-enable (latch bit 0, active low) pulsed low for 22 cycles,
+; about 11us.
+; Leaves DDRA $FF (keys resets it).  Clobbers A, Y; X kept.
 psg:    sei
         ldy #$FF
         sty SVIA_DDRA
         sta SVIA_ORA_NH
-        lda #0                     ; (the latch's 0: the chip's write enable, low)
+        lda #0                     ; latch bit 0 low: write enable
         sta SVIA_ORB
-        ldy #3                     ; (8us)
+        ldy #3
 :       dey
         bne :-
-        lda #8
+        lda #8                     ; and high again
         sta SVIA_ORB
         cli
         rts
 
 ; ---------------------------------------------------------------- a step
-step:   lda gkb                     ; the attitude, a step a tick: left, right the
-        lsr a                      ; yaw (gk, round and round); up, down the
-        bcc :+                     ; pitch (gp, 45 degrees either way at most)
+; step: one step of the model.  The attitude from gkb: Z/left and X/right
+; turn gk one direction (mod NDIR), K/up and M/down move gp a pitch
+; towards NPITCH-1 (nose down) or 0 (nose up).  Crashed: ctim counts down,
+; spawn at 0, only the dots move.  Flying: thr from SPACE or SHIFT, denied
+; without fuel, from 16 tiles up, or once the land has left the screen (CAME
+; past EOFF and landoff's scan); thrust lifts off (landed cleared); drag;
+; thrust, fuel and an exhaust dot; landed: velocities zeroed and REFUEL a
+; step up to FUELMX; else gravity, the move, and the ground test: the ship's
+; centre less than UNDER units above HGV (or below it, or y below 0) is a
+; touch, a landing
+; if over the pad, within a pitch of level and slower than LANDV, else a
+; crash (burst, GSHV 0, ctim CRASHT).  Finally parts.  Reads gkb, fuel, sy,
+; CAME, HGV; writes gk, gp, ctim, thr, landed, gv*, s*, fuel, nland, ncrash,
+; GSHV.  Clobbers A, X, Y, g0, g1, gt0..gt5, tt0, tt1.  Called by gstep.
+step:   lda gkb
+        lsr a
+        bcc :+
         lda gk
-        sbc #1                     ; (C set: the key)
+        sbc #1                     ; (C set: a plain decrement)
         and #NDIR-1
         sta gk
 :       lda gkb
@@ -491,7 +589,7 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         adc #1
         and #NDIR-1
         sta gk
-:       lda gkb                    ; (the pitch a step a tick)
+:       lda gkb
         and #4
         beq :+
         lda gp
@@ -511,25 +609,25 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         jsr spawn
 :       jmp parts
 @fly:
-        lda gkb                     ; thrust (none without fuel)
+        lda gkb                    ; Y = 1 if SPACE or SHIFT (both full thrust)
         lsr a
         lsr a
         lsr a
         lsr a
-        and #3                     ; (SPACE or SHIFT: both full thrust)
+        and #3
         beq :+
         lda #1
 :       tay
-        lda fuel                   ; (none without fuel, nor with the land gone
-        ora fuel+1                 ; from the screen below: Lander's engines cut
-        beq @off                   ; out at its HIGHEST_ALTITUDE; coasting on)
-        lda sy+2
-        bmi :+
-        cmp #16
-        bcs @off                   ; (16 tiles up: gone)
+        lda fuel                   ; none without fuel
+        ora fuel+1
+        beq @off
+        lda sy+2                   ; nor 16 tiles up (su's byte wrapped), nor
+        bmi :+                     ; with the land gone from the screen: CAME
+        cmp #16                    ; under EOFF means in view; from EOFF up,
+        bcs @off                   ; landoff checks last frame's rows
         lda CAME
         cmp #EOFF
-        bcc :+                     ; (the camera that low: in view)
+        bcc :+
         jsr landoff
         bcc :+
 @off:   ldy #0
@@ -537,11 +635,11 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         sta thr
         cmp #0
         beq :+
-        lda #0                     ; (thrust: off the ground)
+        lda #0                     ; thrusting: off the ground
         sta landed
-:       ldx #0                     ; drag: each v less v >> 6
-@dg:
-        ldy #6                     ; (gt1:gt0 = v >> 6, arithmetic)
+:       ldx #0                     ; drag, each of gvx, gvy, gvz (X 0, 2, 4):
+@dg:                               ; v -= (v >> 6) + (v >> 8), 1.25 of Lander's
+        ldy #6                     ; v >> 6; gt1:gt0 = v >> 6, arithmetic
         lda gvx+1,x
         sta gt1
         lda gvx,x
@@ -552,8 +650,8 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         ror gt0
         dey
         bne :-
-        jsr @ds                    ; (v >> 6, then v >> 8: 1.25 v >> 6)
-        lda gt1
+        jsr @ds
+        lda gt1                    ; then >> 2 more: v >> 8
         cmp #$80
         ror gt1
         ror gt0
@@ -567,7 +665,7 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         cpx #6
         bne @dg
         beq @th
-@ds:    lda gvx,x
+@ds:    lda gvx,x                  ; v (X) -= gt1:gt0
         sec
         sbc gt0
         sta gvx,x
@@ -576,9 +674,9 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         sta gvx+1,x
         rts
 @th:
-        lda thr                    ; thrust: THX, THY, THZ for (gp, gk), << THRS
-        beq @nt                    ; (full) or HOVS (hover), 1.25 (tadd); fuel 5
-        lsr a                      ; or 2.5 a step
+        lda thr                    ; thrust: gt5 the shift (THRS full; HOVS
+        beq @nt                    ; hover, unreachable), gt4 the fuel a step
+        lsr a                      ; (5 full; hover 2 and 3 by turns, hpar)
         lda #THRS
         ldy #5
         bcs :++
@@ -592,7 +690,7 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
 :       lda #HOVS
 :       sta gt5
         sty gt4
-        lda fuel
+        lda fuel                   ; fuel -= gt4, floor 0
         sec
         sbc gt4
         sta fuel
@@ -603,8 +701,8 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         lda #0
         sta fuel
         sta fuel+1
-:       jsr throw
-        lda (g0),y
+:       jsr throw                  ; gvx += 1.25 (THX[gp][gk] << gt5), gvz from
+        lda (g0),y                 ; THZ, gvy from THY[gp]
         ldx #gvx-gvx
         jsr tadd
         lda (g1),y
@@ -615,8 +713,8 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         ldx #gvy-gvx
         jsr tadd
         jsr emit
-@nt:    lda landed                 ; landed: still, refuelling
-        beq @mv
+@nt:    lda landed                 ; landed: still, refuelling REFUEL a step
+        beq @mv                    ; up to FUELMX
         lda #0
         ldx #5
 :       sta gvx,x
@@ -637,14 +735,14 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         lda gt0
         sta fuel
         jmp parts
-@mv:    lda gvy                     ; gravity
+@mv:    lda gvy                    ; gravity: gvy -= GRAV (y is up)
         sec
         sbc #<GRAV
         sta gvy
         lda gvy+1
         sbc #>GRAV
         sta gvy+1
-        ldx #gvx-gvx                 ; move: each position += 4 v
+        ldx #gvx-gvx               ; the move: each position += 5 v
         ldy #sx-sx
         jsr pmove
         ldx #gvz-gvx
@@ -653,19 +751,19 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         ldx #gvy-gvx
         ldy #sy-sx
         jsr pmove
-        lda sy+2                   ; below 0: the ground
+        lda sy+2                   ; y below 0: the ground
         bmi @gnd
-        cmp #16                    ; (16 tiles up: nowhere near it)
+        cmp #16                    ; 16 tiles up or more: nowhere near it
         bcc :+
         jmp parts
-:       jsr units                  ; the ground: the ship below the ground under
-        lda su+1                   ; it (HGV) + UNDER
+:       jsr units                  ; the centre less than UNDER units above HGV
+        lda su+1                   ; (or below it): the ground
         sec
         sbc HGV
         bcc @gnd
         cmp #UNDER
         bcs @up
-@gnd:   lda sx+2                   ; on the pad, slowly, near level: landed
+@gnd:   lda sx+2                   ; over the pad: tiles 0..PADN-1 in x and z
         and #63
         cmp #PADN
         bcs @crash
@@ -673,20 +771,20 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         and #63
         cmp #PADN
         bcs @crash
-        lda gp                     ; (and within a pitch step of level)
+        lda gp                     ; within a pitch of level: PFLAT-1..PFLAT+1
         sec
         sbc #PFLAT-1
         cmp #3
         bcs @crash
-        jsr speed
+        jsr speed                  ; and slower than LANDV
         bcs @crash
-        lda #1
+        lda #1                     ; landed: y = (HGV + UNDER) units, still
         sta landed
-        lda HGV                    ; on it: y (HGV + UNDER) units
+        lda HGV
         clc
         adc #UNDER
         sta gt0
-        asl a
+        asl a                      ; (units * 4096: bytes 1 and 2)
         asl a
         asl a
         asl a
@@ -703,8 +801,8 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
 :       sta gvx,x
         dex
         bpl :-
-        sei
-        sed
+        sei                        ; nland + 1, BCD (interrupts off in decimal
+        sed                        ; mode)
         lda nland
         clc
         adc #1
@@ -712,8 +810,8 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         cld
         cli
         jmp parts
-@crash: lda #CRASHT
-        sta ctim
+@crash: lda #CRASHT                ; crashed: CRASHT steps, the ship not drawn,
+        sta ctim                   ; ncrash + 1 (BCD), every dot from the ship
         lda #0
         sta GSHV
         sei
@@ -726,10 +824,12 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         cli
         jsr burst
         jmp parts
-@up:    jmp parts                  ; (no ceiling: it coasts up and falls back)
+@up:    jmp parts                  ; in the air: no ceiling
 
-; landoff: C set if the land was all below the screen last frame (every
-; point of every row past YGND).  X used, Y kept (step's thrust).
+; landoff: C set if the last frame's projection has the land wholly below the
+; screen: every point (np a row) of every row (nr, 16 bytes apart in PY) past
+; YGND; C clear at the first point on the screen.  Clobbers A, X, gt0, gt1; Y
+; kept (step's thrust).  Called by step.
 landoff:
         tya
         pha
@@ -740,7 +840,7 @@ landoff:
         sta gt1
 @p:     lda PY,x
         cmp #YGND+1
-        bcc @v                     ; (on the screen)
+        bcc @v
         inx
         dec gt1
         bne @p
@@ -760,8 +860,10 @@ landoff:
         rts
 
 
-; (g0), (g1): THX's and THZ's row for the pitch gp; Y = gk (their column).
-; X kept (emit's dot).
+; throw: g0 = THX's row for pitch gp, g1 = THZ's (THXL/H, THZL/H: 32 bytes a
+; pitch, one a direction), Y = gk, so (g0),y and (g1),y are the thrust's x
+; and z, 127 a unit.  Out: g0, g1, Y.  Clobbers A; X kept.  Called by step
+; and emit.
 throw:  ldy gp
         lda THXL,y
         sta g0
@@ -774,8 +876,10 @@ throw:  ldy gp
         ldy gk
         rts
 
-; v (X) += 1.25 (A << gt5): A << gt5, then A << (gt5 - 2) (gt5 1: A asr 1).
-; Y kept.
+; tadd: v (X: gvx, gvy or gvz's offset) += 1.25 (A << gt5), as A << gt5 then
+; A << (gt5 - 2); for gt5 below 2 the second term is A asr 1 (right for gt5
+; 1).  Clobbers A, gt0, gt1, gt2, tt0, tt1; X, Y and gt5 kept.  Called by
+; step.
 tadd:   sta tt0
         jsr vadd
         lda gt5
@@ -783,7 +887,7 @@ tadd:   sta tt0
         sec
         sbc #2
         bcs :+
-        lda tt0                    ; (A asr 1)
+        lda tt0                    ; A asr 1
         cmp #$80
         ror a
         sta tt0
@@ -795,10 +899,11 @@ tadd:   sta tt0
         sta gt5
         rts
 
-; v (X: gvx, gvy or gvz's offset) += A (signed) << gt5.
+; vadd: v (X: gvx, gvy or gvz's offset) += A (signed) << gt5, 16-bit.
+; Clobbers A, gt0, gt1, gt2; Y kept (through gt2).  Called by tadd.
 vadd:   sta gt0
         lda #0
-        bit gt0
+        bit gt0                    ; gt1: A's sign extension
         bpl :+
         lda #$FF
 :       sta gt1
@@ -820,19 +925,20 @@ vadd:   sta gt0
         sta gvx+1,x
         rts
 
-; Position (Y: sx, sy or sz's offset) += 5 v (X: its v's offset), 24 bits
-; (4 v Lander's step, 1.25 of it a step here).
+; pmove: position (Y: sx, sy or sz's offset) += 5 v (X: its velocity's
+; offset), 24-bit: 4 v is Lander's step, 5 v is 1.25 of it.  Clobbers A,
+; gt0..gt3; X, Y kept.  Called by step.
 pmove:  lda gvx,x
         sta gt0
         lda gvx+1,x
         sta gt1
-        lda #0
+        lda #0                     ; gt2 (and gt3): v's sign extension
         bit gt1
         bpl :+
         lda #$FF
 :       sta gt2
         sta gt3
-        asl gt0
+        asl gt0                    ; gt2:gt1:gt0 = 4 v
         rol gt1
         rol gt2
         asl gt0
@@ -860,12 +966,13 @@ pmove:  lda gvx,x
         sta sx+2,y
         rts
 
-; C clear if |gvx| + |gvy| + |gvz| < LANDV.
+; speed: C clear if |gvx| + |gvy| + |gvz| < LANDV, set if not.  Clobbers A,
+; X, Y, gt2, gt3.  Called by step.
 speed:  lda #0
         sta gt2
         sta gt3
         ldx #0
-@a:     lda gvx,x
+@a:     lda gvx,x                  ; Y:A = |v|
         ldy gvx+1,x
         bpl :+
         eor #$FF
@@ -894,6 +1001,15 @@ speed:  lda #0
         rts
 
 ; ---------------------------------------------------------------- dots
+; The dots: NPART of them, each a life in steps (plife, 0 dead), a position
+; (ppx, ppz: 8.8 tiles as ppxh:ppx, ppzh:ppz; ppy: height units 8.8) and a
+; velocity (pvx, pvz: 1/256 tile per Lander step; pvy: 1/256 unit), each
+; advancing 1.25 v a step.  The exhaust (emit) adds one a step while
+; thrusting; a
+; crash (burst) relaunches them all.
+
+; rand: A = rnd, the next state of an 8-bit LFSR (x^8 + x^4 + x^3 + x^2 + 1,
+; period 255).  Clobbers A.
 rand:   lda rnd
         asl a
         bcc :+
@@ -901,8 +1017,11 @@ rand:   lda rnd
 :       sta rnd
         rts
 
-; A dot from the exhaust: the ship's place, a little below; its velocity the
-; ship's less the thrust's way, jittered.
+; emit: the next dot (pnext, each in turn) relaunched from the ship's
+; underside with velocity the thrust's opposite: x and z -THX/2, -THZ/2 for
+; (gp, gk) plus a jitter of -16..15, plus the ship's v >> 6 (its units); y
+; -8 (THY + 1) plus the ship's gvy / 4.  Reads gp, gk, sx, sz, sy, gv*.
+; Clobbers A, X, Y, g0, g1, gt0..gt3, su.  Called by step.
 emit:   ldx pnext
         inx
         cpx #NPART
@@ -912,14 +1031,14 @@ emit:   ldx pnext
         jsr dot0
         lda #PLIFE
         sta plife,x
-        jsr throw                  ; the exhaust: - thrust / 2 (x, z), - 8 thrust (y)
+        jsr throw
         lda (g0),y
         jsr exh
-        sta gt0                    ; (x)
+        sta gt0                    ; (-THX / 2)
         lda (g1),y
         jsr exh
-        sta gt1
-        jsr rand                   ; jitter, + the ship's (v >> 6)
+        sta gt1                    ; (-THZ / 2)
+        jsr rand                   ; x: + jitter, sign-extended into pvxh:pvx
         and #31
         sec
         sbc #16
@@ -929,7 +1048,7 @@ emit:   ldx pnext
         sta pvx,x
         tya
         sta pvxh,x
-        ldy #gvx-gvx
+        ldy #gvx-gvx               ; + gvx >> 6 (16384ths of a tile to 256ths)
         jsr vsh6
         lda pvx,x
         clc
@@ -938,7 +1057,7 @@ emit:   ldx pnext
         lda pvxh,x
         adc gt3
         sta pvxh,x
-        jsr rand
+        jsr rand                   ; z likewise
         and #31
         sec
         sbc #16
@@ -957,7 +1076,7 @@ emit:   ldx pnext
         lda pvzh,x
         adc gt3
         sta pvzh,x
-        ldy gp                     ; y: - THY * 8, + the ship's (gvy / 4)
+        ldy gp                     ; y: gt1:gt0 = -(THY + 1) << 3
         lda THY,y
         eor #$FF
         sta gt0
@@ -969,8 +1088,8 @@ emit:   ldx pnext
         rol gt1
         asl gt0
         rol gt1
-        lda gvy+1
-        cmp #$80
+        lda gvy+1                  ; gt3:gt2 = gvy asr 2 (1024ths of a unit to
+        cmp #$80                   ; 256ths)
         ror a
         sta gt3
         lda gvy
@@ -988,7 +1107,8 @@ emit:   ldx pnext
         adc gt3
         sta pvyh,x
         rts
-; gt3:gt2 = v (Y: its offset) >> 6, arithmetic (X kept).
+; vsh6: gt3:gt2 = v (Y: gvx, gvy or gvz's offset) >> 6, arithmetic.
+; Clobbers A, Y; X kept.
 vsh6:   lda gvx,y
         sta gt2
         lda gvx+1,y
@@ -1001,20 +1121,23 @@ vsh6:   lda gvx,y
         dey
         bne :-
         rts
-exh:    eor #$FF                   ; - A / 2 (signed)
+; exh: A = -A / 2, signed (negate, then asr).
+exh:    eor #$FF
         clc
         adc #1
         cmp #$80
         ror a
         rts
-; A (signed) sign-extended into Y:A.
+; sxadd: Y = A's sign extension ($00 or $FF); A kept.
 sxadd:  ldy #0
         cmp #$80
         bcc :+
         dey
 :       rts
 
-; Dot X at the ship: x, z (8.8 tiles), y (units 8.8) less 6 units.
+; dot0: dot X placed at the ship: x and z the ship's (8.8 tiles), y the
+; ship's height (su, 8.8 units) less UNDER whole units: its underside.
+; Clobbers A, Y, su; X kept.  Called by emit and burst.
 dot0:   lda sx+1
         sta ppx,x
         lda sx+2
@@ -1032,7 +1155,9 @@ dot0:   lda sx+1
         sta ppyh,x
         rts
 
-; The crash: every dot from the ship, every way.
+; burst: the crash: every dot relaunched from the ship, x and z velocities
+; random in -64..63, y random upwards (0..1023, both bytes from one rand).
+; Clobbers A, X, Y, su.  Called by step.
 burst:  ldx #NPART-1
 @b:     jsr dot0
         lda #PLIFE
@@ -1061,12 +1186,15 @@ burst:  ldx #NPART-1
         bpl @b
         rts
 
-; Each live dot a step: moved, gravity.
+; parts: each live dot a step: its life down one, each position += 1.25 v
+; (q5), then gravity PGRAV off pvy.  A dot whose height leaves its byte (below
+; 0, or past 255 units) dies rather than wrapping.  Clobbers A, X, Y,
+; gt0..gt3.  Called by step (every path).
 parts:  ldx #NPART-1
 @p:     lda plife,x
         beq @n
         dec plife,x
-        lda pvx,x                  ; (each += 1.25 v)
+        lda pvx,x
         ldy pvxh,x
         jsr q5
         lda ppx,x
@@ -1096,14 +1224,14 @@ parts:  ldx #NPART-1
         lda ppyh,x
         adc gt1
         sta ppyh,x
-        ror a                      ; (past either end of its byte: below the sea,
-        eor gt1                    ; or the ceiling's units: gone, not wrapped
-        bpl :+                     ; round; C: no borrow down, a carry up)
+        ror a                      ; bit 7 = C eor the step's sign: set when a
+        eor gt1                    ; rise carried out of the byte or a fall
+        bpl :+                     ; borrowed past 0: the dot dies
         lda #0
         sta plife,x
         beq @n
 :
-        lda pvy,x
+        lda pvy,x                  ; pvy -= PGRAV
         sec
         sbc #PGRAV
         sta pvy,x
@@ -1113,7 +1241,8 @@ parts:  ldx #NPART-1
         bpl @p
         rts
 
-; gt1:gt0 = 1.25 (Y:A), signed.  X kept.
+; q5: gt1:gt0 = 1.25 (Y:A), signed: Y:A + (Y:A asr 2).  Clobbers A, Y,
+; gt2, gt3; X kept.  Called by parts.
 q5:     sta gt2
         sty gt3
         sta gt0
@@ -1135,19 +1264,25 @@ q5:     sta gt2
         rts
 
 ; ---------------------------------------------------------------- post
-; After the ship: the dots (each a pixel, the column's TOPS, BOTS widened over
-; it so the strips take it off), the map's dot, the status.
-gpre:   jsr dset                   ; (before the ship) the dots beyond it in z
+; gpre (G_PRE, after the strips, before the ship): the live dots beyond the
+; ship in z, each a pixel on the screen being drawn, the column's TOPS and
+; BOTS widened over it so the strips that next draw this screen take it off.
+; gpost (G_POST, after the ship): the dots nearer than the ship, then the
+; map's ship marker and the fuel bar.  Both clobber A, X, Y, g0, g1,
+; gt0..gt5, su, tsg, bsg, scrg, dpass; gpost also mdl, mdp, mdc.
+gpre:   jsr dset
         lda #0
         beq dots
-gpost:  jsr dset                   ; (after it) the rest; the map's dot, the
-        lda #$80                   ; status
+gpost:  jsr dset
+        lda #$80
         jsr dots
         jsr marker
         jmp status
+; dset: scrg = the screen being drawn (scrb); tsg, bsg = its TOPS and BOTS
+; (the set sidx picks for back); su from sy.  Clobbers A, X, Y.
 dset:   lda scrb
         sta scrg
-        ldx back                   ; this screen's TOPS, BOTS
+        ldx back
         ldy sidx,x
         lda setTl,y
         sta tsg
@@ -1158,9 +1293,12 @@ dset:   lda scrb
         lda setBh,y
         sta bsg+1
         jmp units
-; The live dots beyond the ship in z (A 0) or not (A $80).
+; dots: pdraw for each live dot whose z less the ship's has the sign A
+; selects: A 0 for z at or beyond the ship's, $80 for nearer.  None at all
+; from 16 tiles up (su's whole byte has wrapped).  Clobbers A, X, Y, dpass
+; and pdraw's.
 dots:   sta dpass
-        lda sy+2                   ; (16 tiles up: none drawn, su's byte past)
+        lda sy+2
         bmi :+
         cmp #16
         bcc :+
@@ -1169,7 +1307,7 @@ dots:   sta dpass
         ldx #NPART-1
 @d:     lda plife,x
         beq @n
-        lda ppz,x                  ; (its z less the ship's: its sign, dpass's)
+        lda ppz,x                  ; the sign of (its z - the ship's), 16-bit
         cmp sz+1
         lda ppzh,x
         sbc sz+2
@@ -1180,21 +1318,26 @@ dots:   sta dpass
         bpl @d
         rts
 
-; Dot X: x 128 + (its x less the ship's) * 16, y the ship's + its height under
-; the ship's (a unit a line) - its z beyond the ship's * 4.
-pdraw:  lda ppx,x                  ; dx (8.8)
+; pdraw: dot X on screen scrg if it fits: x = 128 + 16 dx (dx its x less the
+; ship's, tiles; |dx| under 8), y = GSHY + dy - 4 dz (dy the ship's height
+; less its, whole units, one line each, -128..127; dz its z less the ship's,
+; tiles), y within YSKY..YGND.  The pixel is yellow, or magenta in its last
+; five steps; then the column's TOPS and BOTS (tsg, bsg) widened to it.
+; Reads ppx.., sx, sz, su, GSHY, plife.  Clobbers A, Y, g0, gt0..gt5; X
+; kept.  Called by dots.
+pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         sec
         sbc sx+1
         sta gt0
         lda ppxh,x
         sbc sx+2
-        sta gt1                    ; (|dx| < 8 tiles: then >> 4, + 128)
-        clc
+        sta gt1
+        clc                        ; off unless -8 <= dx < 8
         adc #8
         cmp #16
         bcc :+
 @o1:    jmp @o
-:       ldy #4
+:       ldy #4                     ; dx >> 4: 16 pixels a tile
 :       lda gt1
         cmp #$80
         ror gt1
@@ -1202,19 +1345,19 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         dey
         bne :-
         lda gt0
-        eor #$80
+        eor #$80                   ; + 128
         sta gt2                    ; (screen x)
-        lda su                     ; dy: the ship's height less its (units 8.8)
-        sec
+        lda su                     ; dy = the ship's height less the dot's,
+        sec                        ; whole units (the fraction only borrows)
         sbc ppy,x
         lda su+1
-        sbc ppyh,x                 ; (lines: whole units, signed; off if not
-        sta gt3                    ; within a byte, the ship far above it)
-        bcc :+
-        bmi @o1
+        sbc ppyh,x
+        sta gt3
+        bcc :+                     ; no borrow: off if >= 128; a borrow: off
+        bmi @o1                    ; unless the byte is -128..-1
         bpl :++
 :       bpl @o1
-:       lda ppz,x                  ; dz (8.8) >> 6: lines up
+:       lda ppz,x                  ; 4 dz: dz (8.8) >> 6, as a byte
         sec
         sbc sz+1
         sta gt0
@@ -1225,7 +1368,7 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         asl gt0
         rol a
         sta gt1
-        lda GSHY
+        lda GSHY                   ; y = GSHY + dy - 4 dz, within YSKY..YGND
         clc
         adc gt3
         sec
@@ -1235,32 +1378,32 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         cmp #YGND+1
         bcs @o
         sta gt3                    ; (screen y)
-        ; the byte: scrg + 2 (y >> 3), (y & 7) + 8 (x >> 2)
+        ; the byte: scrg + $200 (y >> 3) + 8 (x >> 2) + (y & 7)
         and #7
         sta g0
         lda gt2
         and #$FC
-        asl a
+        asl a                      ; (8 (x >> 2): its carry is the $100 bit)
         php
         ora g0
         sta g0
         lda gt3
         lsr a
         lsr a
-        and #$FE
+        and #$FE                   ; 2 (y >> 3)
         plp
         adc scrg
         sta g0+1
-        lda gt2
-        and #3
-        tay
+        lda gt2                    ; the pixel's bits (PIXG by x & 3) masked
+        and #3                     ; out of the byte, then set: both for yellow,
+        tay                        ; the high one only for magenta (life < 6)
         lda PIXG,y
         sta gt4
         eor #$FF
         ldy #0
         and (g0),y
         sta gt5
-        lda gt4                    ; yellow young, magenta old
+        lda gt4
         ldy plife,x
         cpy #6
         bcs :+
@@ -1268,8 +1411,8 @@ pdraw:  lda ppx,x                  ; dx (8.8)
 :       ora gt5
         ldy #0
         sta (g0),y
-        lda gt2                    ; the column's TOPS, BOTS over it
-        lsr a
+        lda gt2                    ; the column (x >> 2): TOPS no lower than y,
+        lsr a                      ; BOTS no higher
         lsr a
         tay
         lda gt3
@@ -1281,23 +1424,27 @@ pdraw:  lda ppx,x                  ; dx (8.8)
         sta (bsg),y
 @o:     rts
 
-; The ship's dot on the map: 2 x 2 pixels, magenta, on the four tiles nearest
-; it, on both screens (each its own, put back from MAPI as it moves); none
-; while crashed.
+; marker: the ship's dot on the map of the screen being drawn (back): 2 x 2
+; pixels, magenta, on the four tiles whose common corner is nearest the ship
+; (gamegen's layout: tile x at pixel (x + MAPX) & 63, z at line (MAPZ - z) &
+; 63); none while GSHV is 0.  Each screen remembers its dot (mkl line, $FF
+; none; mkp pixel): if the new place differs the old dot is restored from
+; MAPI first.  Clobbers A, X, Y, g0, g1, gt0..gt5, mdl, mdp, mdc.  Called by
+; gpost.
 marker: ldx back
-        lda #$FF                   ; (none)
+        lda #$FF                   ; (no dot)
         sta gt0
         lda GSHV
         beq @h
-        lda sz+1                   ; the top line: MAPZ - z, less 1 if z's
-        eor #$FF                   ; fraction >= 1/2 (gamegen's)
-        asl a
+        lda sz+1                   ; the top line: MAPZ - z's tile, one less if
+        eor #$FF                   ; its fraction is 1/2 or more (C clear from
+        asl a                      ; the asl of the inverted fraction)
         lda #MAPZ
         sbc sz+2
         and #63
         sta gt0
-        lda sx+1                   ; the left pixel: x + MAPX - 1, + 1 if x's
-        asl a                      ; fraction >= 1/2
+        lda sx+1                   ; the left pixel: x's tile + MAPX - 1, plus
+        asl a                      ; 1 if its fraction is 1/2 or more (C)
         lda sx+2
         adc #MAPX-1
         and #63
@@ -1307,15 +1454,15 @@ marker: ldx back
         bne :+
         lda gt1
         cmp mkp,x
-        beq @r                     ; (unmoved)
-:       lda mkl,x                  ; the old one off
+        beq @r                     ; (unmoved on this screen)
+:       lda mkl,x                  ; the old dot back to the map's pixels
         bmi :+
         sta mdl
         lda mkp,x
         sta mdp
         lda #0
         jsr mdot
-:       ldx back                   ; the new one on
+:       ldx back                   ; the new one remembered and drawn
         lda gt1
         sta mkp,x
         sta mdp
@@ -1326,8 +1473,9 @@ marker: ldx back
         lda #$80
         jmp mdot
 @r:     rts
-; Pixels (mdp, mdl), the next right and the next down (round the map), magenta
-; (A $80) or the map's (A 0).
+; mdot: the four pixels (mdp, mdl), (mdp+1, mdl), (mdp+1, mdl+1), (mdp,
+; mdl+1), wrapping at the map's edges, magenta (A $80) or the map's own (A 0).
+; Clobbers A, Y, g0, g1, gt2..gt5, mdc; mdp, mdl kept.
 mdot:   sta mdc
         jsr mpix
         inc mdp
@@ -1338,41 +1486,43 @@ mdot:   sta mdc
         jsr mpix
         dec mdl
         rts
-; Pixel mdp & 63 of the map's line mdl & 63 on screen scrg (as gscr's).
+; mpix: pixel mdp & 63 of map line mdl & 63 on screen scrg (the map's bytes as
+; gscr lays them): magenta (mdc bit 7: the pixel's high bit only), or the
+; colour MAPI holds for it.  Clobbers A, Y, g0, g1, gt2..gt5.
 mpix:   lda mdl
         and #63
-        sta gt2                    ; (line)
+        sta gt2                    ; (the line)
         and #7
         sta g0
         lda mdp
         and #63
-        sta gt3                    ; (pixel)
+        sta gt3                    ; (the pixel)
         lsr a
         lsr a
-        sta gt4                    ; (byte)
-        asl a
-        asl a
+        sta gt4                    ; (its byte in the line, 0..15)
+        asl a                      ; the screen byte: scrg + $200 (line >> 3)
+        asl a                      ; + $180 + 8 byte + (line & 7)
         asl a
         ora g0
-        ora #$80                   ; (+ 48 * 8 = $180)
+        ora #$80
         sta g0
         lda gt2
         lsr a
         lsr a
         and #$FE
-        sec                        ; (+ 1)
+        sec                        ; (+ $100 of the $180)
         adc scrg
         sta g0+1
         lda gt3
         and #3
         tay
         lda PIXG,y
-        sta gt3                    ; (its bits)
+        sta gt3                    ; (the pixel's bits)
         bit mdc
         bpl :+
         and #$F0                   ; magenta
         bne @w
-:       lda gt2                    ; the map's: MAPI + 16 line + byte
+:       lda gt2                    ; the map's: MAPI + 16 line + byte, masked
         lsr a
         lsr a
         lsr a
@@ -1393,7 +1543,7 @@ mpix:   lda mdl
         ldy #0
         lda (g1),y
         and gt3
-@w:     sta gt5
+@w:     sta gt5                    ; the pixel's bits replaced in the byte
         lda gt3
         eor #$FF
         ldy #0
@@ -1402,9 +1552,13 @@ mpix:   lda mdl
         sta (g0),y
         rts
 
-; The fuel bar, on this screen if changed.
+; status: the fuel bar on screen scrg, redrawn when its length differs from
+; what this screen shows (fdr, by back): fuel >> 6 pixels (80 full), yellow,
+; four lines deep (FBL..FBL+3 of row FUELR), over byte columns FBC..FBC+19,
+; each byte BARB by the pixels left for it.  Clobbers A, X, Y, g0, gt0, gt1.
+; Called by gpost.
 status: ldx back
-        lda fuel+1                 ; the bar: fuel >> 6 pixels
+        lda fuel+1                 ; gt1 = fuel >> 6
         sta gt1
         lda fuel
         asl a
@@ -1415,8 +1569,8 @@ status: ldx back
         cmp fdr,x
         beq @c
         sta fdr,x
-        sta gt0                    ; (pixels left)
-        lda #FBC*8+FBL             ; the bytes, left to right: 4 lines each
+        sta gt0                    ; (pixels left to draw)
+        lda #FBC*8+FBL             ; the first byte, then 8 on a column
         sta g0
         lda scrg
         clc
@@ -1428,7 +1582,7 @@ status: ldx back
         lda #4
 :       tay
         lda BARB,y
-        ldy #3
+        ldy #3                     ; the column's four lines
 :       sta (g0),y
         dey
         bpl :-
@@ -1445,42 +1599,44 @@ status: ldx back
         cmp #(FBC+20)*8+FBL
         bcc @b
 @c:     rts
-BARB:   .byte $00, $88, $CC, $EE, $FF
-PIXG:   .byte $88, $44, $22, $11   ; a pixel's bits (LAND's PIXM is in bank 4)
+BARB:   .byte $00, $88, $CC, $EE, $FF   ; 0..4 pixels lit from the left, yellow
+PIXG:   .byte $88, $44, $22, $11   ; pixel 0..3's two bits in a byte (LAND's
+                                   ; PIXM is in bank 4, unreadable from here)
 
 ; ---------------------------------------------------------------- state
-gmx:     .byte 0                    ; the yaw, 8 a direction (wrapping)
-gmz:     .byte 0                    ; (unused)
-gkb:     .byte 0                    ; the keys held
-gk:     .byte 0                    ; the ship's direction (0..31), pitch (0..7)
-gp:     .byte 0
-thr:    .byte 0                    ; this step's thrust (1 full, 2 hover)
-landed: .byte 0
-ctim:   .byte 0                    ; crashed: steps left
-sx:     .res 3                     ; position: x, z, y (lo, mid, hi)
-sz:     .res 3
+gmx:    .byte 0                    ; (unused by the game: zeroed by ginit;
+gmz:    .byte 0                    ; test/gametest.py prints them)
+gkb:    .byte 0                    ; the keys down (keys' bits)
+gk:     .byte 0                    ; the ship's direction (0..NDIR-1) and pitch
+gp:     .byte 0                    ; (0..NPITCH-1, PFLAT level)
+thr:    .byte 0                    ; this step's thrust: 0 none, 1 full (2 is
+                                   ; hover: never set)
+landed: .byte 0                    ; 1: sitting on the pad
+ctim:   .byte 0                    ; crashed: steps left (0: flying)
+sx:     .res 3                     ; position: x, z, y, 24-bit, 65536 a tile (y
+sz:     .res 3                     ; 4096 a height unit)
 sy:     .res 3
-gvx:     .res 2                     ; velocity
-gvy:     .res 2
+gvx:    .res 2                     ; velocity, 16-bit, 16384 a tile/Lander step
+gvy:    .res 2                     ; (consecutive: step runs X over them)
 gvz:     .res 2
-su:     .res 2                     ; (units' height, 8.8)
-fuel:   .res 2
-fkey:   .byte 0                    ; (F held last time)
-hpar:   .byte 0                    ; (hover's half unit of fuel)
+su:     .res 2                     ; the ship's height in units, 8.8 (units')
+fuel:   .res 2                     ; 0..FUELMX
+fkey:   .byte 0                    ; (keys': F's bit last time)
+hpar:   .byte 0                    ; (hover's fuel toggle: unused in effect)
 sstp:   .byte 0                    ; (snd's: the crash's step)
-dpass:  .byte 0                    ; (dots': $80 the near ones)
+dpass:  .byte 0                    ; (dots': 0 the far dots, $80 the near)
 tt0:    .byte 0                    ; (tadd's)
 tt1:    .byte 0
-sctl:   .byte $FF                  ; (the noise channel as last written)
-satt:   .byte $FF
-nland:  .byte 0                    ; (BCD)
-ncrash: .byte 0
-rnd:    .byte 0
-scrg:   .byte 0
-pnext:  .byte 0
-plife:  .res NPART
-ppx:    .res NPART
-ppxh:   .res NPART
+sctl:   .byte $FF                  ; the noise control and attenuation bytes as
+satt:   .byte $FF                  ; last written
+nland:  .byte 0                    ; landings and crashes, BCD (counted, never
+ncrash: .byte 0                    ; shown; test/gametest.py prints them)
+rnd:    .byte 0                    ; rand's state
+scrg:   .byte 0                    ; the screen being written to (high byte)
+pnext:  .byte 0                    ; emit's last dot
+plife:  .res NPART                 ; the dots: life (0 dead); position x, z (8.8
+ppx:    .res NPART                 ; tiles), y (8.8 units); velocity x, z (1/256
+ppxh:   .res NPART                 ; tile), y (1/256 unit)
 ppz:    .res NPART
 ppzh:   .res NPART
 ppy:    .res NPART
@@ -1491,14 +1647,14 @@ pvz:    .res NPART
 pvzh:   .res NPART
 pvy:    .res NPART
 pvyh:   .res NPART
-mkl:    .res 2                     ; the map's dot, by screen: its line ($FF none),
-mkp:    .res 2                     ; pixel
-mdl:    .res 1                     ; (mdot's)
+mkl:    .res 2                     ; the map's dot, by screen: line ($FF none)
+mkp:    .res 2                     ; and left pixel
+mdl:    .res 1                     ; (mdot's: line, pixel, colour)
 mdp:    .res 1
 mdc:    .res 1
-fdr:    .res 2                     ; the bar and counts drawn, by screen
-dl:     .res 2
-dc:     .res 2
+fdr:    .res 2                     ; the fuel bar's length drawn, by screen
+dl:     .res 2                     ; (unused: set to $FF by ginit)
+dc:     .res 2                     ; (unused: set to $FF by ginit)
 
         .include "gametab.inc"
-        .assert * <= GLY5, error, "the game over GLY5"
+        .assert * <= GLY5, error, "the game must end below the letters at GLY5"

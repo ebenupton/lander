@@ -219,7 +219,8 @@ TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))   # (the BBC'
 
 
 TILERND2 = np.random.default_rng(54321).integers(0, 16, (MAP, MAP))  # (a second pick)
-LIGHT = 0.5               # the lighting's weight against the random pick (gentle: half)
+LIGHT = 0.5               # the lighting's weight against the random pick (gentle: half),
+LIGHTL = 0.65             # and the light/dark axis's (from the left, as the ship's)
 SLOPE1 = 6                # a slope (sixteenths a tile) that takes the light from middling
                           # to the dark or light end
 
@@ -255,7 +256,7 @@ def _targets(hm):
             alt = min(1.0, max(0.0, (sum(hs) / 4 - SEA) / (HMAX - SEA)))
             slope = ((hs[0] + hs[2]) - (hs[1] + hs[3])) / 2
             ty = (1 - LIGHT) * TILERND[j, i] / 15 + LIGHT * (1 - alt)
-            tl = (1 - LIGHT) * TILERND2[j, i] / 15 + LIGHT * min(1.0, max(0.0, 0.5 - slope / SLOPE1))
+            tl = (1 - LIGHTL) * TILERND2[j, i] / 15 + LIGHTL * min(1.0, max(0.0, 0.5 - slope / SLOPE1))
             raw[(i, j)] = (ty + 1e-6 * (i + MAP * j), tl + 1e-6 * (j + MAP * i))
     keys = list(raw)
     out = {}

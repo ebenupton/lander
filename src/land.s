@@ -2417,7 +2417,7 @@ ff_o:   lda BO,x
         iny
         cpy fwe
         bne ff_e
-        beq ff_d
+        jmp c_np                   ; (as ff_d)
 fe_r:   lda BE,x                   ; the floor's run
         sta RVE
         lda BO,x

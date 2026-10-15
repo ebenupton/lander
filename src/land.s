@@ -1037,8 +1037,8 @@ bclip:  lda BCL
         rts
 
 ; setup: the strip's points, boxes and margins, and its bottom row's line.
-; Points 1 .. np: strip 0 takes row 0 as both rows (its TX, TY are unused:
-; it is only traced); a land strip (ns 1 .. nr-1) takes rows ns-1 (TX, TY)
+; Points 1 .. np: strip 0 takes row 0 as its bottom row only (it is only
+; traced: its TX, TY, CE and CO are never read); a land strip (ns 1 .. nr-1) takes rows ns-1 (TX, TY)
 ; and ns (BX, BY) and its boxes 1 .. np-1 from pcol5's window (su_l7, in
 ; bank 7); BCL counts the bottom points past YGND.  Points 0 and np+1 are the
 ; margins: x at the byte boundary at or left of the bottom row's first point
@@ -1075,22 +1075,17 @@ ldCLE:  .byte 0                    ; pcol5's: 16 * its window offset, added to
                                    ; su_l7's CLE, CLO index (data, in the code)
 su_qc:    inc BCL                  ; a bottom point past YGND
         bcs su_qb                  ; (always: C from the cmp)
-        ; strip 0: row 0 as both rows, boxes black (it is traced only: its
-        ; TY, CE and CO are never read)
+        ; strip 0: row 0 as its bottom row (it is traced only: its TX, TY,
+        ; CE and CO are never read, so they are left as they are)
 su_r:     tay                      ; Y: the row's offset in PX, PY
         ldx #1
-su_q:     lda PX,y                 ; points 1 .. np: the row's as both rows
-        sta TX,x
+su_q:     lda PX,y                 ; points 1 .. np: the row's
         sta BX,x
         lda PY,y
-        sta TY,x
         sta BY,x
         cmp #YGND+1
         bcs su_qc
-su_qb:    lda #0                   ; boxes black
-        sta CE,x
-        sta CO,x
-        iny
+su_qb:    iny
         inx
         cpx np1
         bcc su_q
@@ -1200,7 +1195,7 @@ traceb: lda bota+1                 ; the row's page: jvb's store, and the
         sta tyv
         ldx #0
         beq t_seg
-        .res 18                    ; (padding: keeps the code after it in place)
+        .res 32                    ; (padding: keeps the code after it in place)
 t_end:  ldx #0                     ; (operand: the end + 1) the row's end: the
         jmp t_fl                   ; pending run to it, then t_fr's RTS returns
                                    ; to strips

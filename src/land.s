@@ -1672,49 +1672,36 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         sta zb2+7
         sta zb3+2
         sta zb3+7
-        ldx #$AA                   ; TAX / INX / STX flr1: the floor's line after
-        ldy #$E8                   ; (JMP c_nd: no nearpost)
-        lda #$86
-        bit last
-        bpl :+
-        ldx #$85                   ; (the near strip: STA flr / STA flr1, the floor
-        ldy #flr                   ; itself if level; JMP nearpost)
-        txa
-        bne @lvs
-:       lda BCL                    ; (bclip's: JSR flrc / NOP)
-        beq @lvn
-        ldx #$20
-        ldy #<flrc
-        lda #$EA
-        sta c_lv+3
-        sta o_lv+3
-        lda #>flrc
-        bne @lvp
-@lvs:   ldx #$85                   ; (STA flr / STA flr1)
-@lvn:   lda #flr1
-        sta c_lv+3
-        sta o_lv+3
-        lda #$86
-        cpx #$85
-        bne @lvp
-        txa
-@lvp:   stx c_lv
-        sty c_lv+1
+        ldx #0                     ; c_lv, o_lv; c_np (patched only when the
+        bit last                   ; kind changes: lvk's): 0 TAX / INX / STX
+        bpl :+                     ; flr1, LDA x4 / CLC; 1 bclip's JSR flrc /
+        ldx #2                     ; NOP; 2 the near strip's STA flr / STA flr1
+        bne @lvk                   ; (the floor itself if level), JMP nearpost
+:       lda BCL
+        beq @lvk
+        inx
+@lvk:   cpx #$FF                   ; (the kind patched: $FF none yet)
+        beq @lvd
+        stx @lvk+1
+        lda lvt0,x
+        sta c_lv
+        sta o_lv
+        lda lvt1,x
+        sta c_lv+1
+        sta o_lv+1
+        lda lvt2,x
         sta c_lv+2
-        stx o_lv
-        sty o_lv+1
         sta o_lv+2
-        ldx #$A5                   ; c_np: LDA x4 / CLC (the next column's,
-        lda #x4                    ; inline), but in the near strip JMP nearpost
-        ldy #$18
-        bit last
-        bpl :+
-        ldx #$4C
-        lda #<nearpost
-        ldy #>nearpost
-:       stx c_np
+        lda lvt3,x
+        sta c_lv+3
+        sta o_lv+3
+        lda npt0,x
+        sta c_np
+        lda npt1,x
         sta c_np+1
-        sty c_np+2
+        lda npt2,x
+        sta c_np+2
+@lvd:
         lda xlp                    ; record below xlp or from xrp on (strip 1: all,
         ldx ns                     ; to xr): phase's
         dex
@@ -2198,6 +2185,13 @@ sh_2:   sta TPO0*256,x
         sta rc_h+2
         sta sl_h+2
         rts
+lvt0:   .byte $AA, $20, $85        ; (cols': c_lv, o_lv by kind)
+lvt1:   .byte $E8, <flrc, flr
+lvt2:   .byte $86, >flrc, $85
+lvt3:   .byte flr1, $EA, flr1
+npt0:   .byte $A5, $A5, $4C        ; (c_np's)
+npt1:   .byte x4, x4, <nearpost
+npt2:   .byte $18, $18, >nearpost
 shs:    .byte $30, $31, $58, $59   ; (scrb + half, by t)
 sht:    .byte >STAB, (>STAB)+2, (>STAB)+4, (>STAB)+6 ; (stb0 + 2 * half)
 tpe:    .byte TPE0, TPE1, TPE2, TPE3 ; (tools/landgen.py's)

@@ -3412,6 +3412,7 @@ rfastr: cpy #RFA+1                  ; (Y: a, rungs')
         tax
         lda DUFR-1,y
         sta @j+1
+        ldy alloc                  ; (RFBODY's: alloc in RTBUF's page)
 @j:     jmp FR0
 @sl:    lda dva
         asl a
@@ -3430,6 +3431,7 @@ rfastl: cpy #RFA+1                  ; (Y: a, rungs')
         tax
         lda DUFL-1,y
         sta @j+1
+        ldy alloc
 @j:     jmp FL0
 @sl:    lda dva
         asl a
@@ -3439,28 +3441,25 @@ B16:    .repeat RFA, i
         .byte 16 * (RFA - 1 - i)
         .endrepeat
 DUFR:   .repeat RFA, i
-        .byte <(FR0 + 9 * (RFA - 1 - i))
+        .byte <(FR0 + 8 * (RFA - 1 - i))
         .endrepeat
 DUFL:   .repeat RFA, i
-        .byte <(FL0 + 9 * (RFA - 1 - i))
+        .byte <(FL0 + 8 * (RFA - 1 - i))
         .endrepeat
 .macro RFBODY T
-        .repeat RFA, i
+        .repeat RFA, i                 ; (Y: alloc, the rung's first byte in RTBUF's page)
         lda .ident(.sprintf("%s%d", T, RFA - 1 - i)),x
         adc rrem                   ; (C clear: no carry)
-        ldy #RFA - 1 - i
-        sta (alloc),y
+        sta RTBUF + RFA - 1 - i,y
         .endrepeat
-        lda #$FF                   ; the sentinel (Y = a), alloc += a + 1
-        ldy dva
-        sta (alloc),y
-        tya
+        tya                        ; the sentinel (alloc + a), alloc += a + 1
         sec
-        adc alloc
+        adc dva
         sta alloc
-        bcc :+
-        inc alloc+1
-:       ldx tj                     ; the next rung (rungs' @nx)
+        tay
+        lda #$FF
+        sta RTBUF-1,y
+        ldx tj                     ; the next rung (rungs' @nx)
         inx
         cpx np1
         bcs :+

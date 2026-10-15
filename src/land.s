@@ -1002,11 +1002,12 @@ traceb: lda bota+1
         beq t_seg
 t_end:  ldx #0                     ; the row's end: the run pending, to the end
         jmp t_fl                   ; (back by t_fr's RTS)
+t_stj:  jmp t_steep                ; (in reach; Y: INC or DEC)
 t_o:    jsr t_fl0                  ; (in reach) the run pending, to x0
         jmp t_old
 t_dx0:  lda BY+1,x                 ; (none: a margin on the row's end) the run
         cmp tyv                    ; pending ends at x0 if the next y differs
-        beq t_next
+        beq t_nx
         jsr t_fl0
         ldx tj
         lda BX,x
@@ -1014,7 +1015,7 @@ t_dx0:  lda BY+1,x                 ; (none: a margin on the row's end) the run
         lda BY+1,x                 ; (the next segment's y0)
         sta tyv
 t_next: ldx tj
-        inx
+t_nx:   inx                        ; (X = tj already)
         cpx np1
         bcs t_end
 t_seg:  stx tj
@@ -1026,16 +1027,15 @@ t_seg:  stx tj
         lda BY+1,x                 ; (tyv: BY,x already, every way here)
         sec
         sbc BY,x
-        beq t_next                 ; (level: the run pending goes on)
+        beq t_nx                   ; (level: the run pending goes on)
         ldy #$E6                   ; INC zp
         bcs :+
         eor #$FF                   ; rising: |dy|, DEC
         adc #1
         ldy #$C6
 :       cmp terr
-        bcc :+
-        jmp t_steep                ; (Y: INC or DEC)
-:       sty t_inc                  ; ($E6 or $C6: +1 or -1 below)
+        bcs t_stj
+        sty t_inc                  ; ($E6 or $C6: +1 or -1 below)
         sta dva                    ; a run a y: the steps at x0 + ceil(dx (2k-1) / 2|dy|)
         tay                        ; (k = 1 .. |dy|; ragged.transitions' sum)
         asl a
@@ -1047,7 +1047,7 @@ t_seg:  stx tj
         beq t_one
         lda DVH,y                  ; divt's, inline: q, rem = dx div 2|dy|, mod;
         sta t_dq+2                 ; q2, r2 = 2dx's
-        lda DVR,y
+        adc #>(DRT-DQT)-1          ; (DVR's: DVH + 8; C set: Y >= 2)
         sta t_dr+2
         lda DVL,y
         ora terr
@@ -1342,7 +1342,7 @@ tr_inc: inc tyv
         bcs slow
         lda DVH,y
         sta :+ + 2
-        lda DVR,y
+        adc #>(DRT-DQT)            ; (DVR's: DVH + 8; C clear: D < 64)
         sta :++ + 2
         lda DVL,y
         ora dvd
@@ -1897,8 +1897,11 @@ c_srx:  ldx ri                     ; (c_coly's)
 c_split: cmp LO+1,x
         bcs c_dbl
         bvs :+
-        jmp fsplit                 ; (back to c_next)
+fsplit: cpx lastri                 ; (fsplit's test, inline: back to c_next)
+        bne :++
+        jmp fs_c
 :       jmp split
+:       jmp fs_new
 
 c_dbl:  lda x4
         ora #3
@@ -2151,7 +2154,6 @@ lahsh:  .byte >(LAHSB0), >(LAHSB1), >(LAHSB2), >(LAHSB3)
 enthl:  .byte <(ENTB0), <(ENTB1), <(ENTB2), <(ENTB3)
 enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3)
 
-fs_nt:  jmp fs_new
 ; A column a rung (X = ri) splits, its top level: from mx down to the floor,
 ; the boxes split at bpos (the rung's pixels left of it), bpos moving a pixel
 ; at each of the rung's transitions in the column.  Y = bpos throughout; rtp +
@@ -2165,8 +2167,6 @@ fs_nt:  jmp fs_new
 ; 8 + FSRJ lines or more past the row, or to a floor past it (fe_r); a floor
 ; in the row walked by its copy (ff_se, ff_so).  (cols' inline: c_split
 ; jumps here, back to c_next.)
-fsplit: cpx lastri
-        bne fs_nt
 fs_c:   lda #0                     ; (C set) fl_e, fl_o's operands = RTP + x4
 rbl     = *-1                      ; (- 1 leaning left) (fs_new's: the rung's
         adc x4                     ; transitions, less 1 (2 leaning left))
@@ -2651,9 +2651,8 @@ split2: ldx ri
 @zd:    ldx mx                     ; the runs, from mx
         cpx flr1
         bcs @rd
-        stx yy
-        ldy kb                     ; the next transition, or the floor
-        jmp @rl3
+        stx yy                     ; (the transitions at mx first: then each
+                                   ; next past yy)
 @tr:    ldy kk                     ; (catch2, inline: X = yy)
         txa
         cmp TRL,y
@@ -2683,10 +2682,7 @@ split2: ldx ri
 :       cmp flr1
         bcc :+
         lda flr1
-:       cmp yy
-        beq @tr
-        bcc @tr
-        tay
+:       tay                        ; (past yy: kk, kb caught to it, yy < flr1)
         lda me                     ; (bytes2, inline)
         and bpos2
         eor re

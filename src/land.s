@@ -1011,6 +1011,8 @@ t_dx0:  lda BY+1,x                 ; (none: a margin on the row's end) the run
         ldx tj
         lda BX,x
         sta tcnt
+        lda BY+1,x                 ; (the next segment's y0)
+        sta tyv
 t_next: ldx tj
         inx
         cpx np1
@@ -1021,11 +1023,9 @@ t_seg:  stx tj
         sbc BX,x
         beq t_dx0
         sta terr                   ; dx
-        lda BY,x
-        sta tyv
-        lda BY+1,x
+        lda BY+1,x                 ; (tyv: BY,x already, every way here)
         sec
-        sbc tyv
+        sbc BY,x
         beq t_next                 ; (level: the run pending goes on)
         ldy #$E6                   ; INC zp
         bcs :+
@@ -2369,7 +2369,7 @@ fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
         sta fen_o+1
         sec
 fs_nj:  jmp fs_c                   ; (split's: sp_r)
-        .res 18                    ; (spare: keeps the code after in place)
+        .res 0                     ; (spare: keeps the code after in place)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).
@@ -2517,14 +2517,37 @@ sp_zd:  tya                        ; (fs_w's: X = bpos)
         jmp fs_w
 ; Line X of the zone at bpos Y (X, Y kept).
 sp_ln:  sty bpos
-        jsr pmask
-        ldy bpos
+        lda #0                     ; (pmask)
+        cpx ys+3
+        rol a
+        cpx ys+2
+        rol a
+        cpx ys+1
+        rol a
+        cpx ys
+        rol a
+        tay
+        lda MASKB,y
+        sta msk
+        lda LAH,x                  ; (zline)
+        clc
+        adc scrh
+        sta zp_+1
         txa
+        and #7
+        sta zp_
         lsr a
+        ldy bpos
         lda BE,y
         bcc :+
         lda BO,y
-:       jsr zline
+:       sta zv
+        ldy coff
+        lda (zp_),y
+        eor zv
+        and msk
+        eor (zp_),y
+        sta (zp_),y
         ldy bpos
         rts
 

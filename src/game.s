@@ -239,7 +239,6 @@ putc:   lda gt3                    ; 16 bytes: (g1) to row gt2, column gt3
 spawn:  lda #24*8                   ; (facing away, level)
         sta gmx
         lda #0
-        sta gmz
         sta sx
         sta sx+1
         sta sz
@@ -458,8 +457,8 @@ psg:    sei
 ; ---------------------------------------------------------------- a step
 step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 a
         lsr a                      ; direction, round and round); up, down the
-        bcc :+                     ; pitch (gmz: 8 a step, flat to fully nose
-        lda gmx                    ; down, held there either end)
+        bcc :+                     ; pitch (gp: a step a tick, flat to fully
+        lda gmx                    ; nose down, held there either end)
         sec
         sbc #MSTEP
         sta gmx
@@ -470,25 +469,19 @@ step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 
         clc
         adc #MSTEP
         sta gmx
-:       lda gkb
+:       lda gkb                    ; (the pitch a step a tick)
         and #4
-        beq :++
-        lda gmz
-        clc
-        adc #MSTEP
-        cmp #8*NPITCH
-        bcc :+
-        lda #8*NPITCH-1
-:       sta gmz
+        beq :+
+        lda gp
+        cmp #NPITCH-1
+        bcs :+
+        inc gp
 :       lda gkb
         and #8
-        beq :++
-        lda gmz
-        sec
-        sbc #MSTEP
-        bcs :+
-        lda #0
-:       sta gmz
+        beq :+
+        lda gp
+        beq :+
+        dec gp
 :       lda ctim                   ; crashed: the dots only, then the pad
         beq @fly
         dec ctim
@@ -724,12 +717,7 @@ step:   lda gkb                     ; the attitude: left, right the yaw (gmx: 8 
 
 
 ; The ship's attitude: pitch then yaw (Lander's), straight from the keys'.
-attit:  lda gmz
-        lsr a
-        lsr a
-        lsr a
-        sta gp
-        lda gmx
+attit:  lda gmx
         lsr a
         lsr a
         lsr a
@@ -1410,7 +1398,7 @@ PIXG:   .byte $88, $44, $22, $11   ; a pixel's bits (LAND's PIXM is in bank 4)
 
 ; ---------------------------------------------------------------- state
 gmx:     .byte 0                    ; the yaw, 8 a direction (wrapping)
-gmz:     .byte 0                    ; the pitch, 8 a step (0 .. 8 NPITCH - 1)
+gmz:     .byte 0                    ; (unused)
 gkb:     .byte 0                    ; the keys held
 gk:     .byte 0                    ; the ship's direction (0..31), pitch (0..7)
 gp:     .byte 0

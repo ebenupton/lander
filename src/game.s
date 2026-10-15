@@ -23,7 +23,7 @@
 ; units below it (so the ship stays at line ~81 on screen as it climbs), at
 ; most EMAX more (CAME: LAND's y's held at 254 past the screen; above that the
 ; camera stays and the ship climbs the screen, held at its top).  The
-; engines cut out from height ENGH up (Lander's HIGHEST_ALTITUDE); YTOP a
+; engines cut out ENGR above the ground (Lander's HIGHEST_ALTITUDE); YTOP a
 ; ceiling past that (su: a byte of units).
 ;
 ; The screen's top 64 lines are the game's (LAND draws from YSKY, 64): the
@@ -66,8 +66,10 @@ HOVS    = 1                        ; hover: << HOVS (Lander's quarter); each 1.2
 LANDV   = 2048                     ; Lander's LANDING_SPEED: |gvx| + |gvy| + |gvz| below
 UNDER   = 4                        ; Lander's UNDERCARRIAGE_Y (0.39 tiles) at the ship's
                                    ; size here (14 / R(ZSHIP) of Lander's): height units
-ENGH    = 160                      ; the engines cut out from here up, height units
-                                   ; (10 tiles: the land all below the screen by then)
+ENGR    = 104                      ; the engines cut out from here up, height units
+                                   ; above the ground under the ship: just past
+                                   ; where the ship is held at the screen's top
+                                   ; (100: the camera at EMAX)
 YTOP    = 240                      ; and a ceiling (su's byte: the climb coasts on)
 KOFF    = 79                       ; the camera this far above the ship, or more
 FUEL0   = 3413                     ; Lander's fuel: at the start; most (refuelling)
@@ -510,13 +512,14 @@ step:   lda gkb                     ; the attitude, a step a tick: left, right t
         lsr a
         and #3                     ; (1 full, 2 hover)
         tay
-        lda fuel                   ; (none without fuel, nor from ENGH units up:
-        ora fuel+1                 ; Lander's engines cut out at its
-        beq @off                   ; HIGHEST_ALTITUDE)
-        lda sy+1
-        cmp #(ENGH<<4)&255
-        lda sy+2
-        sbc #ENGH>>4
+        lda fuel                   ; (none without fuel, nor ENGR units or more
+        ora fuel+1                 ; above the ground under it: Lander's engines
+        beq @off                   ; cut out at its HIGHEST_ALTITUDE; coasting on)
+        lda su+1
+        sec
+        sbc HGV
+        bcc :+                     ; (below it: crashing)
+        cmp #ENGR
         bcc :+
 @off:   ldy #0
 :       tya

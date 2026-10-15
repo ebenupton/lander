@@ -1208,36 +1208,36 @@ t_dr:   lda DRT,y                  ; r2 = 2 (dx mod |dy|) (DRT holds 2r)
         sta jv0+1
 tv_h0:  lda TENH4,y
         sta jv0+2
-        txa
-        sec
+        txa                        ; (C clear: X > tcnt, Y the run's length - 1)
         sbc tcnt
-        tay                        ; (TNB = $80: N, Y > TNB, or $80, t_flo's alike)
+        tay                        ; (TNB = $80: N, Y >= TNB, t_flo's alike)
         bmi t_fl1
-        lda TENL,y
+        lda TENL+1,y
         sta tf_j+1
-tf_h:   lda TENH4,y
+tf_h:   lda TENH4+1,y
         sta tf_j+2
         clc                        ; (t_inc's)
         ldy dva                    ; (Y: the runs left after this one)
         lda tyv
 tf_j:   jmp t_back
+        .res 1                     ; (spare: keeps the code after in place)
 t_fl1:  ldy dva                    ; (longer)
         jmp t_flo
 t_one:  lda terr
         lsr a                      ; |dy| 1: the first run to x0 + ceil(dx / 2)
         adc BX,x
-        tax
-        sec
+        tax                        ; (C clear: X > tcnt, Y the run's length - 1)
         sbc tcnt
-        tay                        ; (TNB = $80: N, Y > TNB, or $80, t_flo's alike)
+        tay                        ; (TNB = $80: N, Y >= TNB, t_flo's alike)
         bmi t_fl1
-        lda TENL,y
+        lda TENL+1,y
         sta t1_j+1
-t1_h:   lda TENH4,y
+t1_h:   lda TENH4+1,y
         sta t1_j+2
         ldy #1
         lda tyv
 t1_j:   jmp t_back                 ; (its own, as tf_j)
+        .res 1                     ; (spare: keeps the code after in place)
 t_fr:   lda #<(t_last-t_bq-2)       ; (t_fl's way back: t_bq to t_last again)
         sta t_bq+1
         rts

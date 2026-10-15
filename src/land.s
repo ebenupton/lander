@@ -1054,13 +1054,13 @@ traceb: lda bota+1
         sta fl_1+2
         sta fl_2+2
         sta fl_3+2
+        sta jvb+2
         clc                        ; the fills' entries: TENH4 or TENH5
         adc #>TENH4-4
         sta tf_h+2
         sta t1_h+2
         sta tx_h+2
         sta tv_h0+2
-        sta tv_h1+2
         ldx np1                    ; the row: xl .. xr, and widened to the next
         ldy BX,x                   ; strip's margins (its top row: the margin
         iny                        ; segments' ys run on to them)
@@ -1172,10 +1172,6 @@ t_dr:   lda DRT,y                  ; r2 = 2 (dx mod |dy|) (DRT holds 2r)
         sta jv0+1
 tv_h0:  lda TENH4,y
         sta jv0+2
-        lda TENL+1,y
-        sta jv1+1
-tv_h1:  lda TENH4+1,y
-        sta jv1+2
         txa
         sec
         sbc tcnt
@@ -1260,11 +1256,13 @@ t_inc:  inc tyv                    ; (INC or DEC: as tr_inc, patched)
         bcs :+
         adc ra2                    ; (C set after: + 1)
         sta rrem
+        lda tyv                    ; q2 + 1: the first here, then jv0's q2
+jvb:    sta ROWB,x
         txa
         adc rq2
         tax
         lda tyv
-jv1:    jmp t_back
+        jmp jv0
 :       sta rrem
         txa
         clc

@@ -2410,8 +2410,7 @@ fe_r:   lda BE,x                   ; the floor's run
         lda BO,x
         sta vo
         tya
-        sec
-        adc rsm
+        adc rsm                    ; (C set: fe_x's bcs)
         tax
         ldy flr1
         jsr run2

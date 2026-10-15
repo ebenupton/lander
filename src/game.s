@@ -20,9 +20,9 @@
 ; point is the ship less 128 in x, ZSHIP tiles in z); its height Lander's rule
 ; (min(ship, 0): it follows the ship up) within what the strips allow: CAMH
 ; (6 tiles) above the ground under the ship, or more to keep the ship KOFF
-; units below it (so the ship stays at line ~97 on screen as it climbs), at
-; most EMAX more (CAME: by then every row is below the screen, LAND's y's
-; held at 254; above that the ship stays at KOFF's line over no land).  The
+; units below it (so the ship stays at line ~81 on screen as it climbs), at
+; most EMAX more (CAME: LAND's y's held at 254 past the screen; above that the
+; camera stays and the ship climbs the screen, held at its top).  The
 ; engines cut out from height ENGH up (Lander's HIGHEST_ALTITUDE); YTOP a
 ; ceiling past that (su: a byte of units).
 ;
@@ -323,26 +323,25 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         lda #0
 :       cmp #EMAX+1
         bcc :+
-        lda #EMAX                  ; (past it: every row below the screen; the
-        sta CAME                   ; ship KOFF below the camera, still following)
-        lda #KOFF
-        bne gsy
-:       sta CAME
+        lda #EMAX                  ; (past it: the camera stays, the ship climbs
+:       sta CAME                   ; the screen)
         clc                        ; the ship's line: HORIZON + SHYT (camera - ship),
         adc #CAMH                  ; the camera CAMH + CAME above the ground (d R / 16,
-        sec                        ; R the landscape's at ZSHIP)
+        sec                        ; R the landscape's at ZSHIP; above the camera: 0)
         sbc gt0
-gsy:    tax
-        lda SHYT,x
-        clc
-        adc #HORIZON
-        cmp #YSKY+18
         bcs :+
-        lda #YSKY+18
-:       cmp #YGND-18
+        lda #0
+:       tax
+        lda SHYT,x                 ; (held so the ship's lines, 12 up and 16 down,
+        cmp #YSKY+12-HORIZON       ; stay within YSKY..YGND)
+        bcs :+
+        lda #YSKY+12-HORIZON
+:       cmp #YGND-16-HORIZON
         bcc :+
-        lda #YGND-18
-:       sta GSHY
+        lda #YGND-16-HORIZON
+:       clc
+        adc #<HORIZON
+        sta GSHY
         lda #128
         sta GSHX
         lda gk

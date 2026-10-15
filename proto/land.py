@@ -54,8 +54,8 @@ ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far 
 CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height above the
                           # ground at the ship (ZSHIP ahead, at the camera's x), height
                           # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
-EMAX = 79                 # the camera's most above CAMH: every row below the screen there
-                          # for any ground (the far clip's, R 16: 96 - 15 + e > YGND); y's
+EMAX = 79                 # the camera's most above CAMH (at HORIZON 0 every row below
+                          # the screen there for any ground: 96 - 15 + e > YGND); y's
                           # held at 254 (past YGND: the bottom clip's; the near clip's + 1
                           # within a byte)
 ZSHIP = 13                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID 15: here the clip planes' middle)
@@ -63,7 +63,8 @@ PADN = 6                  # the landing pad: tiles 0..PADN-1 in x and z (Lander'
 PADH = 4                  # its height
 PADC = 19                 # its colour (swatch35: one of each ink, a grey)
 F256 = 65536              # focal length, 8.8 pixels (256: Lander's)
-HORIZON = 0               # screen y of the horizon
+HORIZON = -16             # screen y of the horizon (above the screen: the far
+                          # row's highest over the lowest ground at YSKY + 1)
 XC = 128                  # screen x of the centre (Lander's 160 of 320)
 YLIM = 156                # the lowest a row's corner goes (proto/frame.py's YGND - 1)
 XL, XR = 4, 252           # the edges the rows are clipped to, either side of XC alike

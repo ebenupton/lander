@@ -113,7 +113,7 @@ shipdraw:
         sta FCX+8
 
         ldx ee                     ; its box
-        lda EYS,x                  ; (its first line + 14, low; last - 5)
+        lda EYS,x                  ; (its first line + 14, low; last - 4)
         and #$0F
         clc
         adc shy
@@ -126,7 +126,7 @@ shipdraw:
         lsr a
         lsr a
         sec
-        adc #4
+        adc #3
         adc shy
         sta byb
         lda shx

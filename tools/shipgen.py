@@ -55,7 +55,10 @@ NPITCH = 8                 # pitches 0 .. 90 - 90/NPITCH degrees
 ND2 = NDIR // 2 + 1        # stored directions: -90 .. 90
 NE = ND2 * NPITCH          # entries
 S = 14.0                   # pixels a tile (Lander's ship on its screen, scaled to 256 wide)
-TANV = 0.5                 # the camera's slope down to the ship
+TANV = 0.35                # the camera's slope down to the ship: in play shy/255 (shy the
+                           # ship's line, HORIZON 0, R 17 at ZSHIP), 0.325 flying (shy 83,
+                           # the camera following) to 0.40 at touchdown (102); 0.35 the
+                           # least-squares fit over sampled flight (mean 0.346)
 NV, NF = 9, 9
 
 FACEV = [f['verts'] for f in SH.FACES]
@@ -105,12 +108,12 @@ def entry(kk, p):
 # lose the facets (the top's greens all land on one dither) and the landscape uses
 # every green, so each of the ship's three hues has a ramp of dithers the land and sea
 # never use (proto/land.py's LAND, SEAC), dark to light, indexed by the green channel
-# Lander would show (its colour's green + the brightness, to 15): its top greys, its
-# underside magentas, its exhaust pink.
-RAMPS = {'green': [19] * 8 + [8] * 3 + [4] * 2 + [7] * 3,
-         'cyan': [34] * 4 + [33] * 3 + [30] * 3 + [24] * 3 + [14] * 3,
+# Lander would show (its colour's green + the brightness, to 15): its top and back the two
+# purples, its underside greys, its exhaust pink.
+RAMPS = {'purple': [20] * 13 + [9] * 3,
+         'grey': [19] * 8 + [8] * 3 + [4] * 2 + [7] * 3,
          'orange': [13] * 10 + [12] * 6}
-HUE = {0x080: 'green', 0x040: 'green', 0x088: 'cyan', 0x044: 'cyan', 0xC80: 'orange'}
+HUE = {0x080: 'purple', 0x040: 'purple', 0x088: 'grey', 0x044: 'grey', 0xC80: 'orange'}
 
 
 def shade(p, f, ng):
@@ -409,8 +412,8 @@ def asm6(out):
     tab('SNEG', [e[2] for e in es])
     lss = [sp[(kk, p)] for p in range(NPITCH) for kk in range(ND2)]
     eyt, eyb = [ls[0][0] for ls in lss], [ls[-1][0] for ls in lss]
-    assert all(-14 <= a <= 1 and 5 <= b <= 20 for a, b in zip(eyt, eyb))
-    tab('EYS', [(a + 14) | (b - 5) << 4 for a, b in zip(eyt, eyb)])
+    assert all(-14 <= a <= 1 and 4 <= b <= 19 for a, b in zip(eyt, eyb))
+    tab('EYS', [(a + 14) | (b - 4) << 4 for a, b in zip(eyt, eyb)])
     exl = [min(l[1][0] for l in ls) for ls in lss]
     exr = [max(l[1][-1] for l in ls) - 1 for ls in lss]
     assert all(-17 <= a <= -2 and 4 <= b <= 19 for a, b in zip(exl, exr))

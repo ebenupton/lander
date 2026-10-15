@@ -1957,9 +1957,9 @@ pt0:    lda ROWA,y
 pt1:    cmp ROWA+1,y
         bne c_zt
 pt2:    cmp ROWA+2,y
-        bne c_zt
+        bne c_zt2
 pt3:    cmp ROWA+3,y
-        bne c_zt
+        bne c_zt3
         sta mx                     ; (mn: mx, V clear)
 c_ft:                               ; the floor: level?
 pb0:    lda ROWB,y
@@ -2004,6 +2004,19 @@ zt3:    lda ROWA+3,y               ; (ZTP 3, to c_ft directly)
         bcc c_ft
         sta mx
         jmp c_ft
+c_zt2:  sta ys                     ; (the first two level: as c_zt, on at zt2)
+        sta ys+1
+        sta mn
+        sta mx
+        bit c_v1
+        jmp zt2
+c_zt3:  sta ys                     ; (the first three level: on at zt3)
+        sta ys+1
+        sta ys+2
+        sta mn
+        sta mx
+        bit c_v1
+        jmp zt3
 
 c_zb:                               ; (rare) the lowest (A: the first's; cols:
 zb1:    cmp ROWB+1,y               ; zb1-3 this strip's)

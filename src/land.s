@@ -675,6 +675,45 @@ L1:     lda LERPQ7,y
         lda (syp),y
         sta PY+NX-1,x
 .endmacro
+; (bank 7) a clip's row's corner CI: its height from SA's and SB's by 1 - fz
+; (LERPQ7 at lp), corners 1..NX-2 by SYT7 into PY, the edges' at E0..E3
+.macro LERPY SA, SB, CI, IX
+.if IX
+        lda SB+CI,x                  ; (b + 16) - a - 1: b - a + LQOFF
+        ora #16
+        clc
+        sbc SA+CI,x
+        tay
+        lda (lp),y
+        adc SA+CI,x
+.else
+        lda SB+CI
+        ora #16
+        clc
+        sbc SA+CI
+        tay
+        lda (lp),y
+        adc SA+CI
+.endif
+.if CI = 0
+        sta E0
+.elseif CI = NX-1
+        sta E3
+.else
+.if CI = 1
+        sta E1
+.elseif CI = NX-2
+        sta E2
+.endif
+        tay
+        lda (syp),y
+.if IX
+        sta PY+CI,x
+.else
+        sta PY+CI
+.endif
+.endif
+.endmacro
 .macro R7BP NOL                     ; (bank 7) the row's r (Y: di) and B1T's page
 .ifblank NOL                        ; (NOL: rh alone, the row's x's need no rl)
         lda R7L,y
@@ -3532,11 +3571,14 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         adc cxs
         sta CX11
         jsr hgnd                   ; the ground under the ship (HOFF)
-        lda #0                     ; (MODE's bit 7: the camera higher)
-        ldx CAME
+        lda #0                     ; (MODE's bit 7: the camera higher; the
+        ldy #<@r7                  ; rows after the first normal one straight
+        ldx CAME                   ; on to theirs, MODE 0, or by MODE)
         beq :+
         lda #$80
+        ldy #<@rm
 :       sta CAMF
+        sty @nj+1
         lda RN                     ; the near clip's row's heights (zlerp's,
         asl a                      ; into PY), and the far clip's (flerp's)
         asl a
@@ -3590,7 +3632,7 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         ldx #0
         bcs :+
         jmp @hp0
-:       jmp @apf
+:       jmp @apf                   ; (flerp's)
 @altj:  jmp @alt
 ; A row: Y its di, tmp 16 j (its place in PX, PY), MODE; C set.
 @row:   lda SYL7,y                 ; di * 32: the row's SYT7 (+ HMAX - hg: 0..15,
@@ -3602,9 +3644,10 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         adc #>B1T - >SYT7 - 1      ; (C set: B1T's page; C clear after)
         sta bp+1
         ldx tmp                    ; the edges' heights: corners 1 to 2, and 10
-        lda MODE                   ; to 11, by fx (LERPQ7: land.lerp), from HT
+@rm:    lda MODE                   ; to 11, by fx (LERPQ7: land.lerp), from HT
         bne @altj                  ; (or PY: a clip's row) into PY
-        R7BP 1                     ; (r: the clips' rows' x's not by it)
+@r7:    R7BP 1                     ; (r: the clips' rows' x's not by it)
+        .assert >@rm = >@r7, error, "@nj: @rm, @r7 in one page"
         EDGEY HT, @lq2, @lq3, 1
         .repeat NX-2, i
         PYH i+1
@@ -3624,23 +3667,33 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         lda PINL7,y
         sta PX,x
         lda PINR7,y
-        sta PX+NX-1,x
-        cpy #NCLP                  ; past the screen's edges (CLP7: di < NCLP):
-        bcs @nx                    ; clipr
-        jsr clipr
-        ldx tmp
-        sec
-@nx:    txa                        ; the next row (X: tmp, C set; the near
-        adc #15                    ; clip's the last: its x's @pxn's)
-        sta tmp
-        cmp RN16
+        sta PX+NX-1,x              ; (never past the screen's edges: di >= NCLP)
+        .assert (ZCLIP+1)*16 - DI0 - 15 >= NCLP, error, "a row before the near clip's past XL, XR"
+@nx:    txa                        ; the next row (X: tmp, C clear: no carry out
+        adc #16                    ; of B; the near clip's the last: its x's @pxn's)
+        cmp RN16                   ; (tmp: @row's, the near clip's)
         beq @lst
+        tax
+        lda DCUR
+        sbc #15                    ; (C clear: - 16)
+        sta DCUR
+        tay
+        lda syp+1                  ; (C set: di - 16, SYT7's and B1T's rows 512
+        sbc #2                     ; back, their low bytes the same)
+        sta syp+1
+        adc #>B1T - >SYT7 - 1      ; (C set)
+        sta bp+1
+@nj:    jmp @rm                    ; (@r7 when MODE 0: prow7's)
+@nxf:   txa                        ; (row 0's: its syp, bp not @row's)
+        adc #15
+        sta tmp
         lda DCUR
         sbc #15                    ; (C clear: - 16)
         sta DCUR
         tay
         jmp @row
-@lst:   bit CAMF                   ; the near clip's: on its plane (not the
+@lst:   sta tmp
+        bit CAMF                   ; the near clip's: on its plane (not the
         bmi @lsc                   ; camera higher: straight to its heights,
         tax                        ; X: RN16, MODE 0)
         lda #<(SYT7+32*(ZCLIP*16-DI0))
@@ -3673,11 +3726,13 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         bne :+                     ; row 1
         rts
 :
-        .repeat NX, i
+        .repeat NX, i              ; (row 1's y 0: none, as y - 1 wraps)
+        lda PY+i
+        cmp PY+16+i
+        bcc :+
         ldx PY+16+i
+        beq :+
         dex
-        cpx PY+i
-        bcs :+
         stx PY+i
 :
         .endrepeat
@@ -3694,12 +3749,21 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         .endrepeat
         jmp @pxc
 @ap:    txa                        ; their heights by 1 - fz between the rows
-        bne :+                     ; either side (zlerp, flerp: corners 1..NX-2
-@apf:   jsr flerp                  ; straight to y; the edges' heights at E0..E3)
-        jmp :++
-:
-@apz:   jsr zlerp
-:       lda E1                     ; the edges: their heights by fx, their y's
+        beq @apf                   ; either side (zlerp, flerp: corners 1..NX-2
+        jmp @apz                   ; straight to y; the edges' heights at E0..E3)
+; The far clip's row (row 0; its SYT7 row at syp): to row 1's by 1 - fz (land.lerp,
+; LERPQ7: q = 16 - czs, lp; fz not 0), as the near's.
+@apf:   .repeat NX, i
+        LERPY HT, HT+16, i, 0
+        .endrepeat
+        jmp @ape
+; The near clip's row (X: RN16; its SYT7 row at syp): its heights from the row
+; before's by 1 - fz (land.lerp, LERPQ7: q = 16 - czs, lp; czs not 0), corners
+; 1..NX-2 by SYT7 into PY, the edges' heights (0, 1, NX-2, NX-1) at E0..E3.
+@apz:   .repeat NX, i
+        LERPY HT-16, HT, i, 1
+        .endrepeat
+@ape:   lda E1                     ; the edges: their heights by fx, their y's
         ora #16
         clc
         sbc E0
@@ -3761,7 +3825,7 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         lda PXF7+i,y
         sta PX+i
         .endrepeat
-        jmp @nx
+        jmp @nxf
 @pxn:   .repeat NX, i              ; (the near clip's: the last)
         lda PXN7+i,y
         sta PX+i,x
@@ -3885,224 +3949,6 @@ hgnd:   lda ZB                     ; its row: ZBACK - ZSHIP less the first's j
         sec                        ; heights stay raw)
         adc #HMAX
         sta HOFF
-        rts
-
-; The near clip's row (X: RN16; its SYT7 row at syp): its heights from the row
-; before's by 1 - fz (land.lerp, LERPQ7: q = 16 - czs, lp; czs not 0), corners
-; 1..NX-2 by SYT7 into PY, the edges' heights (0, 1, NX-2, NX-1) at E0..E3.
-.macro LERPY SA, SB, CI, IX
-.if IX
-        lda SB+CI,x                  ; (b + 16) - a - 1: b - a + LQOFF
-        ora #16
-        clc
-        sbc SA+CI,x
-        tay
-        lda (lp),y
-        adc SA+CI,x
-.else
-        lda SB+CI
-        ora #16
-        clc
-        sbc SA+CI
-        tay
-        lda (lp),y
-        adc SA+CI
-.endif
-.if CI = 0
-        sta E0
-.elseif CI = NX-1
-        sta E3
-.else
-.if CI = 1
-        sta E1
-.elseif CI = NX-2
-        sta E2
-.endif
-        tay
-        lda (syp),y
-.if IX
-        sta PY+CI,x
-.else
-        sta PY+CI
-.endif
-.endif
-.endmacro
-zlerp:  .repeat NX, i
-        LERPY HT-16, HT, i, 1
-        .endrepeat
-        rts
-
-; The far clip's row (row 0; its SYT7 row at syp): to row 1's by 1 - fz (land.lerp,
-; LERPQ7: q = 16 - czs, lp; fz not 0), as zlerp.
-flerp:  .repeat NX, i
-        LERPY HT, HT+16, i, 0
-        .endrepeat
-        rts
-
-; A row the screen's edges clip (X: 16 j): its corners left of XL onto XL, those
-; right of XR onto XR, at the row's y where it crosses (land.clip: y0 +
-; floor(((y1 - y0) n 2 + d) / 2d), n the distance to the edge, d the segment's
-; width).
-clipr:  ldy #NX-1                   ; (all on: 8 bits)
-        lda #0
-:       sta PXX,y
-        dey
-        bpl :-
-        ldx tmp
-        ldy #0                     ; the left edge: the first corner on (x >= XL)
-@lf:    lda PXX,y
-        bne @ln                    ; (x < 0)
-        tya
-        clc
-        adc tmp
-        tax
-        lda PX,x
-        cmp #XL
-        bcs :+
-@ln:    iny
-        bne @lf
-:       tya
-        beq @rt
-        sta tj                     ; k
-        clc
-        adc tmp
-        tax                        ; X: 16 j + k
-        lda PX,x                   ; d = x1 - x0 (x0 < 0)
-        sec
-        sbc PX-1,x
-        sta cd
-        lda #XL                    ; n = XL - x0
-        sec
-        sbc PX-1,x
-        sta cn
-        lda PY,x                   ; dy = y1 - y0
-        sec
-        sbc PY-1,x
-        jsr cyc
-        sta cdy
-        lda tj
-        clc
-        adc tmp
-        tax
-        lda cdy
-        clc
-        adc PY-1,x                 ; yc
-        ldy tj                     ; corners 0..k-1 onto (XL, yc)
-        ldx tmp
-:       sta PY,x
-        lda #XL
-        sta PX,x
-        lda PY,x
-        inx
-        dey
-        bne :-
-@rt:    ldy #NX-1                  ; the right edge: the last corner on (x <= XR)
-:       lda PXX,y
-        bne :+
-        tya
-        clc
-        adc tmp
-        tax
-        lda PX,x
-        cmp #XR+1
-        bcc :++
-:       dey
-        bpl :--
-:       cpy #NX-1
-        beq @d
-        sty tj                     ; k
-        tya
-        clc
-        adc tmp
-        tax                        ; X: 16 j + k
-        lda PX+1,x                 ; d = x1 - x0 (x1 > XR: 9 bits)
-        sec
-        sbc PX,x
-        sta cd
-        lda #XR                    ; n = XR - x0
-        sec
-        sbc PX,x
-        sta cn
-        lda PY+1,x
-        sec
-        sbc PY,x
-        jsr cyc
-        sta cdy
-        lda tj
-        clc
-        adc tmp
-        tax
-        lda cdy
-        clc
-        adc PY,x                   ; yc
-        ldy tj                     ; corners k+1..NX-1 onto (XR, yc)
-:       iny
-        cpy #NX
-        beq @d
-        inx
-        sta PY,x
-        pha
-        lda #XR
-        sta PX,x
-        pla
-        bne :-                     ; (yc > 0)
-@d:     rts
-
-; floor((A n 2 + d) / 2d), A signed (dy), n = cn, d = cd (1..127): A.  The
-; product by adding, the quotient by subtracting (both small).
-cyc:    sta cdy
-        lda #0
-        sta cpl
-        sta cph
-        ldy cn
-        beq @m
-@a:     lda cdy                    ; + dy, n times (16 bits, signed)
-        bpl :+
-        dec cph
-:       clc
-        adc cpl
-        sta cpl
-        bcc :+
-        inc cph
-:       dey
-        bne @a
-@m:     asl cpl                    ; * 2, + d
-        rol cph
-        lda cpl
-        clc
-        adc cd
-        sta cpl
-        bcc :+
-        inc cph
-:       lda cd                     ; 2d
-        asl a
-        sta cd
-        ldy #0                     ; floor(N / 2d): N >= 0 by subtracting; N < 0
-        lda cph                    ; by adding (q from 0 down)
-        bmi @n
-@p:     lda cpl
-        sec
-        sbc cd
-        tax
-        lda cph
-        sbc #0
-        bcc @pq
-        sta cph
-        stx cpl
-        iny
-        bne @p
-@pq:    tya
-        rts
-@n:     dey                        ; N + 2d (q - 1) until N >= 0
-        lda cpl
-        clc
-        adc cd
-        sta cpl
-        lda cph
-        adc #0
-        sta cph
-        bmi @n
-        tya
         rts
 
 

@@ -1649,6 +1649,8 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         sta oz2+2
         sta oz3a+2
         sta oz3b+2
+        sta oz1b+2
+        sta oz2b+2
         lda bota+1
         sta ob0+2
         sta ob3+2
@@ -1917,22 +1919,7 @@ c_nh:   lda #0                     ; (a new half)
         ldy x4
         jmp c_coly
 c_end:  rts
-o_zt:   sta ys                     ; (one box, its top not level; C: p0 > p3)
-        bcs :+                     ; each pixel's top, the highest and lowest
-        sta mn
-oz3a:   lda ROWA+3,y
-        sta mx
-        bcc :++
-:       sta mx
-oz3b:   lda ROWA+3,y
-        sta mn
-:       sta ys+3
-oz1:    lda ROWA+1,y
-        sta ys+1
-oz2:    lda ROWA+2,y
-        sta ys+2
-        bit c_v1                   ; (V: a top not level)
-        jmp o_ft
+o_zt:   jmp oz_x                   ; (one box, its top not level: oz_x)
 o_zb:   bcs :+                     ; (one box, its floor not level; C: p0 > p3)
 obz:    lda ROWB+3,y               ; the lowest
 :       sta flr                    ; (as c_zb)
@@ -2506,21 +2493,9 @@ fs_nj:  jmp fs_c                   ; (split's: sp_r)
 
 ; The top zone of a one-box column: lines mn .. min(mx, flr1)-1, each the
 ; pixels at or below their top (pmask, zline inline; cols' inline: back to c_r1).
-zone1:  ldx mn                     ; (mn < mx: a top not level)
-z1_l:   cpx flr1
+zone1:  ldx mn                     ; (mn < mx: a top not level; msk: mn's,
+        cpx flr1                   ; o_zt's or split's)
         bcs z1_n                   ; (and mx: c_r1's run empty)
-        lda #0                     ; (pmask)
-        cpx ys+3
-        rol a
-        cpx ys+2
-        rol a
-        cpx ys+1
-        rol a
-        cpx ys
-        rol a
-        tay
-        lda MASKB,y
-        sta msk
 z1_h:   lda LAHSB0,x               ; (zline; sethalf's, the screen and half's)
         sta zp_+1
         txa
@@ -2536,7 +2511,7 @@ z1_h:   lda LAHSB0,x               ; (zline; sethalf's, the screen and half's)
         sta (zp_),y
         inx
         cpx mx
-        bcc z1_l
+        bcc z1_m
         jmp c_r1x                  ; (X = mx: c_r1's run)
 z1_o:   eor vo
         and msk
@@ -2544,10 +2519,55 @@ z1_o:   eor vo
         sta (zp_),y
         inx
         cpx mx
-        bcc z1_l
+        bcc z1_m
         jmp c_r1x                  ; (X = mx: c_r1's run)
+z1_m:   ldy x4                     ; (rare: lines past mn) each pixel's top
+        lda (topa),y
+        sta ys
+        iny
+        lda (topa),y
+        sta ys+1
+        iny
+        lda (topa),y
+        sta ys+2
+        iny
+        lda (topa),y
+        sta ys+3
+z1_l:   cpx flr1
+        bcs z1_n
+        jsr pmask
+        jmp z1_h
 z1_n:   jmp c_np
-        .res 5                     ; (the layout kept)
+
+oz_x:   bcs oz_dn                  ; (o_zt's: one box, its top not level; C: p0 > p3)
+        sta mn                     ; the highest and lowest, and msk: zone1's
+oz3a:   ldx ROWA+3,y               ; first line's (mn's) pixels, those at mn: the
+        stx mx                     ; top monotonic, from p0 (mn p0) or p3 (mn p3)
+oz1:    ldx ROWA+1,y
+        lda #$88
+        cpx mn
+        bne oz_m
+oz2:    ldx ROWA+2,y
+        lda #$CC
+        cpx mn
+        bne oz_m
+        lda #$EE
+        bne oz_m
+oz_dn:    sta mx
+oz3b:   ldx ROWA+3,y
+        stx mn
+oz2b:   ldx ROWA+2,y
+        lda #$11
+        cpx mn
+        bne oz_m
+oz1b:   ldx ROWA+1,y
+        lda #$33
+        cpx mn
+        bne oz_m
+        lda #$77
+oz_m:     sta msk
+        bit c_v1                   ; (V: a top not level)
+        jmp o_ft
 
 ; msk: line X's pixels at or below their top.
 pmask:  lda #0
@@ -2597,6 +2617,9 @@ split:  ldx ri
         lda CO-1,x
         cmp CO,x
         bne :+
+        ldx mn                     ; (zone1's msk: mn's)
+        jsr pmask
+        ldx ri
         jmp c_ld
 :
         lda #<sp_r                 ; (fs_new: back to sp_r)

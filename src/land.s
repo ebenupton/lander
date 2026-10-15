@@ -2245,6 +2245,7 @@ sh_2:   sta TPO0*256,x
         sta np_h+2
         sta np_h2+2
         sta rc_h+2
+        sta sl_h+2
         rts
 shs:    .byte $30, $31, $58, $59   ; (scrb + half, by t)
 sht:    .byte >STAB, (>STAB)+2, (>STAB)+4, (>STAB)+6 ; (stb0 + 2 * half)
@@ -2672,9 +2673,7 @@ sp_ln:  sty bpos
         tay
         lda MASKB,y
         sta msk
-        lda LAH,x                  ; (zline)
-        clc
-        adc scrh
+sl_h:   lda LAHSB0,x               ; (zline; sethalf's, the screen and half's)
         sta zp_+1
         txa
         and #7

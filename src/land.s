@@ -2102,7 +2102,9 @@ np_z:     ldy x4
 :       cmp ys
         bcc :+
         lda ys
-:       tax
+:       tax                        ; (the highest: at most flr, the lowest, or
+        cpx flr                    ; YGND as bclip held it)
+        bcs np_e
 np_l:
 np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; sethalf's)
         sta zp_+1
@@ -2124,9 +2126,20 @@ np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; se
         and (zp_),y
         sta (zp_),y
         inx
-        cpx flr1
+        cpx flr
         bcc np_l
-        jmp np_b
+        bne np_x                   ; (flr + 1: its last line, YGND, done)
+np_e:   cpx #YGND                  ; (X = flr: the line all its pixels at or below
+        beq np_l                   ; their bottom, black, unless bclip held flr)
+np_h3:  lda LAHSB0,x               ; (sethalf's)
+        sta zp_+1
+        txa
+        and #7
+        sta zp_
+        ldy coff
+        lda #0
+        sta (zp_),y
+np_x:   jmp np_b
 
 ; c_coly's tests for rung X (ri): its HI, and its LO's byte column (x4 a
 ; multiple of 4: LO <= x4 + 3 iff LO & $FC <= x4).
@@ -2175,6 +2188,7 @@ sh_2:   sta TPO0*256,x
         sta z1_h+2
         sta np_h+2
         sta np_h2+2
+        sta np_h3+2
         sta rc_h+2
         sta sl_h+2
         rts

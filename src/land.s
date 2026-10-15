@@ -1379,7 +1379,7 @@ rungs:  lda xl
         lda #>RTBUF
         sta alloc+1
         ldx #1
-@r:     stx tj
+rg_r:     stx tj
         lda BX,x
         cmp TX,x
         bne :+
@@ -1394,22 +1394,20 @@ rungs:  lda xl
         sta RTPH,x
         ldy #0
         sty dva
-        jmp @nr
-@rsl:   jsr divs                   ; (a >= 32 or D >= 64)
+        jmp rg_nr
+rg_rsl:   jsr divs                   ; (a >= 32 or D >= 64)
         lda rrem
-        beq @rz
+        beq rg_rz
         lda ra2
         sec
         sbc rrem
-@rz:    cmp #1
-        jmp @rst
+rg_rz:    cmp #1
+        jmp rg_rst
 :       bcs :+
-        jmp @lft
+        jmp rg_lft
 :       sta HI,x                   ; leaning right: xt .. xb-1
         sbc TX,x                   ; (C set)
         sta dva                    ; (a)
-        asl a
-        sta ra2                    ; 2a (C clear: a < 128)
         lda TX,x
         sta LO,x
         eor #$FF                   ; RTP = alloc - LO
@@ -1419,14 +1417,15 @@ rungs:  lda xl
         lda alloc+1
         adc #$FF
         sta RTPH,x
-        RDIV @rsl
-@rst:   RSET                       ; (C clear after)
+        jmp rfastr                 ; (bank 4: a <= RFA, D < 16; else back,
+rg_rdr:   RDIV rg_rsl                  ; ra2 = 2a)
+rg_rst:   RSET                       ; (C clear after)
         ldy #0                     ; the pixels, from xt (Y = x - LO) to Y = a
         sta (alloc),y
         iny
         cpy dva
-        beq @nr
-@rs:    tax                        ; the next pixel's: + q2 (+ 1: a step)
+        beq rg_nr
+rg_rs:    tax                        ; the next pixel's: + q2 (+ 1: a step)
         lda rrem
         adc rr2
         bcs :+
@@ -1436,8 +1435,8 @@ rungs:  lda xl
         sta (alloc),y
         iny
         cpy dva
-        bne @rs                    ; (C clear: Y < a)
-        beq @nr
+        bne rg_rs                    ; (C clear: Y < a)
+        beq rg_nr
         .res 3                     ; (keeps the layout)
 :       adc dvd                    ; (C set: + 2a; C clear after)
         sta rrem
@@ -1446,24 +1445,24 @@ rungs:  lda xl
         sta (alloc),y
         iny
         cpy dva
-        bne @rs
-@nr:    lda #$FF                   ; the sentinel (Y = a)
+        bne rg_rs
+rg_nr:    lda #$FF                   ; the sentinel (Y = a)
         sta (alloc),y
         tya                        ; alloc += a + 1
         sec
         adc alloc
         sta alloc
-        bcc @nx
+        bcc rg_nx
         inc alloc+1
-@nx:    ldx tj
+rg_nx:    ldx tj
         inx
         cpx np1
         bcs :+
-        jmp @r
+        jmp rg_r
 :       rts
-@lslj:  jmp @lsl                   ; (in reach)
+rg_lslj:  jmp rg_lsl                   ; (in reach)
         .res 3                     ; (keeps the layout)
-@lft:   sta LO,x                   ; leaning left: xb .. xt-1
+rg_lft:   sta LO,x                   ; leaning left: xb .. xt-1
         eor #$FF                   ; RTP = alloc - LO
         sec
         adc alloc
@@ -1476,15 +1475,14 @@ rungs:  lda xl
         sec
         sbc BX,x
         sta dva                    ; (a)
-        asl a
-        sta ra2                    ; 2a (C clear: a < 128)
-        RDIV @lslj
-@lst:   RSET                       ; (C clear after)
+        jmp rfastl                 ; (bank 4: a <= RFA, D < 16; else back,
+rg_rdl:   RDIV rg_lslj                 ; ra2 = 2a)
+rg_lst:   RSET                       ; (C clear after)
         ldy dva                    ; the pixels, from xt-1 (Y = x - LO) to 0
         dey
         sta (alloc),y
-        beq @ld
-@ls:    tax
+        beq rg_ld
+rg_ls:    tax
         lda rrem
         adc rr2
         bcs :+
@@ -1493,18 +1491,18 @@ rungs:  lda xl
         adc rq2
         dey
         sta (alloc),y
-        bne @ls                    ; (C clear)
-        beq @ld
+        bne rg_ls                    ; (C clear)
+        beq rg_ld
 :       adc dvd
         sta rrem
         txa
         adc rq
         dey
         sta (alloc),y
-        bne @ls
-@ld:    ldy dva
-        jmp @nr
-@lsl:   jsr divs                   ; (a >= 32 or D >= 64)
+        bne rg_ls
+rg_ld:    ldy dva
+        jmp rg_nr
+rg_lsl:   jsr divs                   ; (a >= 32 or D >= 64)
         lda rrem
         beq :+
         lda ra2
@@ -1515,8 +1513,8 @@ rungs:  lda xl
         ldy dva                    ; (as below, but D may be "negative": the
         dey                        ; lines wrap, so C cleared each pixel)
         sta (alloc),y
-        beq @ld
-@lw:    tax
+        beq rg_ld
+rg_lw:    tax
         clc
         lda rrem
         adc rr2
@@ -1526,16 +1524,16 @@ rungs:  lda xl
         adc rq2
         dey
         sta (alloc),y
-        bne @lw
-        beq @ld
+        bne rg_lw
+        beq rg_ld
 :       adc dvd
         sta rrem
         txa
         adc rq
         dey
         sta (alloc),y
-        bne @lw
-        beq @ld
+        bne rg_lw
+        beq rg_ld
 
 ; ---------------------------------------------------------------- columns
 cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
@@ -3062,6 +3060,88 @@ glyphs5:                           ; (as glyphs: the game's letters to GLY5)
 lchars: .byte "FUELANDCRSH"
 lchars_end:
 oswblk: .res 9
+
+; ---------------------------------------------------------------- rungs' fast way
+; (bank 4, its free space) A rung with a <= RFA and 0 <= D < 16: each pixel's
+; transition from tools/landgen.py's tables, TRk (leaning right) or TLk (left)
+; by X = 16 (RFA - a) + D: the k'th pixel's offset from yt (the pixel at
+; (alloc),k), k < a; the code entered at the a-1'th pixel (DUFR, DUFL by a).
+; Else back to the division (ra2 = 2a).  (rungs': X the rung, dva = a.)
+        .segment "B4C"
+rfastr: ldy dva
+        cpy #RFA+1
+        bcs @sl
+        lda TY,x
+        sta rrem                   ; (yt)
+        lda BY,x
+        sec
+        sbc rrem
+        cmp #16
+        bcs @sl                    ; (C clear after: kept below)
+        ora B16-1,y
+        tax
+        lda DUFR-1,y
+        sta @j+1
+@j:     jmp FR0
+@sl:    lda dva
+        asl a
+        sta ra2
+        jmp rg_rdr
+rfastl: ldy dva
+        cpy #RFA+1
+        bcs @sl
+        lda TY,x
+        sta rrem
+        lda BY,x
+        sec
+        sbc rrem
+        cmp #16
+        bcs @sl
+        ora B16-1,y
+        tax
+        lda DUFL-1,y
+        sta @j+1
+@j:     jmp FL0
+@sl:    lda dva
+        asl a
+        sta ra2
+        jmp rg_rdl
+B16:    .repeat RFA, i
+        .byte 16 * (RFA - 1 - i)
+        .endrepeat
+DUFR:   .repeat RFA, i
+        .byte <(FR0 + 9 * (RFA - 1 - i))
+        .endrepeat
+DUFL:   .repeat RFA, i
+        .byte <(FL0 + 9 * (RFA - 1 - i))
+        .endrepeat
+.macro RFBODY T
+        .repeat RFA, i
+        lda .ident(.sprintf("%s%d", T, RFA - 1 - i)),x
+        adc rrem                   ; (C clear: no carry)
+        ldy #RFA - 1 - i
+        sta (alloc),y
+        .endrepeat
+        lda #$FF                   ; the sentinel (Y = a), alloc += a + 1
+        ldy dva
+        sta (alloc),y
+        tya
+        sec
+        adc alloc
+        sta alloc
+        bcc :+
+        inc alloc+1
+:       ldx tj                     ; the next rung (rungs' @nx)
+        inx
+        cpx np1
+        bcs :+
+        jmp rg_r
+:       rts
+.endmacro
+        .segment "B4R"
+FR0:    RFBODY "TR"
+        .segment "B4L"
+FL0:    RFBODY "TL"
 
 ; ---------------------------------------------------------------- bank 7
         .segment "B7CODE"

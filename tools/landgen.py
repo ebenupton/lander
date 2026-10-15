@@ -41,7 +41,14 @@ ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, DE=0xA300, DO=0xA340,
             LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00,
             DVH=0xBD00, DVR=0xBD20, DVL=0xBD40, CLMP1=0xBE00, DIV4=0xBF00,
             TBLK4=0x9B00, TBLK5=0x9D00, TENL=0x9F00, TENH4=0xA000, TENH5=0xA100,
-            RSMT=0xBA00 - YSKY, EIN=0xBB00 - (YSKY - 1))
+            RSMT=0xBA00 - YSKY, EIN=0xBB00 - (YSKY - 1),
+            TR0=0xBA62, TR1=0xBC80, TR2=0xBD60, TR3=0x9C83, TR4=0x9F81, TR5=0xA600,
+            TR6=0xBDD0, TR7=0x9FD1, TR8=0xA2F0,
+            TL0=0xBB63, TL1=0xA200, TL2=0xA280, TL3=0x9E83, TL4=0xA3A0, TL5=0xAE00,
+            TL6=0x9300, TL7=0x9330, TL8=0xA3F0)
+# rungs' fast way (a <= RFA, D < 16): TRk, TLk by X = 16 (RFA - a) + D, k < a: the
+# transition of the pixel stored at k (leaning right: pixel k + 1 from xt; left: a - k)
+RFA = 9
 # run2's store tables: by t (2 screen + half), the even lines' on page TPE[t], the odd
 # lines' on TPO[t], from R2OFF, the end line's slot (an RTS) at $FF
 TPE = (0x90, 0x91, 0x92, 0x93)
@@ -138,6 +145,15 @@ def build():
             img[pg * 256 + 255 - BASE] = 0x60
     for y in range(YSKY - 1, YGND + 3):
         put('EIN', y, R2OFF + 3 * ((y + 1) // 2 - YSKY // 2))
+    for k in range(RFA):
+        for side in 'RL':
+            o = ADDR[f'T{side}{k}'] - BASE
+            n = 16 * (RFA - k)
+            assert not any(img[o:o + n]) and (o & 255) + n <= 256, (side, k)
+            for a in range(k + 1, RFA + 1):
+                j = k + 1 if side == 'R' else a - k
+                for d in range(16):
+                    img[o + 16 * (RFA - a) + d] = -(-d * (2 * j - 1) // (2 * a))
     return img
 
 
@@ -198,7 +214,7 @@ def main():
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=TNB, MAPSZ=L.MAP, HMAX=L.HMAX, SEA=L.SEA, NDI=NDI, BLACK=34,
                       NX=L.NX - 2 * L.XSKIP, XSKIP=L.XSKIP, NZ=L.NZ, ZBACK=L.ZBACK, ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=DI0, XC=L.XC, XL=L.XL, XR=L.XR, YLIM=L.YLIM, LQOFF=LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH, EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON,
-                      YSKY=YSKY, YGND=YGND, R2OFF=R2OFF,
+                      YSKY=YSKY, YGND=YGND, R2OFF=R2OFF, RFA=RFA,
                       TPE0=TPE[0], TPE1=TPE[1], TPE2=TPE[2], TPE3=TPE[3],
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])
         for k, v in consts.items():

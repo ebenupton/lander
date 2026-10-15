@@ -9,6 +9,16 @@ python3 tools/landgen.py $B
 python3 tools/gamegen.py $B
 ca65 -g --cpu 6502 -I src -I $B -o $B/land.o src/land.s -l $B/land.lst
 ld65 -C src/land.cfg -o $B/LAND $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/land.dbg
+python3 - $B B4C 0x2181 B4R 0x1000 B4L 0x1100 <<'PY'     # the rungs' fast way (bank 4) into TABLES
+import sys
+d = sys.argv[1]
+img = bytearray(open(d + '/TABLES', 'rb').read())
+for c, off in zip(sys.argv[2::2], sys.argv[3::2]):
+    code, off = open(f'{d}/{c}', 'rb').read(), int(off, 16)
+    assert not any(img[off:off + len(code)]), c + ': code over the tables'
+    img[off:off + len(code)] = code
+open(d + '/TABLES', 'wb').write(img)
+PY
 python3 - $B <<'PY'                 # bank 5's and bank 7's code into their tables
 import sys
 for t, c, off in (('TABLES2', 'B5CODE', 0x2000), ('TABLES2', 'B5GAME', 0x2100), ('TABLES7', 'B7CODE', 0x3900)):

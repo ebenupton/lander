@@ -1478,12 +1478,13 @@ rungs:  lda xl
         lda xr
         sta LO,x
         sta HI,x
-        lda #$FF                   ; (the first's sentinel leaning left)
-        sta RTBUF
-        lda #<(RTBUF+1)
-        sta alloc
-        lda #>RTBUF
+        lda #$FF                   ; (the first's sentinel leaning left; from
+        sta RTBUF+4                ; RTBUF+5, all in RTBUF's page: RTP + x4 + 1,
+        lda #<(RTBUF+5)            ; at least alloc - 3 for a rung in the column,
+        sta alloc                  ; is too, so fsplit, split, mktr and slow
+        lda #>RTBUF                ; need its low byte only)
         sta alloc+1
+        sta rtp+1                  ; (split's, mktr's)
         ldx #1
 rg_r:     stx tj
         lda BX,x
@@ -1491,13 +1492,10 @@ rg_r:     stx tj
         bne :+
         sta LO,x                   ; upright: none (its sentinel only)
         sta HI,x
-        eor #$FF                   ; RTP = alloc - LO - 1
+        eor #$FF                   ; RTP = alloc - LO - 1 (its low byte)
         clc
         adc alloc
         sta RTPL,x
-        lda alloc+1
-        adc #$FF
-        sta RTPH,x
         ldy #0
         sty dva
         jmp rg_nr
@@ -1520,17 +1518,12 @@ rg_rz:    cmp #1
         clc
         adc alloc
         sta RTPL,x
-        lda alloc+1
-        adc #$FF
-        sta RTPH,x
         jmp rfastr                 ; (bank 4: a <= RFA, D < 16; else back,
 rg_lft:   sta LO,x                   ; leaning left: xb .. xt-1
         eor #$FF                   ; RTP = alloc - LO - 1 (C clear: bcc)
         adc alloc
         sta RTPL,x
-        lda alloc+1
-        adc #$FF                   ; (C set after: alloc+1 > 0)
-        sta RTPH,x
+        sec
         lda TX,x
         sta HI,x
         sbc BX,x
@@ -1567,12 +1560,10 @@ rg_rs:    tax                        ; the next pixel's: + q2 (+ 1: a step)
         bne rg_rs
 rg_nr:    lda #$FF                   ; the sentinel (Y = a)
         sta (alloc),y
-        tya                        ; alloc += a + 1
+        tya                        ; alloc += a + 1 (in RTBUF's page)
         sec
         adc alloc
         sta alloc
-        bcc rg_nx
-        inc alloc+1
 rg_nx:    ldx tj
         inx
         cpx np1
@@ -2218,14 +2209,10 @@ enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3)
 ; jumps here, back to c_next.)
 fs_c:   lda #0                     ; (C set) fl_e, fl_o's operands = RTP + x4
 rbl     = *-1                      ; (- 1 leaning left) (fs_new's: the rung's
-        adc x4                     ; transitions, less 1 (2 leaning left))
-        sta fl_e+1
+        adc x4                     ; transitions, less 1 (2 leaning left); in
+        sta fl_e+1                 ; RTBUF's page: rungs')
         sta fl_o+1
-        lda #0
-rbh     = *-1
-        adc #0
-        sta fl_e+2
-        sta fl_o+2                 ; (C clear)
+        clc
         lda TX,x                   ; bpos: TX - x4, clamped to 0..4
         sbc x4
         tay
@@ -2276,7 +2263,7 @@ fn_e:                              ; Y even
 fst_e:  inx                        ; (or DEX: fs_new)
 fen_e:  cpx #4                     ; (or 0)
         beq fe_x
-fl_e:   lda $FFFF,x                ; the transition's line, t (operand: fs_c's)
+fl_e:   lda RTBUF,x                ; the transition's line, t (operand: fs_c's)
         cmp flr1
         bcs fe_x
         sbc rsm                    ; (C clear) t, in the row (fwe)
@@ -2292,7 +2279,7 @@ fn_o:                              ; Y odd
 fst_o:  inx                        ; (or DEX: fs_new)
 fen_o:  cpx #4                     ; (or 0)
         beq fe_x
-fl_o:   lda $FFFF,x
+fl_o:   lda RTBUF,x
         cmp flr1
         bcs fe_x
         sbc rsm
@@ -2428,9 +2415,6 @@ fs_ln:  lda BX,x
         lda RTPL,x                 ; leaning left: x4 + bpos - 1, bpos - 1 after
         sbc #0                     ; (C clear: - 2)
         sta rbl
-        lda RTPH,x
-        sbc #0
-        sta rbh
         lda #OP_DEX                ; (the last rung's lean, kept)
         cmp fst_e
         beq fs_nj                  ; (C set)
@@ -2443,8 +2427,6 @@ fs_ln:  lda BX,x
         bcs fs_nj
 fs_nr:  lda RTPL,x                 ; leaning right (or upright): pixel x4 + bpos
         sta rbl                    ; changes, bpos + 1 after (- 1; C set)
-        lda RTPH,x
-        sta rbh
         lda #OP_INX
         cmp fst_e
         beq fs_nj                  ; (C set)
@@ -2599,14 +2581,10 @@ sp_r:   lda #<fs_c                 ; (C set) fs_new's own again
         sta fs_nj+2
 sp_c:   lda rbl                    ; (C set) as fs_c
         adc x4
-        sta rtp
+        sta rtp                    ; (rtp+1: rungs')
         sta fl_e+1
         sta fl_o+1
-        lda rbh
-        adc #0
-        sta rtp+1
-        sta fl_e+2
-        sta fl_o+2
+        clc
         lda TX,x
         sbc x4
         tax                        ; (X reloaded below)
@@ -2686,10 +2664,8 @@ mktr:   sta tj
         lda RTPL,x                 ; (rtp: RTP + x4, by position)
         sec
         adc x4
-        sta rtp
-        lda RTPH,x
-        adc #0
-        sta rtp+1                  ; (C clear)
+        sta rtp                    ; (rtp+1: rungs')
+        clc
         lda BX,x                   ; (A - x4, clamped to 0..4)
         sbc x4
         tay
@@ -4281,14 +4257,12 @@ slow:   ldx #0
         bcc @rn
         cmp HI,x
         bcs @rn
-        lda RTPL,x
-        sta rtp
-        lda RTPH,x
-        sta rtp+1
+        lda RTPL,x                 ; (RTP + tx1 + 1: in RTBUF's page)
+        sec
+        adc tx1
         sty tmp
-        ldy tx1
-        iny
-        lda (rtp),y
+        tay
+        lda RTBUF,y
         ldy tmp
         sta STL,y
         lda BX,x

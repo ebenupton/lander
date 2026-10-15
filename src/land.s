@@ -1923,6 +1923,13 @@ c_d3:   bvs :+                     ; (three: never seen; slow reads ys)
 ; at the floor, or the pixels at or below their bottom-row line, read-modify-
 ; write); then black to the land's lowest line last time (BOTS); CURB.  (cols'
 ; inline: back to c_nd.)
+np_b:     ldx x4                     ; the land's lowest line now, and last time's
+        ldy DIV4,x
+        lda flr
+        cmp #YGND+1                ; (on the screen: bclip's)
+        bcc pB4
+        lda #YGND
+        bcs pB4
 nearpost:
         lda flr                    ; (its bottom level: flr1 = flr)
         cmp flr1
@@ -1937,13 +1944,9 @@ np_h:   lda LAHSB0,x               ; (sethalf's, the screen and half's)
         ldy coff
         lda #0
         sta (zp_),y
-np_b:     ldx x4                     ; the land's lowest line now, and last time's
+        ldx x4                     ; (np_b's: flr on the screen here)
         ldy DIV4,x
         lda flr
-        cmp #YGND+1                ; (on the screen: bclip's)
-        bcc :+
-        lda #YGND
-:
 pB4:    sta CURB,y
 pB5:    cmp BOTS,y
         bcs np_n

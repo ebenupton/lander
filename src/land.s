@@ -1730,6 +1730,7 @@ ph_hi:  cmp #0
 ph_n:   stx c_xe+1
         ldx #<o_nr                 ; (o_rec's high byte: record's too)
         stx o_rec+1
+        stx ob_rj+1
         ldx #<c_srx
         stx c_rec+1
         ldx #>c_srx
@@ -1742,6 +1743,7 @@ ph_rec: cpx xr                     ; (at most xr)
 ph_r:   stx c_xe+1
         ldx #<record               ; (its high byte: o_nr's too)
         stx o_rec+1
+        stx ob_rj+1
         .assert >record = >o_nr, error, "record, o_nr: one page (phase)"
         ldx #<recordc
         stx c_rec+1
@@ -1938,7 +1940,7 @@ obz:    lda ROWB+3,y               ; the lowest
         cpx #YGND+2
         bcs ob_cl
 ob_st:  stx flr1
-        jmp o_rec
+ob_rj:  jmp record                 ; (phase: as o_rec)
 ob_cl:  dex                        ; (rare)
         dec flr
         bcs ob_st                  ; (C set)

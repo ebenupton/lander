@@ -1941,11 +1941,12 @@ obz:    lda ROWB+3,y               ; the lowest
         tax
         inx
         cpx #YGND+2
-        bcc :+
-        dex
-        dec flr
-:       stx flr1
+        bcs ob_cl
+ob_st:  stx flr1
         jmp o_rec
+ob_cl:  dex                        ; (rare)
+        dec flr
+        bcs ob_st                  ; (C set)
 c_ri0:  jmp c_rix                   ; (in reach)
 
 c_sp:                              ; a rung in the column: the top level?
@@ -2030,11 +2031,12 @@ zb3c:   bcs :+
         tax
         inx
         cpx #YGND+2                ; (at most YGND+1, and flr then YGND: bclip's;
-        bcc :+                     ; nearpost's not level kept)
-        dex
-        dec flr
-:       stx flr1
+        bcs zb_cl                  ; nearpost's not level kept)
+zb_st:  stx flr1
         jmp c_rec
+zb_cl:  dex                        ; (rare)
+        dec flr
+        bcs zb_st                  ; (C set)
 ; The near strip's column, drawn (to the line before its floor if its bottom
 ; row is level there, else to the floor): below the near row black (the line
 ; at the floor, or the pixels at or below their bottom-row line, read-modify-

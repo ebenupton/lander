@@ -63,7 +63,7 @@ for c, off in zip(sys.argv[2::2], sys.argv[3::2]):
     img[off:off + len(code)] = code
 open(d + '/TABLES', 'wb').write(img)
 PY
-printf 'MODE 1\r*LOAD LAND\r*RUN LANDS\r' > $B/BOOT
+printf 'MODE1:VDU23,1,0;0;0;0;19,1,0;0;19,2,0;0;19,3,0;0;\r*LOAD LAND\r*RUN LANDS\r' > $B/BOOT   # (palette black, cursor off: the loads unseen)
 python3 tools/mkdfs.py build $B/land.ssd LAND \
     "!BOOT:$B/BOOT:0000:FFFF" "LAND:$B/LAND:1900:1900" "LANDS:$B/LANDS:7000:7000" "TABLES:$B/TABLES:3000:3000" "TABLES2:$B/TABLES2:3000:3000" "SHIPB:$B/SHIPB:3000:3000" "TABLES7:$B/TABLES7:3000:3000"
 echo "$B/land.ssd: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, SHIPB $(wc -c < $B/SHIPB | tr -d ' ')"

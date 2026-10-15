@@ -72,6 +72,23 @@ G_STEP  = $A103
 G_POST  = $A106
 BANK7   = 7                        ; and the projection (project's)
 BANK2   = 5                        ; and the tiles' colours (project's, a moment)
+; (banks 4..7 are logical: each is the socket BANKMAP holds, LANDS's find_ram's)
+MOS_ROMTAB = $02A1                 ; the MOS's ROM table: each socket's ROM type
+ROMHDR_TYPE = $8006                ; a ROM's type byte, its copyright offset
+ROMHDR_COPY = $8007
+UVIA_DDRB = $FE62                  ; the user VIA's port B direction (Solidisk)
+WRSEL_WATFORD = $FF30              ; a Watford board's write bank: a store to here +
+WRSEL_SOLIDISK = $FE60             ; the socket; a Solidisk's: the user VIA's port B
+BOARD_STD = 0                      ; (find_ram's: writes through ROMSEL, or as above)
+BOARD_WATFORD = 1
+BOARD_SOLIDISK = 2
+
+; PAGE n: sideways bank n (4..7) paged for reads and writes (pgN: on a
+; write-select board LANDS patches its BIT to the board's store).  A = the
+; socket, Z, N as it.
+.macro PAGE n
+        jsr .ident(.sprintf("pg%d", n))
+.endmacro
 
                                    ; (YSKY, YGND: proto/frame.py's, tables.inc)
 MARGIN  = 0                        ; (to the byte boundary: the land extents clear the rest)
@@ -314,24 +331,16 @@ vsync:  php
 
 ; Bank 6's routine at $8000 + A (B6_KEYS or B6_SHIP), bank 4 paged back after.
 call6:  sta @j+1
-        lda #BANK3
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 6
 @j:     jsr $8000
-        lda #BANK
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 4
         rts
 
 ; Bank 5's routine at $A100 + A (G_INIT, G_STEP, G_POST: game.s), bank 4 after.
 call5:  sta @j+1
-        lda #BANK2
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 5
 @j:     jsr G_INIT
-        lda #BANK
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 4
         rts
 
 ; Show the screen just drawn (from the next frame), and draw the other.
@@ -753,17 +762,11 @@ project:
         .endrepeat
         dex
         bpl @hc
-@p5:    lda #BANK2                 ; (bank 5) each land strip's boxes (pcol5)
-        sta ROMCOPY
-        sta ROMSEL
+@p5:    PAGE 5                     ; (bank 5) each land strip's boxes (pcol5)
         jsr pcol5
-@p7:    lda #BANK7                 ; (bank 7) each row's y's and x's (prow7)
-        sta ROMCOPY
-        sta ROMSEL
+@p7:    PAGE 7                     ; (bank 7) each row's y's and x's (prow7)
         jsr prow7
-        lda #BANK
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 4
         rts
 
 ; ---------------------------------------------------------------- strips
@@ -933,14 +936,10 @@ setup:  lda #0                     ; the near strip: the ground below it too
         asl a
         adc #$F0                   ; 16 (ns - 1): su_l7's Y
         tay
-        lda #BANK7                 ; (bank 7: su_l7, unrolled)
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 7                     ; (bank 7: su_l7, unrolled)
         jsr su_l7
-        lda #BANK
-        sta ROMCOPY
-        sta ROMSEL
-        bne su_m
+        PAGE 4
+        jmp su_m
 ldCLE:  .byte 0                    ; (pcol5's: 16 o, su_l7's CLE, CLO window)
 su_qc:    inc BCL
         bcs su_qb
@@ -3086,6 +3085,17 @@ pkz:    .byte $FF                  ; boxes (CLE, CLO) are for
 SHF:    .byte 0                    ; (zsh4's: HT a row on (1) or back ($FF), HTN)
 fps10:  .res 2                     ; (the readout's)
 fpson:  .byte 1                    ; (the readout on: game.s's F toggles it)
+BANKMAP: .byte 4, 5, 6, 7          ; the sockets of banks 4..7 (LANDS's find_ram)
+wrt:    .byte 0                    ; (PAGE's BIT, on a plain machine)
+.repeat 4, k                       ; pg4..pg7: bank 4+k paged, write selected
+        .ident(.sprintf("pg%d", k+4)):
+        lda BANKMAP+k
+        sta ROMCOPY
+        sta ROMSEL
+        .ident(.sprintf("pw%d", k+4)):
+        bit wrt                    ; (LANDS: a board's STA)
+        rts
+.endrepeat
 dvs:    .res 8
 dvi:    .res 1
 vlast:  .res 1
@@ -3194,12 +3204,22 @@ s2_o:   lda (zp_),y                ; an odd line
 s2_m:   jmp s2_n
 
 ; ---------------------------------------------------------------- LANDS
-; LANDS: the start, run once from $7000 (!BOOT: *LOAD LAND, *RUN LANDS): the
-; banks loaded (each file *LOADed to $3000, below this, and copied), the
-; palette, the readout's characters, the screen narrowed; then LAND's `go`
-; (whose init clears the screens, this with them).
+; LANDS: the start, run once from $7000 (!BOOT: MODE 1, the palette black and
+; the cursor off, *LOAD LAND, *RUN LANDS): the four sideways banks found
+; (find_ram, from beebgame's loader: any sockets, written through ROMSEL or a
+; Watford or Solidisk board's write select) and every PAGE's write select
+; patched for the board; the banks loaded (each file *LOADed to $3000, below
+; this, and copied); the readout's characters; the screen narrowed and
+; cleared; the palette; then LAND's `go` (whose init clears the screens, this
+; with them).
         .segment "BOOT"
-start:  ldx #<cmd_load7             ; TABLES7 to bank 7, SHIPB to bank 6,
+start:  lda ROMCOPY
+        sta old_bank
+        jsr find_ram               ; the four banks into BANKMAP -- or C = 1, fewer
+        bcc :+
+        jmp no_ram
+:       jsr wpatch                 ; PAGE's write selects, for the board
+        ldx #<cmd_load7             ; TABLES7 to bank 7, SHIPB to bank 6,
         ldy #>cmd_load7            ; TABLES2 to bank 5, TABLES to bank 4
         lda #BANK7
         jsr ldbank
@@ -3217,20 +3237,10 @@ start:  ldx #<cmd_load7             ; TABLES7 to bank 7, SHIPB to bank 6,
         jsr ldbank
         lda #119                   ; close !BOOT (an EXEC file): the filing
         jsr OSBYTE                 ; system's workspace is then ours
-        ldx #0                     ; the palette (!BOOT has set MODE 1)
-:       lda vdu_init,x
-        jsr OSWRCH
-        inx
-        cpx #vdu_end-vdu_init
-        bne :-
         jsr glyphs
-        lda #BANK2                 ; the game's letters, in bank 5
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 5                     ; the game's letters, in bank 5
         jsr glyphs5
-        lda #BANK
-        sta ROMCOPY
-        sta ROMSEL
+        PAGE 4
         ldx #0                     ; narrow the screen: 64 bytes by 20 rows
 :       lda crtc_regs,x
         sta CRTC_IDX
@@ -3240,6 +3250,24 @@ start:  ldx #<cmd_load7             ; TABLES7 to bank 7, SHIPB to bank 6,
         inx
         cpx #crtc_end-crtc_regs
         bne :-
+        lda #$30                   ; the shown screen ($3000..$57FF) cleared, then
+        sta ptr+1                  ; the palette (the loads' $3000 unseen)
+        ldy #0
+        sty ptr
+        tya
+:       sta (ptr),y
+        iny
+        bne :-
+        inc ptr+1
+        ldx ptr+1
+        cpx #$58
+        bne :-
+        ldx #0
+:       lda vdu_init,x
+        jsr OSWRCH
+        inx
+        cpx #vdu_end-vdu_init
+        bne :-
         jmp go
 
 cmd_load: .byte "LOAD TABLES 3000", 13
@@ -3247,14 +3275,16 @@ cmd_load3: .byte "LOAD SHIPB 3000", 13
 cmd_load7: .byte "LOAD TABLES7 3000", 13
 cmd_load2: .byte "LOAD TABLES2 3000", 13
 
-; *LOAD (X, Y: the command) to $3000, then the 16K there to bank A (which is
-; left paged in).
+; *LOAD (X, Y: the command) to $3000, then the 16K there to bank A (4..7: its
+; socket, which is left paged in and write selected).
 ldbank: pha
         jsr OSCLI
         pla
+        tax
+        lda BANKMAP-4,x
+        tax
         sei
-        sta ROMCOPY
-        sta ROMSEL
+        jsr selwr
         cli
         lda #$30
         sta ptr+1
@@ -4454,3 +4484,219 @@ WM:     .byte 0
         .assert * <= $A100, error, "pcol5: bank 5 from $A100 the game's"
 
         .include "game.s"
+
+; ---------------------------------------------------------------- LANDS's RAM
+; (Cribbed from beebgame's loader.s, github.com/ebenupton/beebgame: find_ram,
+; selwr, wrx; here a socket holding a ROM the MOS runs is never taken.)
+        .segment "BOOT"
+NSOCK   = 16
+SIG_TAG = $C0                      ; a socket's signature: its number, tagged
+CLASS_FREE = 0                     ; RAM with no ROM image
+CLASS_IMAGE = 1                    ; RAM with an image the MOS is not running
+CLASS_ROM = 2                      ; (RAM with a ROM the MOS runs: never taken)
+CLASS_NONE = $FF                   ; not RAM (bit 7 also: an alias, SIG_TAG | n)
+
+; selwr: socket X paged for reads and writes (wrx: the write select alone, on
+; the board find_ram found).  A X; Y kept.
+selwr:  stx ROMCOPY
+        stx ROMSEL
+wrx:    lda board
+        lsr a                      ; plain: 0, C = 0; Watford: 0, C = 1;
+        bcc @sol                   ; Solidisk: 1, C = 0
+        sta WRSEL_WATFORD,x        ; (Watford: the address says which)
+@sol:   beq @done
+        stx WRSEL_SOLIDISK         ; (Solidisk: port B bits 0-3)
+@done:  rts
+
+; find_ram: C = 0: BANKMAP the four sockets (the lowest free ones, then the
+; lowest holding images), board the write select; C = 1 fewer.  As beebgame's:
+; a socket takes a write if bit 0 of its ROM type byte flips (and is put back);
+; the board the way that finds the most sockets (plain winning a tie); two
+; numbers reaching one RAM told by a tagged signature, the higher dropped.
+find_ram:
+        sei
+        lda #BOARD_STD
+        sta board
+        sta bestb
+        jsr @count
+        sta best
+        inc board                  ; BOARD_WATFORD
+        jsr @count
+        cmp best
+        bcc @solid
+        beq @solid
+        sta best
+        inc bestb
+@solid: lda #$0F                   ; Solidisk: port B bits 0-3 out
+        sta UVIA_DDRB
+        inc board                  ; BOARD_SOLIDISK
+        jsr @count
+        cmp best
+        beq @nsol
+        bcs @class
+@nsol:  lda bestb
+        sta board
+        inx                        ; (X = 0: @count leaves $FF) port B back
+        stx UVIA_DDRB
+@class: ldx #NSOCK-1
+@sock:  lda #CLASS_NONE
+        sta SOCKCLASS,x
+        jsr @selflip
+        bne @snext
+        lda MOS_ROMTAB,x           ; a ROM the MOS runs
+        beq @image
+        lda #CLASS_ROM
+        bne @cls
+@cstr:  .byte 0, "(C)"             ; (never executed)
+@image: stx tmp                    ; an image: 0 "(C)" at the copyright offset
+        ldy ROMHDR_COPY
+        ldx #<-4
+@cchk:  lda $8000,y
+        cmp @cstr+4-256,x
+        bne @free
+        iny
+        inx
+        bne @cchk
+        lda #CLASS_IMAGE
+        .byte $2C                  ; (BIT abs: the LDA skipped)
+@free:  lda #CLASS_FREE
+        ldx tmp
+@cls:   sta SOCKCLASS,x
+@snext: dex
+        bpl @sock
+        ldx #NSOCK-1               ; the signatures: each RAM socket's ROMHDR_COPY
+@sig:   lda SOCKCLASS,x            ; saved and its number written there, tagged
+        bmi @signx
+        jsr selwr
+        lda ROMHDR_COPY
+        sta SAVED,x
+        txa
+        ora #SIG_TAG
+        sta ROMHDR_COPY
+@signx: dex
+        bpl @sig
+        ldx #NSOCK-1
+@chk:   lda SOCKCLASS,x
+        bmi @chknx
+        stx ROMCOPY
+        stx ROMSEL
+        txa
+        ora #SIG_TAG
+        cmp ROMHDR_COPY
+        beq @chknx
+        sta SOCKCLASS,x            ; (an alias of a lower number)
+@chknx: dex
+        bpl @chk
+        inx                        ; restored in reverse: aliases unwind
+@res:   ldy SOCKCLASS,x
+        iny
+        beq @resnx
+        jsr selwr
+        lda SAVED,x
+        sta ROMHDR_COPY
+@resnx: inx
+        cpx #NSOCK
+        bne @res
+        lda old_bank
+        sta ROMCOPY
+        sta ROMSEL
+        cli
+        ldy #CLASS_FREE            ; the lowest free sockets, then images
+        sty want
+@cl:    ldx #0
+@pick:  lda SOCKCLASS,x
+        cmp want
+        bne @pnext
+        txa
+        sta BANKMAP,y
+        iny
+        cpy #4
+        beq @found
+@pnext: inx
+        cpx #NSOCK
+        bne @pick
+        inc want
+        lda want
+        cmp #CLASS_ROM
+        bne @cl
+        sec                        ; fewer than four
+        rts
+@count: lda #0                     ; A = the sockets taking a write, the board as
+        sta want                   ; set (X = $FF after)
+        ldx #NSOCK-1
+@cnt:   jsr @selflip
+        bne @cntnx
+        inc want
+@cntnx: dex
+        bpl @cnt
+        lda want
+        rts
+@selflip:                          ; Z = 1: socket X takes a write
+        jsr selwr
+        lda ROMHDR_TYPE
+        tay
+        eor #1
+        sta ROMHDR_TYPE
+        cmp ROMHDR_TYPE
+        sty ROMHDR_TYPE
+@found: clc
+        rts
+
+; wpatch: each PAGE's BIT made the board's write select: a Watford's STA
+; WRSEL_WATFORD + the bank's socket, a Solidisk's STA WRSEL_SOLIDISK (A is the
+; socket there); a plain machine's left.
+wpatch: lda board
+        beq @r
+        ldx #3
+@l:     lda wrsl,x
+        sta ptr
+        lda wrsh,x
+        sta ptr+1
+        ldy #0
+        lda #$8D                   ; STA abs
+        sta (ptr),y
+        lda board
+        cmp #BOARD_SOLIDISK
+        beq @s
+        lda BANKMAP,x
+        ora #<WRSEL_WATFORD
+        ldy #1
+        sta (ptr),y
+        iny
+        lda #>WRSEL_WATFORD
+        bne @h
+@s:     ldy #1
+        lda #<WRSEL_SOLIDISK
+        sta (ptr),y
+        iny
+        lda #>WRSEL_SOLIDISK
+@h:     sta (ptr),y
+        dex
+        bpl @l
+@r:     rts
+
+; no_ram: fewer than four banks: say so (MODE 1's palette black: back to
+; white first), and back to the MOS.
+no_ram: ldx #0
+:       lda msg_ram,x
+        beq :+
+        jsr OSWRCH
+        inx
+        bne :-
+:       rts
+msg_ram: .byte 20, 23, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0
+        .byte "LAND needs 64K of sideways RAM:", 13, 10
+        .byte "four 16K banks, any sockets, writable", 13, 10
+        .byte "(through &FE30, or a Watford or", 13, 10
+        .byte "Solidisk board).", 13, 10, 0
+
+old_bank: .byte 0
+board:  .byte 0
+want:   .byte 0
+best:   .byte 0
+bestb:  .byte 0
+SOCKCLASS: .res NSOCK
+SAVED:  .res NSOCK
+; pg4..pg7's BITs
+wrsl:   .byte <pw4, <pw5, <pw6, <pw7
+wrsh:   .byte >pw4, >pw5, >pw6, >pw7

@@ -13,9 +13,9 @@ frame.  For debugging src/game.s; exit status 0 unless a frame fails to run.
 
 Each line: the frame number, the keys, the frame's cycles (frame()'s: see
 there), then state(): x, z (tiles), y (height units, 16 a tile), v (gvx,
-gvy, gvz, 16-bit), m (gmx, gmz: unused, 0), k, p (direction, pitch), fuel,
-landed, ctim (crash steps left), L and C (nland, ncrash: BCD), hg (HGV: the
-ground under the ship), came (CAME), shy (GSHY: the ship's line).
+gvy, gvz, 16-bit), k, p (direction, pitch), fuel, landed, ctim (crash steps
+left), hg (HGV: the ground under the ship), came (CAME), shy (GSHY: the
+ship's line).
 
 Importable: Game() builds the machine and runs G_INIT; frame(keys) runs a
 frame; state() describes the ship; rd(name, n) reads n bytes at a label.
@@ -172,9 +172,9 @@ class Game:
         r = self.rd
         return (f"x {s24(r('sx', 3)):7.3f} z {s24(r('sz', 3)):7.3f} y {s24(r('sy', 3)) * 16:6.2f}u "
                 f"v {s16(r('gvx', 2)):6d} {s16(r('gvy', 2)):6d} {s16(r('gvz', 2)):6d} "
-                f"m {r('gmx')[0]:3d} {r('gmz')[0]:3d} k {r('gk')[0]:2d} p {r('gp')[0]} "
+                f"k {r('gk')[0]:2d} p {r('gp')[0]} "
                 f"fuel {r('fuel', 2)[0] | r('fuel', 2)[1] << 8:5d} landed {r('landed')[0]} "
-                f"ctim {r('ctim')[0]:2d} L {r('nland')[0]:02X} C {r('ncrash')[0]:02X} "
+                f"ctim {r('ctim')[0]:2d} "
                 f"hg {self.mpu.memory[HGV]} came {self.mpu.memory[CAME]} shy {self.mpu.memory[GSHY]}")
 
 

@@ -107,22 +107,21 @@
 ;   $0400, $0500  ROWA, ROWB: a row's line by pixel x (a strip's top, bottom)
 ;   $0600         RTBUF: the rungs' transition lines
 ;   $0700, $0800  PX, PY: the rows' points, 16 a row, rows 0..7
-;   $07D0-$07DA   ZCF, ZB, RN, DIB, FACT, BCL, CAME, HGV, EYV, MT0, MT1
+;   $07D1-$07DA   ZB, RN, (spare), FACT, BCL, CAME, HGV, EYV, MT0, MT1
 ;   $07DB-$07DF   the game's ship record for bank 6 (game.s: GSHK..GSHV)
 ;   $07E0         HTN: zsh4's new row of heights (11)
 ;   $0880-$08FF   HT: the rows' raw heights, 16 a row, rows 0..7
 ;   $0900, $09A0  CLE, CLO: pcol5's window of box bytes, 16 a row, 10 rows
-;   $0A40-$0ADF   TX, TY, BX, BY, LO, HI, RTPL, RTPH, CE, CO: the strip's,
+;   $0A40-$0ADF   TX, TY, BX, BY, LO, HI, RTPL, (spare), CE, CO: the strip's,
 ;                 16 each
 ;   $0B00-$0B2F   SPB, STL, STD: the slow way's
-;   $0B30, $0B40  CX: the columns' map x; PXX (unused)
+;   $0B30         CX: the columns' map x
 ;   $0B60, $0BA0  CURT, CURB: this frame's column records (64 each)
 ;   $0C00, $0C80  TOPS, BOTS: each screen's (64 a screen, screen 1's at +64)
 ;   $0D00-$0DC1   ENTL, ENTH: each line's entry in its STAB (lines
 ;                 YSKY..YGND+1: 97 each)
 ;   $0E00, $1000, $1200, $1400  STAB for t = 0..3 (437 bytes each)
-;   $1600-$1722   LAH0, LAH1 (97 each: init writes them, nothing reads them),
-;                 LAH: each line's 2 * (y >> 3)
+;   $16C2-$1722   LAH: each line's 2 * (y >> 3)
 ;   $1740-$17A3   EINL,y for y = YSKY-1..YGND+3 (EINL = $1701): run2's table
 ;                 offsets by line
 ;   $1800-$18EF   GLY: the readout's 15 characters, 16 bytes each
@@ -137,8 +136,8 @@
 ;     way's TR0-8, TL0-8, SWT $9400-$9AFF (init's line tables; RSMT, landgen's,
 ;     in its last page), TBLK4, TBLK5, TENL, TENH4, TENH5 (traceb's fills),
 ;     FPSL, FPSH (the readout), DQT, DRT, DVH, DVR, DVL (division), MRL, MRH
-;     (map row addresses), CLMP1, DIV4, and DE, DO, LANDT, SEAT, EIN (nothing
-;     reads these); and in its free space the code segments B4R, B4L ($9000,
+;     (map row addresses), CLMP1, DIV4; and in its free space the code segments
+;     B4R, B4L ($9000,
 ;     $9100), B4S2 ($9200), B4S ($A081), B4C ($A181), B4V1-3 ($B600-$B800),
 ;     B4Z ($B900)
 ;   bank 5, TABLES2: CMAPE $8000, CMAPO $9000 (each tile's dither bytes, even
@@ -214,16 +213,14 @@ BY      = $0A70
 LO      = $0A80                    ; each rung's pixels: LO..HI-1 (HI = LO:
 HI      = $0A90                    ; none)
 RTPL    = $0AA0                    ; and its transitions' base: pixel x's line
-RTPH    = $0AB0                    ; is in RTBUF's page at offset RTPL + x + 1
-                                   ; (RTPH, the page, is unused)
+                                   ; is in RTBUF's page at offset RTPL + x + 1
 CE      = $0AC0                    ; each box's byte on even and odd lines
 CO      = $0AD0
 SPB     = $0B00                    ; the slow way's: each pixel's box at the top
 STL     = $0B10                    ; and its transitions (4 a pixel: line, step)
 STD     = $0B20
-EINL    = $1701                    ; run2's table offsets by line, init's copy
-                                   ; of landgen's EIN (EINL,x and EINL-1,x in
-                                   ; one page)
+EINL    = $1701                    ; run2's table offsets by line (init's;
+                                   ; EINL,x and EINL-1,x in one page)
 GLY     = $1800                    ; the readout's characters: 16 bytes each
 ENTL    = $0D00-YSKY               ; each line's entry in its STAB: low byte,
 ENTH    = $0D61-YSKY               ; and the page within the table (lines
@@ -234,20 +231,17 @@ CURT    = $0B60                    ; time there, and this frame's
 CURB    = $0BA0
 STAB    = $0E00
 LAH     = $16C2-YSKY               ; each line's 2 * (y >> 3) (lines
-LAH0    = $1600-YSKY               ; YSKY..YGND+1); the same + $30 and + $58
-LAH1    = $1661-YSKY               ; (written by init, never read)
+                                   ; YSKY..YGND+1)
         .assert YGND+2-YSKY <= 97, error, "LAH, ENTL: 97 lines each"
         .assert <EINL + YGND+2 < $100 && LAH + YGND+2 < EINL + YSKY-1, error, "EINL: in its page, past LAH"
 CX      = $0B30                    ; the columns' map x (project)
-PXX     = $0B40                    ; (unused)
-ZCF     = $07D0                    ; the far clip on (always 1: init)
 BCL     = $07D5                    ; this strip's bottom points past YGND: a
                                    ; count (0: none)
 ZB      = $07D1                    ; ZBACK less the first row's j: row k's map
 RN      = $07D2                    ; row is czt + ZB - k; the near clip's row
-DIB     = $07D3                    ; (ZB - ZCLIP, the last); (unused); the far
-FACT    = $07D4                    ; clip's row is between the rows either
-                                   ; side (1) or a corner row (0)
+FACT    = $07D4                    ; (ZB - ZCLIP, the last); the far clip's row
+                                   ; is between the rows either side (1) or a
+                                   ; corner row (0)
 CAME    = $07D6                    ; the camera above CAMH (0..EMAX: game.s's)
 HGV     = $07D7                    ; the ground under the ship (hgnd's, for
                                    ; game.s)
@@ -281,9 +275,6 @@ OP_STAY = $99                      ; STA abs,Y
 OP_LDAZ = $A5                      ; LDA zp
 OP_TXA  = $8A
 OP_RTS  = $60
-OP_JMP  = $4C                      ; (unused)
-OP_INY  = $C8                      ; (unused)
-OP_DEY  = $88                      ; (unused)
 OP_INX  = $E8
 OP_DEX  = $CA
 
@@ -294,7 +285,6 @@ czt:    .res 1
 czs:    .res 1
 back:   .res 1                     ; the screen being drawn: 0 ($3000) or 1
 scrb:   .res 1                     ; ($5800), and its high byte
-stb0:   .res 1                     ; >STAB + 4 * back (setback's; unused)
 np:     .res 1                     ; points a row: NX (prow7's)
 nr:     .res 1                     ; rows: 7 or 8 (project's)
 vcount: .res 1                     ; vertical syncs (vsync's)
@@ -303,21 +293,11 @@ ptr:    .res 2                     ; a pointer (init, putg, LANDS)
 tmp:    .res 2                     ; scratch (init, prow7's 16 j, hgnd, slow,
                                    ; slow2, LANDS)
 ; project
-pr:     .res 1                     ; (unused)
-zq:     .res 1                     ; (unused: cd)
-hp0:    .res 2                     ; (unused: PH, CBOX)
-hp1:    .res 2                     ; (unused: CBOX)
 syp:    .res 2                     ; bank 7's: the row's SYT7 line, offset by
 lp:     .res 2                     ; HOFF; a LERPQ7 row (the clip rows' q =
                                    ; 16 - czs; hgnd's)
-vx:     .res 3                     ; (unused: PXS)
 rl:     .res 1                     ; the row's r, low and high (R7BP)
 rh:     .res 1
-ha:     .res 1                     ; (unused: cn)
-hb:     .res 1                     ; (unused: cdy)
-lqx:    .res 2                     ; (unused: cpl, cph)
-xt1:    .res 1                     ; (unused)
-lqz:    .res 2                     ; (unused)
 ; strips
 ns:     .res 1                     ; the strip: 0 (row 0 traced only), 1..nr-1
                                    ; the land's (nr-1 the near strip)
@@ -348,11 +328,8 @@ rr2:    .res 1
 alloc:  .res 2                     ; the next free byte in RTBUF
 rtp:    .res 2                     ; a rung's transitions by position (split,
                                    ; mktr)
-rend:   .res 1                     ; (unused)
 dva:    .res 1                     ; the divisor a and dividend D (divs, divt)
 dvd:    .res 1
-dvp:    .res 2                     ; (unused)
-dvq:    .res 2                     ; (unused)
 fe:     .res 1                     ; traceb's: a long fill's end
 tcnt:   .res 1                     ; traceb's: the pending run's first x
 tsy:    .res 1                     ; gone's: xr / 4, the first column right
@@ -367,11 +344,10 @@ BO      = BE+5                     ; (both in the shared scratch $8E-$9F)
 ; columns
 x4:     .res 1                     ; the column's first pixel x (a multiple
                                    ; of 4)
-x4p4:   .res 1                     ; (never written: slow reads it)
+x4p4:   .res 1                     ; x4 + 4 (slow's)
 coff:   .res 1                     ; (8 * column) & 255: the byte within the
                                    ; half
 scrh:   .res 1                     ; the screen's high byte + the half (shs)
-stbh:   .res 1                     ; (unused)
 ri:     .res 1                     ; the first rung not wholly left of the
                                    ; column
 ys:     .res 4                     ; each pixel's top-row line
@@ -411,7 +387,6 @@ kb:     .res 1                     ; split2's: the second rung's transition
 pp:     .res 2                     ; run's planted RTS (dummy: none)
 tsp:    .res 2                     ; TOPS, BOTS of the screen being drawn (its
 bsp:    .res 2                     ; set)
-rec:    .res 1                     ; $FF for a land strip (setup's; never read)
 bpos2:  .res 1                     ; split2's, s2v's: the second boundary
 le:     .res 1                     ; split2's, s2v's: the left box's bytes;
 lo2:    .res 1                     ; split2's: the middle's EORed with the
@@ -521,8 +496,8 @@ flip:   lda vcount                 ; (FMIN = 4: 12.5 frames a second at most)
         lda back
         eor #1
         sta back
-; setback: scrb ($30 or $58), sethalf's screen bits (sh_b's operand: 2 * back)
-; and stb0 (unused) for `back`.  Clobbers A.
+; setback: scrb ($30 or $58) and sethalf's screen bits (sh_b's operand: 2 *
+; back) for `back`.  Clobbers A.
 setback:
         lda back
         beq :+
@@ -533,21 +508,16 @@ setback:
         lda back
         asl a
         sta sh_b+1                 ; (sethalf's ORA #: t = 2 * back + half)
-        asl a
-        adc #>STAB
-        sta stb0
         rts
 
 ; ---------------------------------------------------------------- init
-; init: ZCF = 1; both screens black ($3000-$7FFF: LANDS with them); the four
-; STABs and the line tables (ENTL, ENTH; LAH, LAH0, LAH1; in bank 4: LAHSB0-3,
+; init: both screens black ($3000-$7FFF: LANDS with them); the four STABs and
+; the line tables (ENTL, ENTH; LAH; in bank 4: LAHSB0-3,
 ; ENTB0-3, EXLB, EXHB0-3); TOPS, BOTS to nothing drawn; traceb's fill blocks'
 ; JMPs; EINL; pp to dummy; the camera at tile (40, 30), sixteenths 0; dvs.  No
 ; OS calls: the tests (test/landsoak.py, test/gametest.py) run it under py65.
 ; Needs bank 4 paged in and writable.  Clobbers A, X, Y, ptr, tmp.
-init:   lda #1                     ; the far clip: always on
-        sta ZCF
-        lda #0
+init:   lda #0
         tay
         sta ptr
         ldx #$30
@@ -635,14 +605,10 @@ init:   lda #1                     ; the far clip: always on
         lsr a
         and #$FE                   ; 2 * (y >> 3)
         sta LAH,x
-        clc
+        clc                        ; LAHSBt = LAH + $30, $31, $58, $59 (shs)
         adc #$30
-        sta LAH0,x
-        adc #$28
-        sta LAH1,x
-        sec                        ; LAHSBt = LAH + $30, $31, $58, $59 (shs)
-        sbc #$28
         sta LAHSB0,x
+        sec
         adc #0                     ; (C set: + 1)
         sta LAHSB1,x
         adc #$28
@@ -698,7 +664,7 @@ init:   lda #1                     ; the far clip: always on
         sta TBLK4+3*TNB+2
         sta TBLK5+3*TNB+2
         ldx #YSKY-1                ; EINL: lines 2k-1 and 2k share R2OFF + 3
-        lda #R2OFF                 ; (k - YSKY/2), as landgen's EIN; the last
+        lda #R2OFF                 ; (k - YSKY/2): run2's slots; the last
         clc                        ; pair (YGND+2, +3) wraps past 255 and is
 :       sta EINL,x                 ; never read
         sta EINL+1,x
@@ -735,34 +701,11 @@ init:   lda #1                     ; the far clip: always on
 ; not, bank 7's prow7 makes the rows' points (PX, PY: x from B1T and r, y from
 ; SYT7 by height less the ground's, hgnd, plus eyrow's EYV for CAME), the clip
 ; planes' rows interpolated by 1 - fz, and np = NX.
-; In: cxt, cxs, czt, czs, CAME, ZCF.  Out: ZB, RN, FACT, nr, np, CX, HT, HTN,
+; In: cxt, cxs, czt, czs, CAME.  Out: ZB, RN, FACT, nr, np, CX, HT, HTN,
 ; SHF (0 after), PX, PY, HGV, EYV, pkx, pkz, CLE, CLO, ldCLE; bank 4 paged.
 ; Clobbers A, X, Y, tmp, rl, rh, syp, lp, MT0, MT1, $8E-$9E.  Called by the
 ; main loop.
         .assert <PY = 0, error, "PY page-aligned"
-cd      = zq                       ; (unused aliases)
-cn      = ha
-cdy     = hb
-cpl     = lqx
-cph     = lqx+1
-.macro PH i                         ; (unused)
-        ldy CX+i
-        lda (hp0),y
-        and #15
-        sta PY+i,x
-.endmacro
-.macro CBOX i                       ; (unused)
-        ldy CX+i
-        lda (hp0),y
-        sta CLE-16+i,x
-        lda (hp1),y
-        sta CLO-16+i,x
-.endmacro
-.macro PYS i                        ; (unused)
-        ldy PY+i,x
-        lda (syp),y
-        sta PY+i,x
-.endmacro
 .macro PYSE i                       ; (bank 7) corner i's y: SYT7 (syp) by the
         ldy PY+i,x                  ; height in PY + EYV, the camera raised
         lda (syp),y                 ; (C clear on entry; the sum stays within a
@@ -887,25 +830,12 @@ L1:     lda LERPQ7,y
         lda R7H,y
         sta rh
 .endmacro
-.macro PXS i                        ; (unused)
-        sta PX+i,x
-        tay
-        lda vx
-        clc
-        adc rl
-        sta vx
-        tya
-        adc rh
-.endmacro
 
 project:
-        lda #ZBACK-ZSKIP           ; ZB: ZCF is always 1, so the first row is
-        ldx #0                     ; the far clip's: a corner row (ZB = ZFCLIP,
-        ldy ZCF                    ; FACT 0) at czs 0, else between rows ZFCLIP
-        beq :+                     ; and ZFCLIP+1 (ZB = ZFCLIP+1, FACT 1);
-        lda #ZFCLIP                ; ZBACK-ZSKIP is the far clip off, never
-        ldy czs                    ; taken
-        beq :+
+        lda #ZFCLIP                ; ZB: the first row is the far clip's: a
+        ldx #0                     ; corner row (ZB = ZFCLIP, FACT 0) at czs 0,
+        ldy czs                    ; else between rows ZFCLIP and ZFCLIP+1 (ZB
+        beq :+                     ; = ZFCLIP+1, FACT 1)
         lda #ZFCLIP+1
         inx
 :       sta ZB
@@ -1147,11 +1077,10 @@ flrc:   tax
 ; black.  Then the bottom row is traced into (bota) (traceb, whose RTS is
 ; this routine's).  In: ns, nr, np, np1, PX, PY, CLE, CLO, ldCLE, bota.  Out:
 ; TX, TY, BX, BY, CE, CO (0 .. np+1), xl, xr, BCL, last ($FF for the near
-; strip, ns = nr-1), rec (unused), (bota).  Clobbers A, X, Y and traceb's
+; strip, ns = nr-1), (bota).  Clobbers A, X, Y and traceb's
 ; (bank 7 paged and bank 4 back).  Called by strips.
 setup:  lda #0
         sta BCL
-        sta rec                    ; ($FF for a land strip; nothing reads it)
         tax
         ldy ns
         iny
@@ -1163,9 +1092,6 @@ setup:  lda #0
         ; - 1) + ldCLE + b - 1 (su_l7, unrolled in bank 7)
         lda ns
         beq su_r                   ; (A = 0: strip 0, row 0 as both rows)
-        cmp nr
-        beq su_g                   ; (unused: ns < nr always)
-        dec rec
         asl a                      ; 16 (ns - 1): the top row's offset in PX,
         asl a                      ; PY (C clear: ns < 16)
         asl a
@@ -1180,14 +1106,8 @@ ldCLE:  .byte 0                    ; pcol5's: 16 * its window offset, added to
                                    ; su_l7's CLE, CLO index (data, in the code)
 su_qc:    inc BCL                  ; a bottom point past YGND
         bcs su_qb                  ; (always: C from the cmp)
-        ; strip 0: row 0 as both rows, boxes black.  (su_g, su_gb and the
-        ; ground's bottom row below are unused: strips runs ns 0 .. nr-1, and
-        ; the ground under the near row is nearpost's.)
-su_g:     asl a                    ; (unused) 16 (nr - 1)
-        asl a
-        asl a
-        asl a
-        adc #$F0
+        ; strip 0: row 0 as both rows, boxes black (it is traced only: its
+        ; TY, CE and CO are never read)
 su_r:     tay                      ; Y: the row's offset in PX, PY
         ldx #1
 su_q:     lda PX,y                 ; points 1 .. np: the row's as both rows
@@ -1205,20 +1125,6 @@ su_qb:    lda #0                   ; boxes black
         inx
         cpx np1
         bcc su_q
-        ldx np
-        lda ns
-        bne su_gb                  ; (unused)
-        lda #YSKY                  ; strip 0's top row at YSKY (not read: strip
-:       sta TY,x                   ; 0 is not drawn)
-        dex
-        bne :-
-        beq su_m
-su_gb:    lda #0                   ; (unused) the ground's bottom row at YGND
-        sta BCL
-        lda #YGND
-:       sta BY,x
-        dex
-        bne :-
 su_m:
         ; the margins: the byte boundaries MARGIN or more beyond the bottom
         ; row's ends (MARGIN 0: nothing is assembled for it)
@@ -1253,35 +1159,8 @@ su_m:
         sta CO
         sta CE,x
         sta CO,x
-su_bot:   lda ns                   ; the bottom row's line
-        cmp nr
-        beq :+                     ; (unused: never)
-        jmp traceb                 ; (its RTS returns to strips)
-:
-        ldy xl                     ; (unused) the ground's: each column's
-:       tya                        ; lowest land line this frame or last
-        lsr a                      ; (CURB, BOTS), its four pixels alike
-        lsr a
-        tax
-        sty tmp
-        tay
-        lda (bsp),y
-        cmp CURB,x
-        bcs :+
-        lda CURB,x
-:       ldy tmp
-        sta (bota),y
-        iny
-        sta (bota),y
-        iny
-        sta (bota),y
-        iny
-        sta (bota),y
-        iny
-        cpy xr
-        bne :--
-        rts
-
+su_bot:   jmp traceb               ; the bottom row's line (its RTS returns to
+                                   ; strips)
 
 ; traceb: the bottom row (BX, BY 0 .. np+1) into (bota), one line a pixel,
 ; segment by segment as points.py's bresenham_ys (trace: a segment's first
@@ -1359,10 +1238,8 @@ t_end:  ldx #0                     ; (operand: the end + 1) the row's end: the
 t_stj:  jmp t_steep                ; (trampolines within reach of t_seg's
 t_o:    jsr t_fl0                  ; branches) t_o: the pending run to x0, then
         jmp t_old                  ; a pixel at a time
-t_dx0:  lda BY+1,x                 ; dx = 0, y differs: the pending run ends at
-        cmp tyv                    ; x0 (tyv = BY,x here, so this test never
-        beq t_nx                   ; holds: unused)
-        jsr t_fl0
+t_dx0:  jsr t_fl0                  ; dx = 0, y differs: the pending run ends at
+                                   ; x0
         ldx tj
         lda BX,x                   ; the new run: from x0 at y1
         sta tcnt
@@ -1922,6 +1799,14 @@ rg_lw:    tax
         bne rg_lw
         beq rg_ld
 
+; The column filler's patched jumps and chains rely on pairs of labels sharing
+; a page (the .asserts below: record/o_nr, the run2 pages, the fsplit walker
+; ...).  LAYPAD puts the code from here on at the page phase that satisfies
+; them all (the smallest value that links); change it when code before this
+; point grows or shrinks.
+LAYPAD  = 78
+        .res LAYPAD
+
 ; ---------------------------------------------------------------- columns
 ; cols: draw a land strip's byte columns, xl/4 .. xr/4-1, left to right.  A
 ; column runs from its top row's highest line (mn) down to its floor (flr: its
@@ -2201,7 +2086,7 @@ c_r1x:  cpx flr1                   ; (zone1 returns here, X = mx)
 ; through tools/landgen.py's store tables.  For t = 2 back + half, page TPEt
 ; holds STA line,Y for each even line (3 bytes a line from offset R2OFF, line
 ; YGND+1's slot at $FF) and page TPOt the odd lines' (line YGND+2's at $FF);
-; EINL,y (init's, landgen's EIN) is the slot of the first even line at or after
+; EINL,y (init's) is the slot of the first even line at or after
 ; y, EINL-1,y that of the first odd line at or after y.  The even pass is a JSR
 ; to line X's slot (je), back by an RTS planted over line Y's (pr0 its address:
 ; the page sethalf's, the offset EINL,y); the odd pass likewise (jo, pr1).  The
@@ -2618,7 +2503,6 @@ npt0:   .byte $A5, $A5, $4C        ; c_np by kind (cols): LDA x4 / CLC, the
 npt1:   .byte x4, x4, <nearpost    ; same, JMP nearpost
 npt2:   .byte $18, $18, >nearpost
 shs:    .byte $30, $31, $58, $59   ; scrh by t: the screen's page + the half
-sht:    .byte >STAB, (>STAB)+2, (>STAB)+4, (>STAB)+6 ; STAB t's page (unused)
 tpe:    .byte TPE0, TPE1, TPE2, TPE3 ; run2's store pages by t (landgen's)
 tpo:    .byte TPO0, TPO1, TPO2, TPO3
 exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3) ; run's EXHBt (init's)
@@ -4163,7 +4047,8 @@ prow7:  lda SHF                    ; (zsh4 stepped the map: shift HT first)
         bcs :+
         jmp @hp0                   ; (a corner row on the plane: HT's heights)
 :       jmp @apf                   ; (lerped to row 1's)
-@altj:  jmp @alt
+@altj:  jmp @cam                   ; (MODE not 0 here has bit 7 set: the camera
+                                   ; raised)
 ; A row: Y = its di, X = tmp = 16 j, MODE; C set on entry.
 @row:   lda SYL7,y                 ; syp = SYT7 + 32 di | HOFF (32 di's low 5
         sta bp                     ; bits are 0, HOFF <= HMAX); bp = B1T + 32 di
@@ -4278,12 +4163,6 @@ prow7:  lda SHF                    ; (zsh4 stepped the map: shift HT first)
 :
         .endrepeat
         rts
-@alt:   bpl :+                     ; MODE not 0: bit 7 set (the camera raised)
-        jmp @cam                   ; goes to @cam.  A clip row with the camera
-:       lsr a                      ; at CAMH never reaches @row (prow7 and @lst
-        bcc @hp0                   ; handle those directly), so the three
-                                   ; instructions here are not reached.
-        jmp @ap
 @hp0:                              ; a clip row's y's from HT (the camera at
                                    ; CAMH): X = 0 or 16 RN, syp set
         EDGEY HT
@@ -4414,7 +4293,6 @@ eyrow:  lda rh
         asl MT1
         rol a
         sta EYV
-        clc
         rts
 
 ; hsh (bank 7): the heights HT shifted a row after zsh4's map step.  SHF 1:
@@ -4511,9 +4389,8 @@ hgnd:   lda ZB                     ; X = 16 (ZB - ZSHIP) + 4 + (cxs >= 8)
 ; Rows ns-1 and ns (PX, PY + Y and + Y + 16) become the strip's top and bottom
 ; points TX, TY, BX, BY + 1..NX, BCL counted up for each bottom point at or past
 ; YGND+1 (bclip's); then Y += ldCLE (pcol5's 16 o: the window row of row ns)
-; and CLE, CLO + Y + 0..NX-1 become the boxes CE, CO + 1..NX (SUCL 10 copies a
-; window row's entry 10, which crow never makes, into CE+NX, the right
-; margin's, which setup zeroes afterwards).  Clobbers A, Y.  Caller: setup,
+; and CLE, CLO + Y + 0..NX-2 become the boxes CE, CO + 1..NX-1 (CE, CO + NX,
+; the right margin's, setup zeroes).  Clobbers A, Y.  Caller: setup,
 ; with bank 7 paged.  The code is in five pieces: the end of B7CODE, then the
 ; spare 80 bytes after R7L, R7H, PINL7 and PINR7 (each table is NDI = 176
 ; bytes of its page).
@@ -4566,7 +4443,6 @@ su_l7c:
         jmp su_l7d
         .segment "B7D"
 su_l7d: SUCL 9
-        SUCL 10
         rts
 
 ; satrow (bank 7, CLP7's spare): prow7's row X (16 j) with the camera so far
@@ -4670,9 +4546,11 @@ zsh4:   tay
 ; slow2.  In: ri, x4, x4p4, LO, HI, TX, BX, RTPL, RTBUF; and slow2's.  Out:
 ; SPB, STL, STD (slow2's).  Clobbers A, X, Y, tj, tx1, tmp.  Caller: c_d3
 ; (JSR; slow2's RTS returns).
-; (x4p4 is never written: nothing in the program stores to it, so @r's test
-; compares LO with whatever that zero page byte holds.)
-slow:   ldx #0
+slow:   lda x4                     ; x4p4 = x4 + 4: the column's end
+        clc
+        adc #4
+        sta x4p4
+        ldx #0
 @p:     stx tj                     ; pixel p
         txa
         clc

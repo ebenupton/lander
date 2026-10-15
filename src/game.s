@@ -31,7 +31,7 @@
 ; own used here: cxt, cxs, czt, czs (the camera, written by gout), PY, np, nr
 ; (the last frame's projected rows, read by landoff), back, scrb, sidx,
 ; setTl..setBh (the screen being drawn and its TOPS, BOTS), fpson (the
-; frame-rate readout's switch), GLY (the readout's characters: putd, unused).
+; frame-rate readout's switch).
 ; Zero page $8E..$9B (g0, g1, gt0..gt5, tsg, bsg) is LAND's spare, scratch
 ; within a single call.
 ;
@@ -107,9 +107,6 @@ GRAV    = 240                      ; gravity a step: Lander's &30000 (of 2^24)
 THRS    = 3                        ; full thrust: THX, THZ, THY (127 a unit)
                                    ; << 3: 1016 at most (Lander's 1024); tadd
                                    ; then makes it 1.25 as much
-HOVS    = 1                        ; hover's shift, Lander's quarter (step's
-                                   ; hover path is unreachable: the keys never
-                                   ; produce thr 2)
 LANDV   = 2048                     ; Lander's LANDING_SPEED, 1/8 tile a step:
                                    ; |gvx| + |gvy| + |gvz| must be below it
 UNDER   = 4                        ; the ship's centre above its underside, in
@@ -118,8 +115,6 @@ EOFF    = 60                       ; CAME below this: the land is on the screen,
                                    ; landoff's scan skipped
 KOFF    = 79                       ; the camera's least height above the ship,
                                    ; height units: SHYT[KOFF] = 97, line 81
-FUEL0   = 3413                     ; Lander's initialFuelLevel (unused: spawn
-                                   ; fills the tank)
 FUELMX  = 5120                     ; Lander's refuel limit (&1400): full
 REFUEL  = 40                       ; a step on the pad (1.25 of Lander's &20)
 CRASHT  = 40                       ; steps a crash lasts (4 seconds)
@@ -130,10 +125,7 @@ NPART   = 20                       ; dots (emit uses one a step, each in turn)
 SNTH    = $E6                      ; the engine: noise register, white noise at
                                    ; the lowest fixed rate
 SATF    = 13                       ; its attenuation (2 dB a step, 15 silent)
-SATH    = 13                       ; hover's (unreachable: see HOVS)
 SNCR    = $E7                      ; the crash: white noise clocked by tone 2
-SCRN    = $180                     ; tone 2's period at init (the crash sets it
-                                   ; every step: EXNL, EXNH)
 PGRAV   = 60                       ; a dot's gravity, 256ths of a unit a step^2
                                    ; (GRAV in the dots' units, 4 times coarser)
 PADX    = PADN/2                   ; the pad's middle tile: the start
@@ -150,28 +142,19 @@ FBC     = 10
 
 ; ---------------------------------------------------------------- init
 ; ginit (G_INIT): once, after LAND's init has blacked both screens.  The map
-; and the FUEL label on both screens; the counters and marks cleared; every
-; dot dead; the sound chip silenced with tone 2's period set; the ship spawned
-; on the pad; then gout, so LAND's first projection has the camera and bank 6
-; the ship.  Clobbers A, X, Y, g0, g1, gt0, gt2..gt4, su, scrg.
+; and the FUEL label on both screens; the marks cleared; every dot dead; the
+; sound chip silenced; the ship spawned on the pad; then gout, so LAND's first
+; projection has the camera and bank 6 the ship.  Clobbers A, X, Y, g0, g1,
+; gt0, gt2..gt4, su, scrg.
 ginit:  lda #$30
         jsr gscr
         lda #$58
         jsr gscr
-        lda #0
-        sta nland
-        sta ncrash
-        sta gmx
-        sta gmz
         lda #$FF                   ; $FF: nothing drawn yet on either screen
         sta mkl
         sta mkl+1
         sta fdr
         sta fdr+1
-        sta dl
-        sta dl+1
-        sta dc
-        sta dc+1
         lda #$5A                   ; (the LFSR's seed: never 0)
         sta rnd
         ldx #NPART-1
@@ -179,8 +162,8 @@ ginit:  lda #$30
 :       sta plife,x
         dex
         bpl :-
-        ldx #SININ-1               ; SINI to the sound chip, last byte first:
-:       lda SINI,x                 ; four channels off, then tone 2's period
+        ldx #SININ-1               ; SINI to the sound chip: the four channels
+:       lda SINI,x                 ; off
         jsr psg
         dex
         bpl :-
@@ -189,10 +172,7 @@ ginit:  lda #$30
         sta satt
         jsr spawn
         jmp gout
-SINI:   .byte $18, $C0|SCRN & 15   ; tone 2's period SCRN, sent (in reverse) as
-                                   ; the latch byte $C0 | low 4 bits, then the
-                                   ; data byte, the high 6
-        .byte $FF, $DF, $BF, $9F   ; noise, tone 2, 1, 0: attenuation 15 (off)
+SINI:   .byte $FF, $DF, $BF, $9F   ; noise, tone 2, 1, 0: attenuation 15 (off)
 SININ   = * - SINI
 
 ; gscr: the top of screen A (its high byte, $30 or $58): the map, MAPI's 64
@@ -276,14 +256,6 @@ putl:   asl a
         adc #0
         sta g1+1
         jmp putc
-; putd: digit A of LAND's GLY likewise.  (Unused.)
-putd:   asl a
-        asl a
-        asl a
-        asl a
-        sta g1                     ; (GLY is page-aligned)
-        lda #>GLY
-        sta g1+1
 ; putc: the 16 bytes at (g1) to row gt2, column gt3 of screen scrg: the cell
 ; is two byte columns of 8 lines, 16 consecutive bytes at scrg + $200 row +
 ; 16 column (the column 0..15: 16 column is a byte).  Clobbers A, Y, g0.
@@ -320,9 +292,6 @@ spawn:  lda #0
         sta gvz
         sta gvz+1
         sta ctim
-        lda #PFLAT                 ; (set again below, from SPAWNP)
-        sta gp
-        lda #0                     ; (unused load)
         lda #PADX                  ; the pad's middle tile in x and z
         sta sx+2
         sta sz+2
@@ -387,16 +356,16 @@ gout:   lda sx+1
         sta czs
         jsr units
         lda sy+2                   ; rel: the ship above the ground under it, in
-        bmi gr_lo                  ; whole units, 0..255: 255 from 16 tiles up
+        bmi gr_0                   ; whole units, 0..255: 255 from 16 tiles up
         cmp #16                    ; (su's whole byte has wrapped), 0 when below
-        bcc gr_lo                  ; HGV (y below 0, only while crashed, takes
-        lda #$FF                   ; the gr_lo path with su's byte wrapped: a
-        bne gr_st                  ; large rel, so CAME = EMAX)
+        bcc gr_lo                  ; HGV or below y = 0 (both only while
+        lda #$FF                   ; crashed)
+        bne gr_st
 gr_lo:  lda su+1
         sec
         sbc HGV
         bcs gr_st
-        lda #0
+gr_0:   lda #0
 gr_st:  sta gt0
         sec                        ; CAME = rel - (CAMH - KOFF), in 0..EMAX:
         sbc #CAMH-KOFF             ; the camera is then max(CAMH - rel, KOFF)
@@ -526,10 +495,7 @@ snd:    lda ctim
         lda thr
         beq @v
         ldx #SATF
-        lsr a                      ; (thr 1: C set, full; thr 2 would be hover:
-        bcs :+                     ; never produced)
-        ldx #SATH
-:       lda #SNTH
+        lda #SNTH
 @c:     cmp sctl                   ; the noise control byte, if changed
         beq @v
         sta sctl
@@ -572,8 +538,7 @@ psg:    sei
 ; touch, a landing
 ; if over the pad, within a pitch of level and slower than LANDV, else a
 ; crash (burst, GSHV 0, ctim CRASHT).  Finally parts.  Reads gkb, fuel, sy,
-; CAME, HGV; writes gk, gp, ctim, thr, landed, gv*, s*, fuel, nland, ncrash,
-; GSHV.  Clobbers A, X, Y, g0, g1, gt0..gt5, tt0, tt1.  Called by gstep.
+; CAME, HGV; writes gk, gp, ctim, thr, landed, gv*, s*, fuel, GSHV.  Clobbers A, X, Y, g0, g1, gt0..gt5, tt0, tt1.  Called by gstep.
 step:   lda gkb
         lsr a
         bcc :+
@@ -674,22 +639,12 @@ step:   lda gkb
         sta gvx+1,x
         rts
 @th:
-        lda thr                    ; thrust: gt5 the shift (THRS full; HOVS
-        beq @nt                    ; hover, unreachable), gt4 the fuel a step
-        lsr a                      ; (5 full; hover 2 and 3 by turns, hpar)
+        lda thr                    ; thrust: gt5 the shift (THRS), gt4 the fuel
+        beq @nt                    ; a step (5)
         lda #THRS
-        ldy #5
-        bcs :++
-        lda hpar
-        eor #1
-        sta hpar
-        ldy #2
-        lsr a
-        bcc :+
-        iny
-:       lda #HOVS
-:       sta gt5
-        sty gt4
+        sta gt5
+        lda #5
+        sta gt4
         lda fuel                   ; fuel -= gt4, floor 0
         sec
         sbc gt4
@@ -801,27 +756,11 @@ step:   lda gkb
 :       sta gvx,x
         dex
         bpl :-
-        sei                        ; nland + 1, BCD (interrupts off in decimal
-        sed                        ; mode)
-        lda nland
-        clc
-        adc #1
-        sta nland
-        cld
-        cli
         jmp parts
 @crash: lda #CRASHT                ; crashed: CRASHT steps, the ship not drawn,
-        sta ctim                   ; ncrash + 1 (BCD), every dot from the ship
+        sta ctim                   ; every dot from the ship
         lda #0
         sta GSHV
-        sei
-        sed
-        lda ncrash
-        clc
-        adc #1
-        sta ncrash
-        cld
-        cli
         jsr burst
         jmp parts
 @up:    jmp parts                  ; in the air: no ceiling
@@ -1604,13 +1543,10 @@ PIXG:   .byte $88, $44, $22, $11   ; pixel 0..3's two bits in a byte (LAND's
                                    ; PIXM is in bank 4, unreadable from here)
 
 ; ---------------------------------------------------------------- state
-gmx:    .byte 0                    ; (unused by the game: zeroed by ginit;
-gmz:    .byte 0                    ; test/gametest.py prints them)
 gkb:    .byte 0                    ; the keys down (keys' bits)
 gk:     .byte 0                    ; the ship's direction (0..NDIR-1) and pitch
 gp:     .byte 0                    ; (0..NPITCH-1, PFLAT level)
-thr:    .byte 0                    ; this step's thrust: 0 none, 1 full (2 is
-                                   ; hover: never set)
+thr:    .byte 0                    ; this step's thrust: 0 none, 1 full
 landed: .byte 0                    ; 1: sitting on the pad
 ctim:   .byte 0                    ; crashed: steps left (0: flying)
 sx:     .res 3                     ; position: x, z, y, 24-bit, 65536 a tile (y
@@ -1622,15 +1558,12 @@ gvz:     .res 2
 su:     .res 2                     ; the ship's height in units, 8.8 (units')
 fuel:   .res 2                     ; 0..FUELMX
 fkey:   .byte 0                    ; (keys': F's bit last time)
-hpar:   .byte 0                    ; (hover's fuel toggle: unused in effect)
 sstp:   .byte 0                    ; (snd's: the crash's step)
 dpass:  .byte 0                    ; (dots': 0 the far dots, $80 the near)
 tt0:    .byte 0                    ; (tadd's)
 tt1:    .byte 0
 sctl:   .byte $FF                  ; the noise control and attenuation bytes as
 satt:   .byte $FF                  ; last written
-nland:  .byte 0                    ; landings and crashes, BCD (counted, never
-ncrash: .byte 0                    ; shown; test/gametest.py prints them)
 rnd:    .byte 0                    ; rand's state
 scrg:   .byte 0                    ; the screen being written to (high byte)
 pnext:  .byte 0                    ; emit's last dot
@@ -1653,8 +1586,6 @@ mdl:    .res 1                     ; (mdot's: line, pixel, colour)
 mdp:    .res 1
 mdc:    .res 1
 fdr:    .res 2                     ; the fuel bar's length drawn, by screen
-dl:     .res 2                     ; (unused: set to $FF by ginit)
-dc:     .res 2                     ; (unused: set to $FF by ginit)
 
         .include "gametab.inc"
         .assert * <= GLY5, error, "the game must end below the letters at GLY5"

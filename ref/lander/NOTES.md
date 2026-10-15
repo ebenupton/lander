@@ -255,8 +255,8 @@ clipped at 15, and packed into a VIDC 256-colour byte.
   the roof vector, the 1/64 drag, the fuel burn and the refuel rate are 1.25
   times Lander's per step with the velocities kept in Lander's units, so
   `LANDING_SPEED` is unchanged; the refuel limit &1400 (5120) is the tank's
-  size and the ship starts full (`initialFuelLevel`, 3413, is defined and
-  unused); hover is coded (`HOVS`) but no key produces it; the undercarriage is
+  size and the ship starts full (`initialFuelLevel` is not used); there is no
+  hover: SPACE and SHIFT both give full thrust; the undercarriage is
   a quarter tile (`UNDER`, Lander's 0.39 scaled to the drawn ship); the engines
   cut once the land has left the screen (`HIGHEST_ALTITUDE` in effect). Its
   pad is 6 tiles (`PADN`) for Lander's 8, the ship 13 tiles from the camera

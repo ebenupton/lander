@@ -52,41 +52,25 @@ t       = L_TRL                    ; scratch
 al      = L_TRL+1                  ; shx & 3
 alx     = L_TRL+2                  ; al, or - al mirrored
 k       = L_TRL+3                  ; scratch
-nn      = L_TRL+4                  ; (unused)
 ee      = L_TRL+5                  ; the orientation's entry, 17 shp + kk
 tmp     = L_TRL+6                  ; ship's last column
 dq      = L_TRL+7                  ; BOTS (ship)
 pm      = L_TRL+9                  ; $FF if pass A's lines are odd
 mk      = L_TRL+10                 ; lk's mask on n: 0, or $FF mirrored
-np1     = L_TRL+11                 ; (unused)
 nb      = L_TRL+12                 ; pass B's lines ($80: none, a one-line band)
-dpb     = L_TRL+13                 ; (unused)
 ptb     = L_TRL+14                 ; pass B's first line's screen byte
         .assert ptb+2 <= L_TRL+24, error, "the TRL names must fit TRL, TRB: 24 bytes"
 
-SHIP_TILT = 3                      ; (unused)
-SVIA_ORB = $FE40                   ; the system VIA (the KEY macro's: unused)
-SVIA_DDRA = $FE43
-SVIA_ORA_NH = $FE4F
-
+; SHPAD: the span walker's patch chains and tables must each sit within one
+; page (shipspan.s's .asserts); this pad after `keys` puts the code from
+; `ship` on at a page phase that satisfies them (the smallest that links).
+SHPAD   = 208
         .code
         .assert * = $8000, error, "bank 6 starts at $8000: B6_KEYS, B6_SHIP"
         jmp keys                   ; B6_KEYS ($8000)
         jmp ship                   ; B6_SHIP ($8003)
 
 ; ---------------------------------------------------------------- keys
-; KEY code, routine: read one key straight from the keyboard through the
-; system VIA (the key's code written to port A, bit 7 read back set if it is
-; down) and jsr routine if so.  Unused: nothing invokes it.
-.macro KEY code, routine
-        .local no
-        lda #code
-        sta SVIA_ORA_NH
-        lda SVIA_ORA_NH            ; (bit 7: pressed)
-        bpl no
-        jsr routine
-no:
-.endmacro
 ; keys (B6_KEYS): shk, shp, shx, shy = GSHK, GSHP, GSHX, GSHY, the ship as
 ; the game's step left it.  Clobbers A, X.
 keys:   ldx #3
@@ -95,9 +79,7 @@ keys:   ldx #3
         dex
         bpl :-
         rts
-        .res $E0-(*-keys)          ; padding to $80E6: ship and everything after
-                                   ; it keep their addresses (shipspan.s's page
-                                   ; asserts check the layout that results)
+        .res SHPAD                 ; (layout: see SHPAD above)
 
 ; ---------------------------------------------------------------- ship
 ; ship (B6_SHIP): draw the ship, then widen this screen's column records to
@@ -137,7 +119,6 @@ ship:   jsr shipdraw               ; the ship; bxl, bxr, byt, byb its box
         bcc @c
         rts
 
-kmv:    .byte 0                    ; (unused: padding)
 shk:    .byte 0                    ; the ship: direction (0..31), pitch (0..12),
 shp:    .byte 0                    ; centre x, y (B6_KEYS: the game's copied)
 shx:    .byte 128

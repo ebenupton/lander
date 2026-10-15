@@ -34,9 +34,6 @@ Bank 4 (TABLES), by address:
                           n'th store from the end it fills X-n .. X-1.
   TENL, TENH4, TENH5 + n  the entry for n stores, n 0..TNB: TBLK + 3 (TNB - n), its low
                           byte and its page (TBLK4's, TBLK5's).
-  DE, DO + e              dither e's bytes on even and odd lines (dither_bytes), e 0..34;
-  LANDT, SEAT + r         land.LAND[r mod 10], land.SEAC[r mod 4], r 0..15.  Nothing reads
-                          these four: the tiles' colours are bank 5's.
   FPSL, FPSH + s          (4000 + s/2) / s (0 at s 0): the readout's frames a second in
                           tenths, s the vertical syncs of the last 8 frames.
   DQT, DRT + 64 a + D     D div a, and 2 (D mod a); a 1..31, D 0..63 (row 0 free: TR5, TL5).
@@ -52,10 +49,6 @@ Bank 4 (TABLES), by address:
                           ceil(D (2 j - 1) / (2 a)), j = k + 1 leaning right (TRk) or a - k
                           leaning left (TLk).  TRk and TLk hold 16 (RFA - k) bytes, in gaps
                           between the tables.
-  EIN + y                 R2OFF + 3 ((y + 1) / 2 - YSKY / 2), y YSKY-1..YGND+2: the entry
-                          offset of the first even line at or after y (EIN - 1 + y: the
-                          first odd).  Nothing reads it: land.s's init computes the same
-                          into EINL in low RAM.
 
 Bank 5 (TABLES2):
   CMAPE, CMAPO + 64 z + x tile (x, z)'s colour (land.colour: sea if its four corners are
@@ -110,11 +103,10 @@ import swatch35 as SW  # noqa: E402
 
 BASE = 0x8000
 YSKY, YGND = FR.YSKY, FR.YGND
-ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, DE=0xA300, DO=0xA340,
-            LANDT=0xA380, SEAT=0xA390, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00,
+ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, FPSL=0xA400, FPSH=0xA500, DQT=0xA600, DRT=0xAE00,
             DVH=0xBD00, DVR=0xBD20, DVL=0xBD40, CLMP1=0xBE00, DIV4=0xBF00,
             TBLK4=0x9B00, TBLK5=0x9D00, TENL=0x9F00, TENH4=0xA000, TENH5=0xA100,
-            RSMT=0x9A00 + 97 - YSKY, EIN=0xBB00 - (YSKY - 1),
+            RSMT=0x9A00 + 97 - YSKY,
             TR0=0xBA62, TR1=0xBC80, TR2=0xBD60, TR3=0x9C83, TR4=0x9F81, TR5=0xA600,
             TR6=0xBDD0, TR7=0x9FD1, TR8=0xA2F0,
             TL0=0xBB63, TL1=0xA200, TL2=0xA280, TL3=0x9E83, TL4=0xA3A0, TL5=0xAE00,
@@ -163,13 +155,6 @@ def build():
     for z in range(L.MAP):
         for x in range(L.MAP):
             put('MAP', z * 64 + x, int(hm[z, x]) | (int(L.TILERND[z, x]) << 4))
-    for e in range(35):
-        de, do = dither_bytes(e)
-        put('DE', e, de)
-        put('DO', e, do)
-    for r in range(16):
-        put('LANDT', r, L.LAND[r % len(L.LAND)])
-        put('SEAT', r, L.SEAC[r % len(L.SEAC)])
     for a in range(1, 32):
         for d in range(64):
             put('DQT', a * 64 + d, d // a)
@@ -213,8 +198,6 @@ def build():
         for pg in (TPE[t], TPO[t]):
             assert not img[pg * 256 + 255 - BASE]
             img[pg * 256 + 255 - BASE] = 0x60               # RTS
-    for y in range(YSKY - 1, YGND + 3):
-        put('EIN', y, R2OFF + 3 * ((y + 1) // 2 - YSKY // 2))
     for k in range(RFA):
         for side in 'RL':
             o = ADDR[f'T{side}{k}'] - BASE

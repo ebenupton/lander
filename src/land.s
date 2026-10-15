@@ -2221,6 +2221,10 @@ exhh:   .byte >(EXHB0), >(EXHB1), >(EXHB2), >(EXHB3)
 lahsh:  .byte >(LAHSB0), >(LAHSB1), >(LAHSB2), >(LAHSB3)
         .assert <(ENTB0) = <(ENTB1) && <(ENTB0) = <(ENTB2) && <(ENTB0) = <(ENTB3), error, "ENTB lows"
 enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3)
+MASKB:  .byte $00, $88, $44, $CC, $22, $AA, $66, $EE
+        .byte $11, $99, $55, $DD, $33, $BB, $77, $FF
+MASKN:  .byte $FF, $77, $BB, $33, $DD, $55, $99, $11
+        .byte $EE, $66, $AA, $22, $CC, $44, $88, $00                     ; (pmask's: here, the walker after in one page)
 
 ; A column a rung (X = ri) splits, its top level: from mx down to the floor,
 ; the boxes split at bpos (the rung's pixels left of it), bpos moving a pixel
@@ -2553,10 +2557,6 @@ pmask:  lda #0
         lda MASKB,y
         sta msk
         rts
-MASKB:  .byte $00, $88, $44, $CC, $22, $AA, $66, $EE
-        .byte $11, $99, $55, $DD, $33, $BB, $77, $FF
-MASKN:  .byte $FF, $77, $BB, $33, $DD, $55, $99, $11
-        .byte $EE, $66, $AA, $22, $CC, $44, $88, $00
 
 ; Line X of the column: A in msk's pixels (read-modify-write).  X kept.
 zline:  sta zv

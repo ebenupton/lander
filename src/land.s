@@ -66,8 +66,9 @@
 ; odd lines (black for the margins).  Then the byte columns xl/4 .. xr/4-1
 ; (cols): a column no rung crosses holds one box; from its top row's highest
 ; line (mn) to its lowest (mx) the pixels at or below their top are set a line
-; at a time (zone1, pmask), then a run fills to the floor (flr1: the line
-; after its bottom row's lowest); a column one rung crosses is split at bpos,
+; at a time (zone1, pmask), then a run fills to the line before the floor
+; (flr1: its bottom row's lowest line, which the strip below draws, or in the
+; near strip nearpost blacks); a column one rung crosses is split at bpos,
 ; the number of its pixels left of the rung, which moves at each of the
 ; rung's transitions (fsplit, split); two rungs (split2, s2v) or more (slow)
 ; are rarer still.  The near strip's columns are also blacked below the land
@@ -354,8 +355,9 @@ ys:     .res 4                     ; each pixel's top-row line
 mn:     .res 1                     ; the top's highest and lowest lines
 mx:     .res 1
 flr:    .res 1                     ; the floor (the bottom's lowest line) and
-flr1:   .res 1                     ; the line after it (the run's end), or
-                                   ; flr itself: the near strip, level floor
+flr1:   .res 1                     ; the run's end: flr (the strip below draws
+                                   ; line flr), or flr + 1 in the near strip
+                                   ; when the floor is not level (nearpost's)
 ve:     .res 1                     ; the bytes being drawn: even and odd lines
 vo:     .res 1
 re:     .res 1                     ; split2's right box's bytes
@@ -1017,8 +1019,8 @@ setBh:  .byte >BOTS, >(BOTS+64), >CURB
 
 ; bclip: the bottom row's line held on the screen.  If setup saw a bottom
 ; point past YGND (BCL), every entry of (bota) greater than YGND+1 (below the
-; screen) is set to YGND+1, so each column's floor is at most YGND+1 (flrc,
-; o_zb, c_zb) and the lines drawn stay on the screen.  The whole page is
+; screen) is set to YGND+1, so each column's floor is at most YGND+1 (o_zb,
+; c_zb) and the lines drawn stay on the screen.  The whole page is
 ; clamped, not only xl .. xr-1.
 ; In: BCL, bota.  Clobbers A, Y.  Called by strips.
 bclip:  lda BCL
@@ -1055,18 +1057,6 @@ c_rix:
         and #$FC
         sta c_lo+1
         jmp c_lo
-; flrc: cols' floor line after, for a strip whose bottom row bclip held
-; (kind 1: JSR flrc / NOP patched over c_lv's TAX / INX / STX flr1): flr1 =
-; min(A + 1, YGND+1).  In: A = the column's floor (level: its bottom-row
-; line, at most YGND+1).  Clobbers X.
-flrc:   tax
-        inx
-        cpx #YGND+2
-        bcc :+
-        dex
-:       stx flr1
-        rts
-
 ; setup: the strip's points, boxes and margins, and its bottom row's line.
 ; Points 1 .. np: strip 0 takes row 0 as both rows (its TX, TY are unused:
 ; it is only traced); a land strip (ns 1 .. nr-1) takes rows ns-1 (TX, TY)
@@ -1087,7 +1077,7 @@ setup:  lda #0
         cpy nr
         bne :+
         dex
-:       stx last                   ; the near strip: $FF (cols' kind 2)
+:       stx last                   ; the near strip: $FF (cols' kind 1)
         ; a land strip: rows ns-1 and ns; box b's bytes at CLE, CLO + 16 (ns
         ; - 1) + ldCLE + b - 1 (su_l7, unrolled in bank 7)
         lda ns
@@ -1804,14 +1794,15 @@ rg_lw:    tax
 ; ...).  LAYPAD puts the code from here on at the page phase that satisfies
 ; them all (the smallest value that links); change it when code before this
 ; point grows or shrinks.
-LAYPAD  = 78
+LAYPAD  = 124
         .res LAYPAD
 
 ; ---------------------------------------------------------------- columns
 ; cols: draw a land strip's byte columns, xl/4 .. xr/4-1, left to right.  A
-; column runs from its top row's highest line (mn) down to its floor (flr: its
-; bottom row's lowest line; flr1 the line after, or flr itself in the near
-; strip when the floor is level there), and is drawn as one of:
+; column runs from its top row's highest line (mn) down to the line before its
+; floor (flr: its bottom row's lowest line, whose pixels are the strip below's;
+; flr1 = flr is the run's end, or flr + 1 in the near strip when the floor is
+; not level there: nearpost blacks line flr's ground), and is drawn as one of:
 ;   - one box (no rung in it: c_lo fails): the top zone when the top is not
 ;     level (zone1: lines mn .. mx-1, the pixels at or below their top-row
 ;     line), then run2 from mx (c_r1);
@@ -1822,7 +1813,7 @@ LAYPAD  = 78
 ; xrp on; strip 1: every column) is recorded first (record, recordc: CURT, and
 ; black from the land's highest line last time on this screen, TOPS, down to
 ; mx-1); in the near strip every column ends at nearpost (black below, CURB).
-; In: ns, last, BCL, xl, xr, xlp, xrp; topa, bota (the rows' lines by pixel);
+; In: ns, last, xl, xr, xlp, xrp; topa, bota (the rows' lines by pixel);
 ; TX, BX, LO, HI, RTPL, CE, CO (setup's, rungs'); sh_b's operand (setback's).
 ; Out: the strip drawn; CURT, CURB where recorded; lastri; the operands below
 ; patched.  Clobbers A, X, Y and the column variables (x4, coff, scrh, ri, mn,
@@ -1860,31 +1851,21 @@ cols:   lda #$FF                   ; fsplit's tables are no rung's yet
         sta zb2+7
         sta zb3+2
         sta zb3+7
-        ldx #0                     ; the strip's kind, X: 0 the bottom row on
-        bit last                   ; the screen; 1 bclip held it (BCL); 2 the
-        bpl :+                     ; near strip (last $FF, whatever BCL)
-        ldx #2
-        bne @lvk
-:       lda BCL
-        beq @lvk
+        ldx #0                     ; the strip's kind, X: 0 a strip above the
+        bit last                   ; near one; 1 the near strip (last $FF)
+        bpl @lvk
         inx
 @lvk:   cpx #$FF                   ; operand: the kind patched last ($FF: none
         beq @lvd                   ; yet); patched only when it changes
         stx @lvk+1
-        lda lvt0,x                 ; c_lv and o_lv (4 bytes; A = a level floor):
-        sta c_lv                   ; 0 TAX / INX / STX flr1; 1 JSR flrc / NOP
-        sta o_lv                   ; (flr1 at most YGND+1); 2 STA flr / STA flr1
-        lda lvt1,x
-        sta c_lv+1
-        sta o_lv+1
-        lda lvt2,x
-        sta c_lv+2
-        sta o_lv+2
-        lda lvt3,x
-        sta c_lv+3
-        sta o_lv+3
-        lda npt0,x                 ; c_np (3 bytes; the column done): 0, 1 LDA
-        sta c_np                   ; x4 / CLC, on into c_nd1; 2 JMP nearpost
+        lda zbt0,x                 ; ob_st, zb_st (a floor not level; 2 bytes):
+        sta ob_st                  ; 0 STA flr1 (the run ends at the floor); 1
+        sta zb_st                  ; BNE ob_n, zb_n (flr + 1: nearpost draws
+        lda zbt1,x                 ; the floor), 3 on from each
+        sta ob_st+1
+        sta zb_st+1
+        lda npt0,x                 ; c_np (3 bytes; the column done): 0 LDA x4
+        sta c_np                   ; / CLC, on into c_nd1; 1 JMP nearpost
         lda npt1,x
         sta c_np+1
         lda npt2,x
@@ -2156,9 +2137,8 @@ o_ft:
 ob0:    lda ROWB,y                 ; the bottom row's (page: cols')
 ob3:    cmp ROWB+3,y
         bne o_zb
-o_lv:   tax                        ; a level floor, A; 4 bytes patched by kind
-        inx                        ; (cols, as c_lv): here flr1 = A + 1
-        stx flr1
+o_lv:   sta flr                    ; a level floor, A: the run ends at it (as
+        sta flr1                   ; c_lv)
 o_rec:  jmp record                 ; (phase's: record or o_nr)
 c_lim:  cmp xr                     ; the phase's end: the strip's too?
         beq c_end
@@ -2192,27 +2172,29 @@ oz_mu:  sta msk
         bvs o_ft                   ; (always)
 oz_dt:  jmp oz_dn
 ; o_zb: a one-box column whose floor is not level: flr the lower of p0 (C from
-; ob3: p0 > p3) and p3; flr1 = flr + 1, at most YGND+1 (bclip held the row at
-; YGND+1: flr is then YGND).  The kind patch does not apply here.
+; ob3: p0 > p3) and p3, and flr1 = flr (ob_st: STA flr1, cols' kind 0), or in
+; the near strip (BNE ob_n, always taken: TAX's Z, a line not being 0) flr +
+; 1, at most YGND+1 (bclip held the row at YGND+1: flr is then YGND).
 o_zb:   bcs :+
 obz:    lda ROWB+3,y
 :       sta flr
         tax
-        inx
-        cpx #YGND+2
-        bcs ob_cl
-ob_st:  stx flr1
+ob_st:  sta flr1                   ; (STA flr1 or BNE ob_n: cols', by kind)
 ob_rj:  jmp record                 ; (phase's: record or o_nr)
-ob_cl:  dex                        ; flr1 YGND+1, flr YGND
+ob_n:   inx                        ; the near strip: flr1 = flr + 1, at most
+        cpx #YGND+2                ; YGND+1
+        bcc :+
+        dex                        ; flr1 YGND+1, flr YGND
         dec flr
-        bcs ob_st                  ; (always: C set)
+:       stx flr1
+        jmp ob_rj
 c_ri0:  jmp c_rix                   ; (ri on to the first rung with HI > x4, its
                                    ; RVE, RVO, c_lo, c_hi; back to c_lo)
 c_hi:   cpy #0                     ; operand: rung ri's HI (rpatch's)
         bcs c_ri0                  ; wholly left of the column
 ; c_sp: rung ri is in the column.  The top: level (mx; V clear) or each pixel's
-; line into ys with mn, mx and V set (c_zt); the floor: level (c_lv, by kind)
-; or its lowest (c_zb); then c_rec.
+; line into ys with mn, mx and V set (c_zt); the floor: level (c_lv) or its
+; lowest (c_zb); then c_rec.
 c_sp:
 pt0:    lda ROWA,y                 ; (pages: cols')
 pt1:    cmp ROWA+1,y
@@ -2230,10 +2212,9 @@ pb2:    cmp ROWB+2,y
         bne zb2c
 pb3:    cmp ROWB+3,y
         bne zb3c
-c_lv:   tax                        ; a level floor, A; 4 bytes patched by kind
-        inx                        ; (cols, lvt0-3): 0 TAX / INX / STX flr1;
-        stx flr1                   ; 1 JSR flrc / NOP; 2 STA flr / STA flr1
-c_rec:  jmp recordc                ; (phase's: recordc or c_srx)
+c_lv:   sta flr                    ; a level floor, A: the run ends at it (the
+        sta flr1                   ; strip below draws line flr; nearpost reads
+c_rec:  jmp recordc                ; flr) (phase's: recordc or c_srx)
 ; c_zt: the top not level, the first pixel differing from pixel 0 being 1 (A =
 ; pixel 0's line; c_zt2, c_zt3: pixel 2, 3): ys each pixel's line, mn, mx; V
 ; set by BIT c_v1, and nothing touches it before c_on's and c_split's tests.
@@ -2281,9 +2262,9 @@ c_zt3:  sta ys                     ; pixels 0, 1, 2 alike: on at zt3
 
 ; c_zb: the floor not level: flr the lowest of the bottom row's four pixels
 ; (A the first's; entered at zb1c, zb2c or zb3c with C from c_ft's CMP); flr1 =
-; flr + 1, at most YGND+1 (bclip's row at YGND+1: flr then YGND).  The kind
-; patch does not apply: in the near strip flr1 = flr + 1 tells nearpost the
-; floor is not level.
+; flr (zb_st: STA flr1, cols' kind 0), or in the near strip (BNE zb_n, always
+; taken: TAX's Z) flr + 1, at most YGND+1 (bclip's row at YGND+1: flr then
+; YGND), which tells nearpost the floor is not level.
 c_zb:
 zb1:    cmp ROWB+1,y               ; (pages: cols', the CMPs' and the LDAs')
 zb1c:   bcs :+
@@ -2298,15 +2279,16 @@ zb3c:   bcs :+
         lda ROWB+3,y
 :       sta flr
         tax
-        inx
-        cpx #YGND+2
-        bcs zb_cl
-zb_st:  stx flr1
+zb_st:  sta flr1                   ; (STA flr1 or BNE zb_n: cols', by kind)
         jmp c_rec
-zb_cl:  dex                        ; flr1 YGND+1, flr YGND
+zb_n:   inx                        ; the near strip: flr1 = flr + 1, at most
+        cpx #YGND+2                ; YGND+1
+        bcc :+
+        dex                        ; flr1 YGND+1, flr YGND
         dec flr
-        bcs zb_st                  ; (always: C set)
-; nearpost: the near strip's column after its drawing (c_np's JMP, kind 2):
+:       stx flr1
+        jmp c_rec
+; nearpost: the near strip's column after its drawing (c_np's JMP, kind 1):
 ; black below the near row.  The column is drawn to flr1 - 1: the line before
 ; the floor when the bottom row is level across the column (c_lv: flr1 = flr),
 ; else the floor itself (c_zb: flr1 = flr + 1).  Level: line flr black.  Not
@@ -2495,13 +2477,12 @@ sh_2:   sta TPO0*256,x             ; (the last call's tpo)
         sta rc_h+2
         sta sl_h+2
         rts
-lvt0:   .byte $AA, $20, $85        ; c_lv, o_lv by kind (cols): TAX / INX / STX
-lvt1:   .byte $E8, <flrc, flr      ; flr1; JSR flrc / NOP; STA flr / STA flr1
-lvt2:   .byte $86, >flrc, $85
-lvt3:   .byte flr1, $EA, flr1
-npt0:   .byte $A5, $A5, $4C        ; c_np by kind (cols): LDA x4 / CLC, the
-npt1:   .byte x4, x4, <nearpost    ; same, JMP nearpost
-npt2:   .byte $18, $18, >nearpost
+zbt0:   .byte $85, $D0             ; ob_st, zb_st by kind (cols): STA flr1,
+zbt1:   .byte flr1, 3              ; BNE +3 (ob_n, zb_n: past the JMP after)
+        .assert ob_n = ob_st+5 && zb_n = zb_st+5, error, "ob_n, zb_n: 3 bytes past ob_st, zb_st's branch (zbt1)"
+npt0:   .byte $A5, $4C             ; c_np by kind (cols): LDA x4 / CLC, JMP
+npt1:   .byte x4, <nearpost        ; nearpost
+npt2:   .byte $18, >nearpost
 shs:    .byte $30, $31, $58, $59   ; scrh by t: the screen's page + the half
 tpe:    .byte TPE0, TPE1, TPE2, TPE3 ; run2's store pages by t (landgen's)
 tpo:    .byte TPO0, TPO1, TPO2, TPO3

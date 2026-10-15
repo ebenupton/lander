@@ -55,7 +55,7 @@ CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height abov
                           # ground at the ship (ZSHIP ahead, at the camera's x), height
                           # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
 EMAX = 46                 # the camera's most above CAMH (the near row's y's within a byte)
-ZSHIP = 14                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID 15, a tile nearer)
+ZSHIP = 13                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID 15: here the clip planes' middle)
 PADN = 6                  # the landing pad: tiles 0..PADN-1 in x and z (Lander's: 8)
 PADH = 4                  # its height
 PADC = 19                 # its colour (swatch35: one of each ink, a grey)

@@ -16,7 +16,7 @@
 ; 64; y up, its height units 4096 each: LAND's 16 a tile); velocities 16 bits,
 ; 16384 a tile a step.
 ;
-; The camera: Lander's, at the ship's x, ZSHIP (14) tiles behind it in z (LAND's camera
+; The camera: Lander's, at the ship's x, ZSHIP (13) tiles behind it in z (LAND's camera
 ; point is the ship less 128 in x, ZSHIP tiles in z); its height Lander's rule
 ; (min(ship, 0): it follows the ship up) within what the strips allow: CAMH
 ; (6 tiles) above the ground under the ship, or more to keep the ship KOFF

@@ -79,8 +79,8 @@ PLIFE   = 19                       ; a dot's life, steps: the land's 96 lines at
                                    ; ~5 lines a step)
 NPART   = 20                       ; dots (one a step: none reused alive)
 SNTH    = $E6                      ; the engine: white noise, the low rate
-SATF    = 5                        ; its attenuation: full thrust, hover (half
-SATH    = 10                       ; the volume they were)
+SATF    = 8                        ; its attenuation: full thrust, hover (a
+SATH    = 13                       ; quarter the volume they were)
 SNCR    = $E7                      ; the crash: white noise at tone 2's rate
 SCRN    = $180                     ; (its period: EXNL, EXNH a step; this at first)
 PGRAV   = 60                       ; a dot's gravity (height units / 256 a step^2)

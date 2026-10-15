@@ -1878,7 +1878,32 @@ c_r1:    ldx mx
 c_r1x:  cpx flr1                   ; (zone1's: X = mx)
         bcs c_next
         ldy flr1
-        jsr run2
+run2:
+pX:     cpx #$FF                   ; (je, jo already X's)
+        beq pY
+        stx pX+1
+        lda EINL,x
+        sta je+1
+        lda EINL-1,x                ; (OIN)
+        sta jo+1
+pY:     cpy #$FF                   ; (the RTSes already at Y's)
+        beq pY_k
+        sty pY+1
+        lda #OP_STAY               ; the last back
+pr0:    sta $FFFF                  ; (rE: the low byte EIN's)
+pr1:    sta $FFFF                  ; (rO)
+        lda #OP_RTS
+        ldx EINL,y
+        stx pr0+1
+pp0:    sta $FF00,x
+        ldx EINL-1,y
+        stx pr1+1
+pp1:    sta $FF00,x
+pY_k:   lda ve
+        ldy coff
+je:     jsr $FFFF
+        lda vo
+jo:     jsr $FFFF                  ; (inline: on to c_next; fe_r's too)
 c_next:
 c_np:   jmp nearpost               ; (cols: LDA x4 / CLC, the next column's,
                                    ; inline, but in the near strip; back to c_xe)
@@ -2136,72 +2161,6 @@ np_h2:    lda LAHSB0,x             ; (zline, black: the byte AND not pmask's; se
         bcc np_l
         jmp np_b
 
-; Columns the land has left since last time: black from its highest line to
-; its lowest.  Each column outside this frame's land: none this frame (CURT
-; $FF, CURB 0).
-.macro GONE1 lt, lc, lb
-        .local nd
-lt      = *
-        lda TOPS,x
-        cmp #$FF
-        beq nd
-        jsr gn_d
-nd:     lda #$FF
-lc      = *
-        sta CURT,x
-        lda #0
-lb      = *
-        sta CURB,x
-.endmacro
-gone:   lda xr                     ; (right to left: the columns are independent)
-        lsr a                      ; the columns right of the near strip's (all
-        lsr a                      ; the strips' columns: within the near strip's)
-        sta tsy
-        ldx #63
-        cpx tsy
-        bcc gn_l
-gn_c:   GONE1 pT6, pT4, pB7
-        dex
-        cpx tsy
-        bcs gn_c
-gn_l:   lda xl                     ; and left of them
-        lsr a
-        lsr a
-        tax
-        dex
-        bmi gn_x
-gn_c2:  GONE1 pT6b, pT4b, pB7b
-        dex
-        bpl gn_c2
-gn_x:   rts
-gn_d:   stx tj
-        txa
-        asl a
-        asl a
-        asl a
-        sta coff
-        txa
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        jsr sethalf
-        ldy tj                     ; (sethalf leaves Y its STAB's)
-        lda (bsp),y
-        pha
-        lda (tsp),y
-        tax
-        pla
-        tay
-        iny
-        lda #0
-        sta ve
-        sta vo
-        jsr run
-        ldx tj
-        rts
-
 ; The column's half of the screen: A (0 left, 1 right).
 sethalf:
 sh_b:   ora #0                     ; t: the STAB (its ENTBt, EXHBt, LAHSBt):
@@ -2362,7 +2321,13 @@ fr:     stx bpos                   ; (C set) lines Y .. t-1, a run
         adc rsm                    ; the line
         tax
         ldy fwu
+        lda c_np                   ; (rare: run2 is inline, on to c_np: an
+        pha                        ; RTS meanwhile)
+        lda #OP_RTS
+        sta c_np
         jsr run2
+        pla
+        sta c_np
         ldy fwu
         lda LAH,y                  ; the walker from t (rare: not sethalf's)
         clc
@@ -2407,7 +2372,7 @@ fe_r:   lda BE,x                   ; the floor's run
         adc rsm                    ; (C set: fe_x's bcs)
         tax
         ldy flr1
-        jsr run2
+        jmp run2                   ; (on to c_next)
 ff_d:   jmp c_np                   ; (c_next; s2v's: s2ov)
 fs_ee:  lda BE                     ; (fs_new's: the rung's two boxes' even
         sta BE+1                   ; bytes alike)
@@ -2923,32 +2888,6 @@ LM:     .byte $00, $88, $CC, $EE, $FF
 ; planted at EIN, OIN + Y (OIN = EIN - 1; rE, rO; pY: the line they are for,
 ; kept while the next run2's end is the same; put back by the next run2's that
 ; ends elsewhere, or sethalf).
-run2:
-pX:     cpx #$FF                   ; (je, jo already X's)
-        beq pY
-        stx pX+1
-        lda EINL,x
-        sta je+1
-        lda EINL-1,x                ; (OIN)
-        sta jo+1
-pY:     cpy #$FF                   ; (the RTSes already at Y's)
-        beq pY_k
-        sty pY+1
-        lda #OP_STAY               ; the last back
-pr0:    sta $FFFF                  ; (rE: the low byte EIN's)
-pr1:    sta $FFFF                  ; (rO)
-        lda #OP_RTS
-        ldx EINL,y
-        stx pr0+1
-pp0:    sta $FF00,x
-        ldx EINL-1,y
-        stx pr1+1
-pp1:    sta $FF00,x
-pY_k:   lda ve
-        ldy coff
-je:     jsr $FFFF
-        lda vo
-jo:     jmp $FFFF                  ; (its RTS returns from run2)
 
 ; Lines X .. Y-1 (X < Y) of the column: ve on even lines, vo odd, through STAB
 ; (STA line,Y / LDA vo or TXA), from line X's entry to an RTS planted at line
@@ -2985,6 +2924,72 @@ pT5c:   lda TOPS,x
         bcc :+
         jmp c_srx
 :       jmp rc_t
+
+; Columns the land has left since last time: black from its highest line to
+; its lowest.  Each column outside this frame's land: none this frame (CURT
+; $FF, CURB 0).
+.macro GONE1 lt, lc, lb
+        .local nd
+lt      = *
+        lda TOPS,x
+        cmp #$FF
+        beq nd
+        jsr gn_d
+nd:     lda #$FF
+lc      = *
+        sta CURT,x
+        lda #0
+lb      = *
+        sta CURB,x
+.endmacro
+gone:   lda xr                     ; (right to left: the columns are independent)
+        lsr a                      ; the columns right of the near strip's (all
+        lsr a                      ; the strips' columns: within the near strip's)
+        sta tsy
+        ldx #63
+        cpx tsy
+        bcc gn_l
+gn_c:   GONE1 pT6, pT4, pB7
+        dex
+        cpx tsy
+        bcs gn_c
+gn_l:   lda xl                     ; and left of them
+        lsr a
+        lsr a
+        tax
+        dex
+        bmi gn_x
+gn_c2:  GONE1 pT6b, pT4b, pB7b
+        dex
+        bpl gn_c2
+gn_x:   rts
+gn_d:   stx tj
+        txa
+        asl a
+        asl a
+        asl a
+        sta coff
+        txa
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        jsr sethalf
+        ldy tj                     ; (sethalf leaves Y its STAB's)
+        lda (bsp),y
+        pha
+        lda (tsp),y
+        tax
+        pla
+        tay
+        iny
+        lda #0
+        sta ve
+        sta vo
+        jsr run
+        ldx tj
+        rts
 
 ; ---------------------------------------------------------------- readout
 ; At each flip: the vertical syncs since the last (dvs, the last 8); the
@@ -3099,20 +3104,19 @@ s2v:    lda CE-1,x                 ; (X = ri) L's bytes
         sta bpos2
         lda #0
         sta kb
-        lda #<s2ov                 ; fsplit's end here
-        sta ff_d+1
-        lda #>s2ov
-        sta ff_d+2
+        lda c_np                   ; fsplit's end here: c_np an RTS meanwhile
+        pha                        ; (ff_d's, run2's)
+        lda #OP_RTS
+        sta c_np
         ldx ri
         inx
         cpx lastri                 ; (fsplit's, but not fs_ns's)
         bne :+
-        jmp fs_c
-:       jmp fs_new
-s2ov:   lda #<c_np                 ; (ff_d's again)
-        sta ff_d+1
-        lda #>c_np
-        sta ff_d+2
+        jsr fs_c
+        jmp s2ov
+:       jsr fs_new
+s2ov:   pla                        ; (c_np's again)
+        sta c_np
         lda #0
         sta zp_
         ldx mx                     ; from mx

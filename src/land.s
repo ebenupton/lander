@@ -1478,7 +1478,14 @@ rungs:  lda xl
         sta alloc+1
         ldx #1
 rg_r:     stx tj
-        lda BX,x
+        lda CE-1,x                 ; (its two boxes alike: rg_sm, bank 4, may
+        cmp CE,x                   ; empty it)
+        bne rg_go
+        lda CO-1,x
+        cmp CO,x
+        bne rg_go
+        jmp rg_sm
+rg_go:    lda BX,x
         cmp TX,x
         bne :+
         sta LO,x                   ; upright: none (its sentinel only)
@@ -4089,6 +4096,68 @@ su_l7c:
 su_l7d: SUCL 9
         SUCL 10
         rts
+
+; ---------------------------------------------------------------- an empty rung
+; (bank 4, its free space, in four) rungs' rung X (tj), its two boxes alike
+; (rg_r's): it changes no pixel, so it is emptied (LO = HI = B, B: HI(X-1) up
+; to a byte boundary; no transitions) if rung X+1 starts at or after B (no
+; column has rungs X-1 and X+1: X's columns from B on are one box) and each
+; row is monotonic through its point X (a one-box column's test: its
+; extremes at its ends; the points X-1, X, X+1 apart, each row's segments as
+; traced); then on to rg_nx, else back to rg_go.
+.macro RMX P
+        lda P-1,x                  ; (X-1 < X < X+1)
+        cmp P,x
+        bcs @no
+        lda P,x
+        cmp P+1,x
+        bcs @no
+.endmacro
+.macro RMY P
+        lda P,x                    ; (monotonic through X)
+        cmp P-1,x
+        beq :++
+        bcs :+
+        cmp P+1,x                  ; (rising: X+1's at or above)
+        bcc @no
+        bcs :++
+:       cmp P+1,x                  ; (falling: X+1's at or below)
+        beq :+
+        bcs @no
+:
+.endmacro
+        .segment "B4G"
+rg_sm:  lda HI-1,x
+        clc
+        adc #3
+        bcs @no
+        and #$FC
+        sta tmp                    ; B
+        lda TX+1,x                 ; rung X+1's pixels from B on
+        cmp tmp
+        bcc @no
+        lda BX+1,x
+        cmp tmp
+        bcc @no
+        jmp rg_s1
+@no:    jmp rg_go
+rg_s4:  lda tmp                    ; (empty)
+        sta LO,x
+        sta HI,x
+        jmp rg_nx
+        .segment "B4G1"
+rg_s1:  RMX TX
+        RMX BX
+        jmp rg_s2
+@no:    jmp rg_go
+        .segment "B4H"
+rg_s2:  RMY TY
+        jmp rg_s3
+@no:    jmp rg_go
+        .segment "B4G2"
+rg_s3:  RMY BY
+        jmp rg_s4
+@no:    jmp rg_go
 
 ; ---------------------------------------------------------------- the slow way
 ; (bank 4, its free space, in two: never seen)

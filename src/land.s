@@ -625,10 +625,12 @@ cph     = lqx+1
 .endmacro
 ; (bank 7) the edges' y's: their heights from S (LERPQ7 at L0, L1, or LQP's
 ; row when blank) by SYT7 straight into PY
-.macro EDGEY S, L0, L1
+.macro EDGEY S, L0, L1, NC
         lda S+1,x
         ora #16
+.ifblank NC                         ; (NC: C known clear)
         clc
+.endif
         sbc S,x
         tay
 .ifblank L0
@@ -662,10 +664,6 @@ L1:     lda LERPQ7,y
 .endif
         lda R7H,y
         sta rh
-        lda syp+1
-        clc
-        adc #>B1T - >SYT7
-        sta bp+1
 .endmacro
 .macro PXS i                        ; (bank 7) corner i's x (B's high byte, in A),
         sta PX+i,x                  ; then B += r (16 bits: the edges' beyond them
@@ -3534,19 +3532,34 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         ora #$40
 :       ora CAMF
         sta MODE
-; A row: Y its di, tmp 16 j (its place in PX, PY), MODE.
+        eor #$40                   ; the far clip's row (MODE $40, $41: not
+        cmp #2                     ; the camera higher) straight to its
+        bcs @row                   ; heights (C set at @row)
+        lsr a                      ; (C: FACT's)
+        lda #<(SYT7+32*(ZFCLIP*16-DI0))
+        ora HOFF
+        sta syp
+        lda #>(SYT7+32*(ZFCLIP*16-DI0))
+        sta syp+1
+        ldx #0
+        bcs :+
+        jmp @hp0
+:       jmp @apf
+@altj:  jmp @alt
+; A row: Y its di, tmp 16 j (its place in PX, PY), MODE; C set.
 @row:   lda SYL7,y                 ; di * 32: the row's SYT7 (+ HMAX - hg: 0..15,
         sta bp                     ; di*32's low 5 bits 0) and B1T
         ora HOFF
         sta syp
         lda SYH7,y
         sta syp+1
+        adc #>B1T - >SYT7 - 1      ; (C set: B1T's page; C clear after)
+        sta bp+1
         ldx tmp                    ; the edges' heights: corners 1 to 2, and 10
         lda MODE                   ; to 11, by fx (LERPQ7: land.lerp), from HT
-        beq :+                     ; (or PY: a clip's row) into PY
-        jmp @alt
-:       R7BP 1                     ; (r and B1T's page: the clips' rows' x's
-        EDGEY HT, @lq2, @lq3       ; not by them)
+        bne @altj                  ; (or PY: a clip's row) into PY
+        R7BP 1                     ; (r: the clips' rows' x's not by it)
+        EDGEY HT, @lq2, @lq3, 1
         .repeat NX-2, i
         PYH i+1
         .endrepeat
@@ -3581,7 +3594,19 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         sta DCUR
         tay
         jmp @row
-@lst:   ldy #ZCLIP*16-DI0          ; the near clip's: on its plane
+@lst:   bit CAMF                   ; the near clip's: on its plane (not the
+        bmi @lsc                   ; camera higher: straight to its heights,
+        tax                        ; X: RN16, MODE 0)
+        lda #<(SYT7+32*(ZCLIP*16-DI0))
+        ora HOFF
+        sta syp
+        lda #>(SYT7+32*(ZCLIP*16-DI0))
+        sta syp+1
+        lda czs
+        bne :+
+        jmp @hp0
+:       jmp @apz
+@lsc:   ldy #ZCLIP*16-DI0
         lda czs                    ; (zlerp's heights: none at czs 0)
         beq :+
         lda #1
@@ -3614,9 +3639,9 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
 @alt:   bpl :+                     ; the clips' rows (bit 6), or the camera higher
         jmp @cam
 :       lsr a                      ; (the clips' rows: heights from HT or PY)
-        bcc :+
+        bcc @hp0
         jmp @ap
-:
+@hp0:
         EDGEY HT
         .repeat NX-2, i
         PYH i+1
@@ -3624,9 +3649,10 @@ prow7:  lda SHF                    ; (zsh4's: the heights a row on or back)
         jmp @pxc
 @ap:    txa                        ; their heights by 1 - fz between the rows
         bne :+                     ; either side (zlerp, flerp: corners 1..NX-2
-        jsr flerp                  ; straight to y; the edges' heights at E0..E3)
+@apf:   jsr flerp                  ; straight to y; the edges' heights at E0..E3)
         jmp :++
-:       jsr zlerp
+:
+@apz:   jsr zlerp
 :       lda E1                     ; the edges: their heights by fx, their y's
         ora #16
         clc

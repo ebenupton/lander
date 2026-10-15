@@ -1905,9 +1905,6 @@ o_lv:   tax                        ; (as c_lv, c_ra, c_rb)
         inx
         stx flr1
 o_rec:  jmp record                 ; (phase: or o_nr)
-c_nd:   lda x4                     ; the next column (nearpost's)
-        clc
-        jmp c_nd1
 c_lim:  cmp xr                     ; (the next phase, or the end)
         beq c_end
         jsr phase
@@ -1918,7 +1915,23 @@ c_nh:   lda #0                     ; (a new half)
         ldy x4
         jmp c_coly
 c_end:  rts
-o_zt:   jmp oz_x                   ; (one box, its top not level: oz_x)
+o_zt:   bcs oz_dt                  ; (one box, its top not level; C: p0 > p3)
+        sta mn                     ; the highest and lowest, and msk: zone1's
+oz3a:   ldx ROWA+3,y               ; first line's (mn's) pixels, those at mn: the
+        stx mx                     ; top monotonic, from p0 (mn p0) or p3 (mn p3:
+oz1:    ldx ROWA+1,y               ; oz_dn)
+        lda #$88
+        cpx mn
+        bne oz_mu
+oz2:    ldx ROWA+2,y
+        lda #$CC
+        cpx mn
+        bne oz_mu
+        lda #$EE
+oz_mu:  sta msk
+        bit c_v1                   ; (V: a top not level)
+        bvs o_ft
+oz_dt:  jmp oz_dn
 o_zb:   bcs :+                     ; (one box, its floor not level; C: p0 > p3)
 obz:    lda ROWB+3,y               ; the lowest
 :       sta flr                    ; (as c_zb)
@@ -2503,20 +2516,9 @@ z1_l:   cpx flr1
         jmp z1_h
 z1_n:   jmp c_np
 
-oz_x:   bcs oz_dn                  ; (o_zt's: one box, its top not level; C: p0 > p3)
-        sta mn                     ; the highest and lowest, and msk: zone1's
-oz3a:   ldx ROWA+3,y               ; first line's (mn's) pixels, those at mn: the
-        stx mx                     ; top monotonic, from p0 (mn p0) or p3 (mn p3)
-oz1:    ldx ROWA+1,y
-        lda #$88
-        cpx mn
-        bne oz_m
-oz2:    ldx ROWA+2,y
-        lda #$CC
-        cpx mn
-        bne oz_m
-        lda #$EE
-        bne oz_m
+c_nd:   lda x4                     ; the next column (nearpost's)
+        clc
+        jmp c_nd1
 oz_dn:    sta mx
 oz3b:   ldx ROWA+3,y
         stx mn

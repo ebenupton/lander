@@ -2214,8 +2214,6 @@ sh_b:   ora #0                     ; t: the STAB (its ENTBt, EXHBt, LAHSBt):
         tay                        ; 2 * back + half (setback's)
         lda shs,y
         sta scrh
-        lda sht,y
-        sta stbh
         clv                        ; (c_coly's)
         lda enthh,y               ; (ENTBt's low bytes all ENTB0's)
         sta r_eh1+2

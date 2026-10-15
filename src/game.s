@@ -20,9 +20,9 @@
 ; point is the ship less 128 in x, ZSHIP tiles in z); its height Lander's rule
 ; (min(ship, 0): it follows the ship up) within what the strips allow: CAMH
 ; (6 tiles) above the ground under the ship, or more to keep the ship KOFF
-; units below it (so the ship stays at line ~81 on screen as it climbs), at
-; most EMAX more (CAME: LAND's y's held at 254 past the screen; above that the
-; camera stays and the ship climbs the screen, held at its top).  The
+; units below it (so the ship stays at line ~81 on screen as it climbs), it
+; always following: LAND drawn at most EMAX higher (CAME: by then every row is
+; below the screen, its y's held at 254).  The
 ; engines cut out ENGR above the ground (Lander's HIGHEST_ALTITUDE); YTOP a
 ; ceiling past that (su: a byte of units).
 ;
@@ -67,9 +67,7 @@ LANDV   = 2048                     ; Lander's LANDING_SPEED: |gvx| + |gvy| + |gv
 UNDER   = 4                        ; Lander's UNDERCARRIAGE_Y (0.39 tiles) at the ship's
                                    ; size here (14 / R(ZSHIP) of Lander's): height units
 ENGR    = 104                      ; the engines cut out from here up, height units
-                                   ; above the ground under the ship: just past
-                                   ; where the ship is held at the screen's top
-                                   ; (100: the camera at EMAX)
+                                   ; above the ground under the ship
 YTOP    = 240                      ; and a ceiling (su's byte: the climb coasts on)
 KOFF    = 79                       ; the camera this far above the ship, or more
 FUEL0   = 3413                     ; Lander's fuel: at the start; most (refuelling)
@@ -328,15 +326,16 @@ gout:   lda sx+1                   ; camera x (8.8): ship's less 128
         lda #0
 :       cmp #EMAX+1
         bcc :+
-        lda #EMAX                  ; (past it: the camera stays, the ship climbs
-:       sta CAME                   ; the screen)
+        lda #EMAX                  ; (past it the camera still follows: LAND drawn
+        sta CAME                   ; at EMAX, every row below the screen; the ship
+        lda #KOFF                  ; KOFF below the camera)
+        bne gsy
+:       sta CAME
         clc                        ; the ship's line: HORIZON + SHYT (camera - ship),
         adc #CAMH                  ; the camera CAMH + CAME above the ground (d R / 16,
-        sec                        ; R the landscape's at ZSHIP; above the camera: 0)
+        sec                        ; R the landscape's at ZSHIP)
         sbc gt0
-        bcs :+
-        lda #0
-:       tax
+gsy:    tax
         lda SHYT,x                 ; (held so the ship's lines, 14 up and 16 down,
         cmp #YSKY+14-HORIZON       ; stay within YSKY..YGND)
         bcs :+
@@ -1067,6 +1066,13 @@ parts:  ldx #NPART-1
         lda ppyh,x
         adc gt1
         sta ppyh,x
+        ror a                      ; (past either end of its byte: below the sea,
+        eor gt1                    ; or the ceiling's units: gone, not wrapped
+        bpl :+                     ; round; C: no borrow down, a carry up)
+        lda #0
+        sta plife,x
+        beq @n
+:
         lda pvy,x
         sec
         sbc #PGRAV

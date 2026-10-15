@@ -54,8 +54,8 @@ ZSKIP = 3                 # the far corner rows not drawn (their tiles: the far 
 CAMH = int(__import__('os').environ.get('LAND_CAMH', 96))   # camera height above the
                           # ground at the ship (ZSHIP ahead, at the camera's x), height
                           # units (HSCALE a tile: 6 tiles; LAND_CAMH: the tests')
-EMAX = 79                 # the camera's most above CAMH (at HORIZON 0 every row below
-                          # the screen there for any ground: 96 - 15 + e > YGND); y's
+EMAX = 95                 # the camera's most above CAMH that LAND draws: every row below
+                          # the screen there for any ground (-16 + 81 + e > YGND); y's
                           # held at 254 (past YGND: the bottom clip's; the near clip's + 1
                           # within a byte)
 ZSHIP = 13                # the ship's depth, tiles (Lander's LANDSCAPE_Z_MID 15: here the clip planes' middle)

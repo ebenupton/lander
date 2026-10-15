@@ -39,6 +39,16 @@ for ln in open(sys.argv[1] + '/labels.txt'):
         out.append(f'L_{n.lstrip(".")} = ${int(a, 16):04X}')
 open(sys.argv[1] + '/landsyms.inc', 'w').write('\n'.join(sorted(set(out))) + '\n')
 PY
+python3 - $B B4S 0x2081 B4S2 0x1200 <<'PY'     # the slow way (bank 4) into TABLES
+import sys
+d = sys.argv[1]
+img = bytearray(open(d + '/TABLES', 'rb').read())
+for c, off in zip(sys.argv[2::2], sys.argv[3::2]):
+    code, off = open(f'{d}/{c}', 'rb').read(), int(off, 16)
+    assert not any(img[off:off + len(code)]), c + ': code over the tables'
+    img[off:off + len(code)] = code
+open(d + '/TABLES', 'wb').write(img)
+PY
 python3 tools/shipgen.py $B
 ca65 -g --cpu 6502 -I src -I $B -o $B/shipb.o src/shipb.s -l $B/shipb.lst
 ld65 -C src/shipb.cfg -o $B/SHIPB $B/shipb.o -m $B/shipb_map.txt -Ln $B/shipb_labels.txt

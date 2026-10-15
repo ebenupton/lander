@@ -1546,7 +1546,16 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         sta zt1+2
         sta zt2+2
         sta zt3+2
+        sta ot0+2
+        sta ot3+2
+        sta oz1+2
+        sta oz2+2
+        sta oz3a+2
+        sta oz3b+2
         lda bota+1
+        sta ob0+2
+        sta ob3+2
+        sta obz+2
         sta pb0+2
         sta pb1+2
         sta pb2+2
@@ -1572,11 +1581,13 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         ldy #<flrc
         lda #$EA
         sta c_lv+3
+        sta o_lv+3
         lda #>flrc
         bne @lvp
 @lvs:   ldx #$85                   ; (STA flr / STA flr1)
 @lvn:   lda #flr1
         sta c_lv+3
+        sta o_lv+3
         lda #$86
         cpx #$85
         bne @lvp
@@ -1584,6 +1595,9 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
 @lvp:   stx c_lv
         sty c_lv+1
         sta c_lv+2
+        stx o_lv
+        sty o_lv+1
+        sta o_lv+2
         lda #<c_nd
         ldy #>c_nd
         bit last
@@ -1592,20 +1606,19 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         ldy #>nearpost
 :       sta c_np+1
         sty c_np+2
-        lda xlp                    ; record below c_ra or from c_rb on (strip 1: all)
-        ldx ns
+        lda xlp                    ; record below xlp or from xrp on (strip 1: all,
+        ldx ns                     ; to xr): phase's
         dex
         bne :+
-        lda #$FF
-:       sta c_ra+1
-        lda xrp
-        sta c_rb+1
         lda xr
-        sta c_xe+1
+:       sta ph_lo+1
+        lda xrp
+        sta ph_hi+1
         lda #0
         sta ri
         lda xl
         sta x4
+        jsr phase
         asl a                      ; 8 * column (C: the right half)
         sta coff
         lda #0
@@ -1614,12 +1627,144 @@ cols:   lda #$FF                   ; (fsplit: a new strip's boxes and rungs)
         ldy x4
         jmp c_coly
 ; (rare: out of cols' way) a column whose top or floor is not level
+; The columns from A (x4) to the next of xlp, xrp, xr (c_xe's): recorded or
+; not (c_rec, o_rec: JMP record, or on).  A kept.
+phase:
+ph_lo:  cmp #0
+        bcs ph_h
+        ldx ph_lo+1                ; (record to xlp)
+        bcc ph_rec
+ph_h:
+ph_hi:  cmp #0
+        bcs ph_x
+        ldx ph_hi+1                ; (none to xrp)
+        cpx xr
+        bcc ph_n
+        ldx xr
+ph_n:   stx c_xe+1
+        ldx #<o_nr
+        stx o_rec+1
+        ldx #>o_nr
+        stx o_rec+2
+        ldx #<c_srx
+        stx c_rec+1
+        ldx #>c_srx
+        stx c_rec+2
+        rts
+ph_x:   ldx xr                     ; (record to xr)
+ph_rec: cpx xr                     ; (at most xr)
+        bcc ph_r
+        ldx xr
+ph_r:   stx c_xe+1
+        ldx #<record
+        stx o_rec+1
+        stx c_rec+1
+        ldx #>record
+        stx o_rec+2
+        stx c_rec+2
+        rts
+c_lim:  cmp xr                     ; (the next phase, or the end)
+        beq c_end
+        jsr phase
+        jmp c_xt
 c_nh:   lda #0                     ; (a new half)
         rol a
         jsr sethalf
         ldy x4
         jmp c_coly
 c_end:  rts
+o_zt:   sta ys                     ; (one box, its top not level; C: p0 > p3)
+        bcs :+                     ; each pixel's top, the highest and lowest
+        sta mn
+oz3a:   lda ROWA+3,y
+        sta mx
+        bcc :++
+:       sta mx
+oz3b:   lda ROWA+3,y
+        sta mn
+:       sta ys+3
+oz1:    lda ROWA+1,y
+        sta ys+1
+oz2:    lda ROWA+2,y
+        sta ys+2
+        bit c_v1                   ; (V: a top not level)
+        jmp o_ft
+o_zb:   bcs :+                     ; (one box, its floor not level; C: p0 > p3)
+obz:    lda ROWB+3,y               ; the lowest
+:       sta flr                    ; (as c_zb)
+        tax
+        inx
+        cpx #YGND+2
+        bcc :+
+        dex
+        dec flr
+:       stx flr1
+        jmp o_rec
+c_ri0:  inx                        ; (the next rung)
+        cmp HI,x
+        bcs c_ri0
+        stx ri
+        jmp c_rr0
+
+c_nd:                               ; the next column (c_np's, nearpost's)
+        lda x4
+        clc
+        adc #4
+        sta x4
+c_xe:   cmp #0                     ; (phase: xlp, xrp or xr)
+        beq c_lim
+c_xt:   tay
+        asl a                      ; 8 * column
+        sta coff
+        beq c_nh
+c_coly:                            ; (V clear: the adc #4 above, or sethalf's
+        ldx ri                     ; last sbc) the rungs: past those wholly left
+        tya
+        cmp HI,x
+        bcs c_ri0
+c_rr0:  ora #3
+        cmp LO,x
+        bcs c_sp                   ; (LO <= x4 + 3: a rung in the column)
+                                   ; one box: no vertex of either row inside it
+                                   ; (rungs ri-1 and before: at or left of x4;
+                                   ; ri on: right of x4 + 3), so each row
+                                   ; monotonic across it: level if its ends are,
+                                   ; its highest and lowest at its ends
+ot0:    lda ROWA,y                 ; the top (cols: ot0, ot3, oz1-3 this strip's)
+ot3:    cmp ROWA+3,y
+        bne o_zt
+        sta mx                     ; (mn: mx, V clear; record's, c_dbl's)
+o_ft:
+ob0:    lda ROWB,y                 ; the floor (cols: ob0, ob3, obz)
+ob3:    cmp ROWB+3,y
+        bne o_zb
+o_lv:   tax                        ; (as c_lv, c_ra, c_rb)
+        inx
+        stx flr1
+o_rec:  jmp record                 ; (phase: or o_nr)
+c_sp:                              ; a rung in the column: the top level?
+pt0:    lda ROWA,y
+pt1:    cmp ROWA+1,y
+        bne c_zt
+pt2:    cmp ROWA+2,y
+        bne c_zt
+pt3:    cmp ROWA+3,y
+        bne c_zt
+        sta mx                     ; (mn: mx, V clear)
+c_ft:                               ; the floor: level?
+pb0:    lda ROWB,y
+pb1:    cmp ROWB+1,y
+        bne c_zb
+pb2:    cmp ROWB+2,y
+        bne c_zb
+pb3:    cmp ROWB+3,y
+        bne c_zb
+c_lv:   tax                        ; (level; cols: STA flr / STA flr1 in the near
+        inx                        ; strip, its ground's from the floor's line on;
+        stx flr1                   ; flr only nearpost's)
+c_rec:  jmp record                 ; a column new this frame (strip 1's, or
+                                   ; beyond the last strip's): record it (phase:
+                                   ; or c_srx)
 c_zt:    sta ys                     ; (rare) each pixel's top (A: the first's), the
         sta mn                     ; highest and lowest (cols: zt1-3 this strip's)
         sta mx
@@ -1650,49 +1795,35 @@ zt3:    lda ROWA+3,y               ; (ZTP 3, to c_ft directly)
         sta mx
         jmp c_ft
 
-c_nd:                               ; the next column (c_np's, nearpost's)
-        lda x4
-        clc
-        adc #4
-        sta x4
-c_xe:   cmp #0                     ; (cols: xr)
-        beq c_end
-        tay
-        asl a                      ; 8 * column
-        sta coff
-        beq c_nh
-c_coly:                            ; the top: level across the column? (V clear:
-                                   ; the adc #4 above, or sethalf's last sbc)
-pt0:    lda ROWA,y
-pt1:    cmp ROWA+1,y
-        bne c_zt
-pt2:    cmp ROWA+2,y
-        bne c_zt
-pt3:    cmp ROWA+3,y
-        bne c_zt
-        sta mn
-        sta mx
-c_ft:                               ; the floor: level?
-pb0:    lda ROWB,y
-pb1:    cmp ROWB+1,y
-        bne c_zb
-pb2:    cmp ROWB+2,y
-        bne c_zb
-pb3:    cmp ROWB+3,y
-        bne c_zb
-c_lv:   tax                        ; (level; cols: STA flr / STA flr1 in the near
-        inx                        ; strip, its ground's from the floor's line on;
-        stx flr1                   ; flr only nearpost's)
-c_rec:                             ; a column new this frame (strip 1's, or
-c_ra:   cpy #0                     ; beyond the last strip's): record it
-        bcc record
-c_rb:   cpy #0
-        bcc c_rd
+c_zb:                               ; (rare) the lowest (A: the first's; cols:
+zb1:    cmp ROWB+1,y               ; zb1-3 this strip's)
+        bcs :+
+        lda ROWB+1,y
+:
+zb2:    cmp ROWB+2,y
+        bcs :+
+        lda ROWB+2,y
+:
+zb3:    cmp ROWB+3,y
+        bcs :+
+        lda ROWB+3,y
+:       sta flr                    ; (not level)
+        tax
+        inx
+        cpx #YGND+2                ; (at most YGND+1, and flr then YGND: bclip's;
+        bcc :+                     ; nearpost's not level kept)
+        dex
+        dec flr
+:       stx flr1
+        jmp c_rec
 ; A land strip's column: its highest and lowest lines into CURT, CURB (cols'
 ; inline: on to c_rd, Y = x4).
 record: ldx DIV4,y                 ; (always the column's first strip this
                                    ; frame: PINL, PINR widen to the near row)
-        lda mn                     ; the column's first strip this frame: its
+        lda mx                     ; the column's first strip this frame: its
+        bvc :+                     ; (mn: mx if V clear, its top level)
+        lda mn
+:
 pT3:    sta CURT,x                 ; highest line, and black from the land's
 pT5:    lda TOPS,x                 ; highest last time down to its top's lowest
                                    ; (the pixels above their top in its top zone
@@ -1729,7 +1860,8 @@ c_rd:
 c_rr:   ora #3
         cmp LO,x
         bcs c_split                 ; (LO <= x4 + 3)
-        lda CE-1,x                 ; one box: ri - 1
+o_nr:   ldx ri
+c_one:  lda CE-1,x                 ; one box: ri - 1
         sta ve
         lda CO-1,x
         sta vo
@@ -1741,27 +1873,6 @@ c_r1:    ldx mx
         jsr run2
 c_next:
 c_np:   jmp nearpost               ; (cols: c_nd but in the near strip; back to c_nd)
-c_zb:                               ; (rare) the lowest (A: the first's; cols:
-zb1:    cmp ROWB+1,y               ; zb1-3 this strip's)
-        bcs :+
-        lda ROWB+1,y
-:
-zb2:    cmp ROWB+2,y
-        bcs :+
-        lda ROWB+2,y
-:
-zb3:    cmp ROWB+3,y
-        bcs :+
-        lda ROWB+3,y
-:       sta flr                    ; (not level)
-        tax
-        inx
-        cpx #YGND+2                ; (at most YGND+1, and flr then YGND: bclip's;
-        bcc :+                     ; nearpost's not level kept)
-        dex
-        dec flr
-:       stx flr1
-        jmp c_rec
 c_ri:   inx                        ; (the next rung)
         cmp HI,x
         bcs c_ri
@@ -1769,6 +1880,9 @@ c_ri:   inx                        ; (the next rung)
         jmp c_rr
 c_v1:   .byte $40                  ; (BIT: V)
 c_z1:    jmp zone1                  ; (back to c_r1)
+c_srx:  ldx ri                     ; (c_coly's)
+        tya
+        ora #3
 c_split: cmp LO+1,x
         bcs c_dbl
         bvs :+
@@ -1776,7 +1890,8 @@ c_split: cmp LO+1,x
 :       jmp split
 
 c_dbl:   bvs :+                     ; (the slow ways read ys)
-        lda mn
+        lda mx                     ; (mn: mx, V clear)
+        sta mn
         sta ys
         sta ys+1
         sta ys+2
@@ -1846,15 +1961,7 @@ pB8:    lda BOTS,y
 np_n:   lda x4                     ; (C set: c_nd's, inline)
         adc #3
         sta x4
-        cmp xr
-        beq np_e
-        tay
-        asl a
-        sta coff
-        beq np_hf
-        jmp c_coly                 ; (V clear: the adc above)
-np_e:   rts
-np_hf:  jmp c_nh
+        jmp c_xe                   ; (V clear: the adc above)
 np_z:     ldy x4
         lda (bota),y
         sta ys
@@ -2662,121 +2769,6 @@ pY_k:   lda ve
 je:     jsr $FFFF
         lda vo
 jo:     jmp $FFFF                  ; (its RTS returns from run2)
-
-; ---------------------------------------------------------------- the slow way
-; A column two rungs (or more) split: each pixel's box at the top (ri - 1, and
-; each rung reaching the column with xt <= x) and transitions (each rung
-; crossing it: +1 leaning left, -1 right), then a line at a time.
-slow:   ldx #0
-@p:     stx tj                     ; pixel p
-        txa
-        clc
-        adc x4
-        sta tx1                    ; its x
-        ldy ri
-        dey
-        tya
-        sta SPB,x
-        txa
-        asl a
-        asl a
-        tay                        ; 4p: its transitions
-        lda #$FF
-        sta STL,y
-        sta STL+1,y
-        sta STL+2,y
-        sta STL+3,y
-        ldx ri
-@r:     lda LO,x
-        cmp x4p4
-        bcs @pd                    ; (the right margin stops it)
-        lda tx1
-        cmp TX,x
-        bcc :+
-        stx tmp                    ; left of x at the top
-        ldx tj
-        inc SPB,x
-        ldx tmp
-:       lda tx1                    ; crossing x
-        cmp LO,x
-        bcc @rn
-        cmp HI,x
-        bcs @rn
-        lda RTPL,x
-        sta rtp
-        lda RTPH,x
-        sta rtp+1
-        sty tmp
-        ldy tx1
-        lda (rtp),y
-        ldy tmp
-        sta STL,y
-        lda BX,x
-        cmp TX,x
-        lda #1
-        bcc :+
-        lda #$FF
-:       sta STD,y
-        iny
-@rn:    inx
-        bne @r
-@pd:    ldx tj
-        inx
-        cpx #4
-        bne @p
-        ldx mn                     ; a line at a time
-@l:     stx yy
-        txa
-        lsr a
-        lda #<CE
-        bcc :+
-        lda #<CO
-:       sta @cl+1
-        lda #0
-        sta msk
-        sta zv
-        ldy #3
-@lp:    lda yy
-        cmp ys,y
-        bcc @skip                  ; above its top
-        lda PIXM,y
-        ora msk
-        sta msk
-        sty tj
-        lda SPB,y
-        sta tmp
-        tya
-        asl a
-        asl a
-        tax
-@s:     lda STL,x
-        cmp #$FF
-        beq @sd
-        lda yy
-        cmp STL,x
-        bcc @sn
-        lda tmp
-        clc
-        adc STD,x
-        sta tmp
-@sn:    inx
-        bne @s
-@sd:    ldx tmp
-@cl:    lda CE,x                   ; (CE or CO)
-        ldy tj
-        and PIXM,y
-        ora zv
-        sta zv
-@skip:  dey
-        bpl @lp
-        ldx yy
-        lda zv
-        jsr zline
-        inx
-        cpx flr1
-        bcc @l
-        rts
-PIXM:   .byte $88, $44, $22, $11
 
 ; ---------------------------------------------------------------- readout
 ; At each flip: the vertical syncs since the last (dvs, the last 8); the
@@ -3689,6 +3681,125 @@ cyc:    sta cdy
         tya
         rts
 
+
+; ---------------------------------------------------------------- the slow way
+; (bank 4, its free space, in two: never seen)
+        .segment "B4S"
+; A column two rungs (or more) split: each pixel's box at the top (ri - 1, and
+; each rung reaching the column with xt <= x) and transitions (each rung
+; crossing it: +1 leaning left, -1 right), then a line at a time.
+slow:   ldx #0
+@p:     stx tj                     ; pixel p
+        txa
+        clc
+        adc x4
+        sta tx1                    ; its x
+        ldy ri
+        dey
+        tya
+        sta SPB,x
+        txa
+        asl a
+        asl a
+        tay                        ; 4p: its transitions
+        lda #$FF
+        sta STL,y
+        sta STL+1,y
+        sta STL+2,y
+        sta STL+3,y
+        ldx ri
+@r:     lda LO,x
+        cmp x4p4
+        bcs @pd                    ; (the right margin stops it)
+        lda tx1
+        cmp TX,x
+        bcc :+
+        stx tmp                    ; left of x at the top
+        ldx tj
+        inc SPB,x
+        ldx tmp
+:       lda tx1                    ; crossing x
+        cmp LO,x
+        bcc @rn
+        cmp HI,x
+        bcs @rn
+        lda RTPL,x
+        sta rtp
+        lda RTPH,x
+        sta rtp+1
+        sty tmp
+        ldy tx1
+        lda (rtp),y
+        ldy tmp
+        sta STL,y
+        lda BX,x
+        cmp TX,x
+        lda #1
+        bcc :+
+        lda #$FF
+:       sta STD,y
+        iny
+@rn:    inx
+        bne @r
+@pd:    ldx tj
+        inx
+        cpx #4
+        bne @p
+        jmp slow2
+        .segment "B4S2"
+slow2:  ldx mn                     ; a line at a time
+@l:     stx yy
+        txa
+        lsr a
+        lda #<CE
+        bcc :+
+        lda #<CO
+:       sta @cl+1
+        lda #0
+        sta msk
+        sta zv
+        ldy #3
+@lp:    lda yy
+        cmp ys,y
+        bcc @skip                  ; above its top
+        lda PIXM,y
+        ora msk
+        sta msk
+        sty tj
+        lda SPB,y
+        sta tmp
+        tya
+        asl a
+        asl a
+        tax
+@s:     lda STL,x
+        cmp #$FF
+        beq @sd
+        lda yy
+        cmp STL,x
+        bcc @sn
+        lda tmp
+        clc
+        adc STD,x
+        sta tmp
+@sn:    inx
+        bne @s
+@sd:    ldx tmp
+@cl:    lda CE,x                   ; (CE or CO)
+        ldy tj
+        and PIXM,y
+        ora zv
+        sta zv
+@skip:  dey
+        bpl @lp
+        ldx yy
+        lda zv
+        jsr zline
+        inx
+        cpx flr1
+        bcc @l
+        rts
+PIXM:   .byte $88, $44, $22, $11
 
 ; ---------------------------------------------------------------- bank 5
         .segment "B5CODE"

@@ -77,10 +77,10 @@ def mapimg():
                 c = 1
             else:
                 c = 3
-            if NU.enabled():           # MODE 2: the even pixel of each pair, NULA's colours
-                if px & 1 == 0:
-                    n = NU.PADC if x < L.PADN and z < L.PADN else NU.SEA if c == 1 else NU.LANDC
-                    out[line * 16 + (px >> 2)] |= NU.solid(n) & NU.pixel(px)
+            if NU.enabled():           # MODE 2: the even pixel of each pair, the build's
+                if px & 1 == 0:        # colours (proto/nula.py)
+                    e = NU.MAPPAD if x < L.PADN and z < L.PADN else NU.MAPSEA if c == 1 else NU.MAPLAND
+                    out[line * 16 + (px >> 2)] |= NU.dither_bytes(e)[line & 1] & NU.pixel(px)
                 continue
             p = px & 3
             out[line * 16 + (px >> 2)] |= ((c >> 1) << (7 - p)) | ((c & 1) << (3 - p))

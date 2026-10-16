@@ -297,10 +297,10 @@ def main():
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])
         for k, v in consts.items():
             f.write(f'{k:8s}= {v}\n')
-    if NU.enabled():                # nula.inc: the NULA build's palette and colour bytes
-        with open(os.path.join(out, 'nula.inc'), 'w') as f:
+    if NU.enabled():                # mode2.inc: the MODE 2 builds' colour bytes, letters
+        with open(os.path.join(out, 'mode2.inc'), 'w') as f:      # and NULA palette
             f.write('; tools/landgen.py: proto/nula.py\'s colours\n')
-            f.write(f'YELB    = ${NU.solid(NU.YELLOW):02X}\nMAGB    = ${NU.solid(NU.MAGENTA):02X}\n')
+            f.write(f'YELB    = ${NU.yelb():02X}\nMAGB    = ${NU.magb():02X}\n')
             f.write('.macro NULAPAL\n')
             for c, (r, g, b) in enumerate(NU.PAL):
                 f.write(f'        .byte ${c << 4 | r:02X}, ${g << 4 | b:02X}\n')

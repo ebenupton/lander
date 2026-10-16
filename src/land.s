@@ -37,12 +37,14 @@
 ; second, so a byte column is addressed by its half (scrh: $30, $31, $58, $59)
 ; and coff = (8 * column) & 255.
 ;
-; The NULA build (build.sh nula: -D NULA; proto/nula.py) is MODE 2 with the
-; VideoNULA's sixteen colours.  Everything here still works in MODE 1's
-; pixels, 256 across and four a byte; a MODE 2 byte is two pixels, each
-; showing the even one of the pair it covers, so only the masks (PM) and the
-; colour bytes (bank 5's, landgen's) differ, with the letters (nfont, gbyte)
-; and the palette (palette).  game.s's dots and map follow (.ifdef NULA).
+; The MODE 2 builds (-D MODE2; proto/nula.py): NULA (build.sh nula, -D NULA),
+; the VideoNULA's sixteen colours, flat; CPC (build.sh cpc, -D CPC), the 27
+; colours of 1 x 2 dithers of MODE 2's eight.  Everything here still works in
+; MODE 1's pixels, 256 across and four a byte; a MODE 2 byte is two pixels,
+; each showing the even one of the pair it covers, so only the masks (PM) and
+; the colour bytes (bank 5's, landgen's) differ, with the letters (nfont,
+; gbyte) and the palette (palette).  game.s's dots and map follow (.ifdef
+; MODE2).
 ;
 ; Projection (project).  The camera is at tile (cxt, czt) plus sixteenths
 ; (cxs, czs), CAMH height units above the ground under the ship (hgnd) and
@@ -162,12 +164,12 @@
 ; ============================================================================
         .setcpu "6502"
         .include "tables.inc"
-; PM m: MODE 1 pixel mask m as drawn.  The NULA build (-D NULA: MODE 2, a byte
+; PM m: MODE 1 pixel mask m as drawn.  The MODE 2 builds (-D MODE2: a byte
 ; two pixels, each showing the even one of the two of LAND's it covers) makes
 ; it the left pixel's bits ($AA) if m has pixel 0, the right's ($55) if pixel 2
 ; (proto/nula.py's mask); else it is m.
-.ifdef NULA
-        .include "nula.inc"
+.ifdef MODE2
+        .include "mode2.inc"
 .define PM(m) ((((m) >> 3) & 1) * $AA | (((m) >> 1) & 1) * $55)
 .else
 .define PM(m) (m)
@@ -3695,7 +3697,7 @@ start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
         ldx ptr+1
         cpx #$58
         bne :-
-.ifdef NULA
+.ifdef MODE2
         jsr palette
 .else
         ldx #0
@@ -3743,14 +3745,20 @@ ldbank: pha
         bne :-
         rts
 
-; palette (NULA build): VideoNULA reset, its palette mode 1 (logical colours 8-15 their own, not
-; flashing), its 16 colours (NULAPAL, nula.inc: (colour << 4 | red), (green <<
-; 4 | blue)); then the ULA's control byte rewritten from the MOS's copy and
-; its palette made the identity, which on a machine without NULA undo what
-; the writes to its control and palette mirrors ($FE22, $FE23) did, leaving
-; MODE 2's own colours.  Clobbers A, X, Y, tmp.  Caller: start.
-.ifdef NULA
+; palette (MODE 2 builds).  CPC: VDU 20, the default palette (!BOOT left
+; every colour black).  NULA: VideoNULA reset, its palette mode 1 (logical
+; colours 8-15 their own, not flashing), its 16 colours (NULAPAL, mode2.inc:
+; (colour << 4 | red), (green << 4 | blue)); then the ULA's control byte
+; rewritten from the MOS's copy and its palette made the identity, which on a
+; machine without NULA undo what the writes to its control and palette
+; mirrors ($FE22, $FE23) did, leaving MODE 2's own colours.  Clobbers A, X, Y,
+; tmp.  Caller: start.
+.ifdef MODE2
 palette:
+.ifdef CPC
+        lda #20                    ; (CPC: VDU 20, MODE 2's own colours back)
+        jmp OSWRCH
+.else
         sei
         lda #$40                   ; NULA register 4: reset
         sta $FE22
@@ -3781,6 +3789,7 @@ palette:
         rts
 nulapal: NULAPAL
 .endif
+.endif
 
 vdu_init:                          ; VDU 19,l,p,0,0,0: logical 1 cyan (6), 2
                                    ; magenta (5), 3 yellow (3)
@@ -3809,8 +3818,8 @@ glyphs: ldx #0
 @c:     stx tcol
         lda gchars,x
         sta oswblk
-.ifdef NULA
-        jsr nfont                  ; (NULA: the build's own letters)
+.ifdef MODE2
+        jsr nfont                  ; (MODE 2: the build's own letters)
 .else
         lda #10                    ; OSWORD 10: read the character's definition
         ldx #<oswblk
@@ -3824,7 +3833,7 @@ glyphs: ldx #0
         asl a
         tax                        ; X = 16 * the index
         ldy #0
-.ifdef NULA
+.ifdef MODE2
 @l:     lda oswblk+1,y             ; row Y: the left 4 pixels, then the right 4,
         jsr gbyte                  ; as MODE 2 bytes (gbyte)
         sta GLY,x
@@ -3867,9 +3876,9 @@ glyphs: ldx #0
         rts
 gchars: .byte "0123456789. FPS"    ; (G_DOT 10, G_SP 11, G_F 12: readout's)
 gchars_end:
-.ifdef NULA
+.ifdef MODE2
 ; nfont: character oswblk's 8 rows into oswblk+1..8, as OSWORD 10 would give
-; them, from the build's letters (nula.inc's NFONT, by NFONTCH; proto/nula.py
+; them, from the build's letters (mode2.inc's NFONT, by NFONTCH; proto/nula.py
 ; FONT).  Clobbers A, X, Y.  Called by glyphs and glyphs5.
 nfont:  ldx #0
 :       lda nfch,x
@@ -3916,7 +3925,7 @@ glyphs5:
 @c:     stx tcol
         lda lchars,x
         sta oswblk
-.ifdef NULA
+.ifdef MODE2
         jsr nfont
 .else
         lda #10
@@ -3931,7 +3940,7 @@ glyphs5:
         asl a
         tax
         ldy #0
-.ifdef NULA
+.ifdef MODE2
 @l:     lda oswblk+1,y
         jsr gbyte
         sta GLY5,x

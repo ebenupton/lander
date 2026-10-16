@@ -1,49 +1,78 @@
 #!/usr/bin/env python3
-"""The NULA build's colours: MODE 2's sixteen logical colours, each given its own
-12-bit colour through the VideoNULA palette, in place of MODE 1's 2 x 2 dithers.
+"""The MODE 2 builds' colours.  Two versions draw the game in MODE 2 in place of
+MODE 1's 2 x 2 dithers of black, cyan, magenta and yellow:
 
-Every tool and test asks enabled() (the environment's NULA set and not "0") and,
-when it is, draws through this module.  The renderer itself is unchanged: it still
-works in the MODE 1 build's pixels, 256 across, four to a byte; only its masks and
-colour bytes differ.  A MODE 2 byte holds two pixels, the left in bits 7, 5, 3, 1
-and the right in bits 6, 4, 2, 0 (colour bit 3 first), so each MODE 2 pixel is two
-of the renderer's: it shows the even one of the pair, which is what mask() makes
-of a MODE 1 mask (MODE 1 pixel 0 decides the left pixel, pixel 2 the right).  A
-mask and its complement stay complements, so boxes meeting in a byte still tile
-it.  Overlays placed by single pixels (the dots, the map's marker) take the MODE 2
-pixel their pixel falls in instead (near()).
+  nula  (NULA=1, build.sh nula): MODE 2's sixteen logical colours, each given its
+        own 12-bit colour through the VideoNULA palette (PAL), flat.
+  cpc   (CPC=1, build.sh cpc): the "Amstrad CPC palette": every colour whose
+        red, green and blue are each off, half or full, 27 of them, made on a
+        plain BBC Micro as a 1 x 2 dither of MODE 2's eight colours (one on even
+        lines, one on odd; two MODE 2 pixels one above the other are about
+        square).  A half channel is on in one line of the two.
 
-colour(e) is swatch35 entry e's logical colour: the entries the game uses are
-given their own (PAL's order below), any other the nearest of them by average
-colour.  solid(c) is colour c's byte (both pixels c); dither_bytes(e) the NULA
-build's even and odd bytes for entry e (both solid(colour(e))).  The land and sea
-use fewer entries than the MODE 1 build (proto/land.py's LAND, SEAC, which read
-enabled()), so that black, three seas, the pad's grey, seven lands and the ship's
-four colours fill the sixteen.
+variant() names the build the environment asks for (mode1 without either) and
+enabled() is true for both MODE 2 builds; every tool and test asks and, when it
+is, draws through this module.  The renderer itself is unchanged: it still works
+in the MODE 1 build's pixels, 256 across, four to a byte, at that resolution;
+only its masks and colour bytes differ.  A MODE 2 byte holds two pixels, the
+left in bits 7, 5, 3, 1 and the right in bits 6, 4, 2, 0 (colour bit 3 first),
+so each MODE 2 pixel is two of the renderer's: it shows the even one of the
+pair, which is what mask() makes of a MODE 1 mask (MODE 1 pixel 0 decides the
+left pixel, pixel 2 the right).  A mask and its complement stay complements, so
+boxes meeting in a byte still tile it.  Overlays placed by single pixels (the
+dots, the map's marker) take the MODE 2 pixel their pixel falls in instead.
 
-    python3 proto/nula.py   writes proto/nula.png: the sixteen colours with their
-                            numbers and the entries they stand for
+dither_bytes(e) is the build's even and odd line bytes for swatch35 entry e.
+NULA: colour(e) is e's logical colour, the entries the game uses given their
+own (SLOTS' order), any other the nearest of them; both bytes solid(colour(e)).
+The land and sea use fewer entries than the MODE 1 build (proto/land.py's LAND,
+SEAC read nula()) so that black, three seas, the pad's grey, seven lands and the
+ship's four colours fill the sixteen.  CPC: every entry the game uses (USED) is
+given a different one of the 27 (CPCMAP: the assignment nearest overall in
+average colour), any other its nearest; its bytes are the two colours' (pair).
+YELB, MAGB (yellow and magenta: the letters, the fuel bar, the dots, the map's
+marker) are solid bytes; the map's colours are entries (MAPSEA, MAPLAND, MAPPAD).
+
+    python3 proto/nula.py   writes proto/nula.png and proto/cpc.png: each build's
+                            colours with their numbers and the entries they
+                            stand for
 """
 import os
 
 import swatch35 as SW
 
 
+def variant():
+    """'nula', 'cpc' or 'mode1', from the environment's NULA and CPC."""
+    on = lambda k: os.environ.get(k, '0') not in ('', '0')
+    return 'nula' if on('NULA') else 'cpc' if on('CPC') else 'mode1'
+
+
 def enabled():
-    return os.environ.get('NULA', '0') not in ('', '0')
+    """A MODE 2 build (nula or cpc)."""
+    return variant() != 'mode1'
+
+
+def nula():
+    return variant() == 'nula'
+
+
+def cpc():
+    return variant() == 'cpc'
 
 
 def check_build(b):
-    """Exit unless build directory b holds the build enabled() expects (build.sh's
-    b/variant: nula or mode1)."""
-    want = 'nula' if enabled() else 'mode1'
+    """Exit unless build directory b holds the build variant() expects (build.sh's
+    b/variant)."""
+    want = variant()
     try:
         got = open(os.path.join(b, 'variant')).read().strip()
     except OSError:
         got = 'mode1'
     if got != want:
-        raise SystemExit(f'{b} holds the {got} build; NULA={int(enabled())} tests the {want} one '
-                         f'(sh build.sh{" nula" if enabled() else ""}, or set NULA)')
+        arg = '' if want == 'mode1' else ' ' + want
+        raise SystemExit(f'{b} holds the {got} build, the environment asks for {want} '
+                         f'(sh build.sh{arg}, or set NULA=1 / CPC=1 to match)')
 
 
 # (swatch35 entry, use), in logical colour order 0..15
@@ -93,10 +122,80 @@ def solid(c):
     return v
 
 
+MAPSEA, MAPLAND, MAPPAD = 0, 10, 19                        # the map's entries
+
+# The CPC build.  A colour is its levels (r, g, b), each 0, 1 (half) or 2 (full);
+# MODE 2's colours are 1 red, 2 green, 4 blue.
+CPC27 = [(r, g, b) for r in range(3) for g in range(3) for b in range(3)]
+USED = [34] + [3, 6, 10, 11, 16, 18, 21, 22, 26, 28] + [0, 2, 15, 17] + [19, 30, 20, 9, 8, 13]
+LUMA = (0.30, 0.59, 0.11)
+
+
+def rgb(lv):
+    return tuple(127.5 * v for v in lv)
+
+
+def _cpcmap():
+    """{entry: levels} for USED, each a different colour, the total squared distance
+    from the entries' average colours least (scipy's assignment)."""
+    from scipy.optimize import linear_sum_assignment
+    cost = [[sum((a - b) ** 2 for a, b in zip(avg(e), rgb(lv))) for lv in CPC27] for e in USED]
+    rows, cols = linear_sum_assignment(cost)
+    return {USED[r]: CPC27[c] for r, c in zip(rows, cols)}
+
+
+_CM = {}
+
+
+def cpcmap():
+    if not _CM:
+        _CM.update(_cpcmap())
+    return _CM
+
+
+def cpc_levels(e):
+    """Entry e's CPC colour: CPCMAP's, or for an entry the game does not use the
+    nearest of the 27."""
+    m = cpcmap()
+    if e in m:
+        return m[e]
+    return min(CPC27, key=lambda lv: sum((a - b) ** 2 for a, b in zip(avg(e), rgb(lv))))
+
+
+def pair(lv):
+    """Levels lv as two MODE 2 colours (even line, odd line): the full channels in
+    both, each half channel in one, the brighter halves first, each to the line so
+    far the darker (even on a tie)."""
+    ev = od = 0
+    le = lo = 0.0
+    for ch in sorted((ch for ch in range(3) if lv[ch] == 1), key=lambda ch: -LUMA[ch]):
+        if le <= lo:
+            ev |= 1 << ch
+            le += LUMA[ch]
+        else:
+            od |= 1 << ch
+            lo += LUMA[ch]
+    full = sum(1 << ch for ch in range(3) if lv[ch] == 2)
+    return ev | full, od | full
+
+
 def dither_bytes(e):
-    """The NULA build's (even, odd) bytes for entry e."""
+    """The MODE 2 build's (even, odd) bytes for entry e."""
+    if cpc():
+        a, b = pair(cpc_levels(e))
+        return [solid(a), solid(b)]
     b = solid(colour(e))
     return [b, b]
+
+
+def yelb():
+    """The yellow byte (letters, fuel bar, dots)."""
+    return solid(3) if cpc() else solid(YELLOW)
+
+
+def magb():
+    """The magenta byte (the map's marker, old dots)."""
+    return solid(5) if cpc() else solid(MAGENTA)
 
 
 def mask(m):
@@ -178,6 +277,17 @@ def main():
         d.rectangle([c * 60, 0, c * 60 + 59, 59], fill=tuple(17 * v for v in rgb))
         d.text((c * 60 + 2, 62), f'{c}: {e}', fill='black')
     im.save(os.path.join(os.path.dirname(__file__), 'nula.png'))
+    phys = [(255 * (c & 1), 255 * (c >> 1 & 1), 255 * (c >> 2 & 1)) for c in range(8)]
+    m = cpcmap()
+    im = Image.new('RGB', (len(USED) * 50, 90), 'white')
+    d = ImageDraw.Draw(im)
+    for i, e in enumerate(USED):
+        a, b = pair(m[e])
+        for y in range(0, 60, 2):
+            d.rectangle([i * 50, y, i * 50 + 49, y], fill=phys[a])
+            d.rectangle([i * 50, y + 1, i * 50 + 49, y + 1], fill=phys[b])
+        d.text((i * 50 + 2, 62), f'{e}: {m[e]}', fill='black')
+    im.save(os.path.join(os.path.dirname(__file__), 'cpc.png'))
 
 
 if __name__ == '__main__':

@@ -116,7 +116,7 @@ XL, XR = 4, 252           # the screen edges rows are clipped to (clip) and fram
 # The palette: swatch35 entries, yellows and greens for land, cyans for sea
 LAND = [3, 6, 10, 11, 16, 18, 21, 22, 26, 28]
 SEAC = [0, 2, 15, 17]
-if NU.enabled():          # the NULA build: fewer, flat (proto/nula.py)
+if NU.nula():             # the NULA build: fewer, flat (proto/nula.py)
     LAND, SEAC = NU.LAND, NU.SEAC
 STEPS = 16                # camera positions a tile: a step is 256 / STEPS in 8.8
                           # (land.s's cxs, czs are sixteenths)

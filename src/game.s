@@ -1627,8 +1627,8 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         ldy #0
         and (g0),y
         sta gt5
-.ifdef NULA
-        lda #YELB                  ; (NULA: the colours' bytes in the pixel)
+.ifdef MODE2
+        lda #YELB                  ; (MODE 2: the colours' bytes in the pixel)
         ldy plife,x
         cpy #6
         bcs :+
@@ -1681,8 +1681,8 @@ marker: ldx back
         asl a                      ; 1 if its fraction is 1/2 or more (C)
         lda sx+2
         adc #MAPX-1
-.ifdef NULA
-        and #62                    ; (NULA: both of a MODE 2 pixel's two)
+.ifdef MODE2
+        and #62                    ; (MODE 2: both of a MODE 2 pixel's two)
 .else
         and #63
 .endif
@@ -1758,7 +1758,7 @@ mpix:   lda mdl
         sta gt3                    ; (the pixel's bits)
         bit mdc
         bpl :+
-.ifdef NULA
+.ifdef MODE2
         and #MAGB                  ; magenta
 .else
         and #$F0                   ; magenta
@@ -1841,8 +1841,8 @@ status: ldx back
         cmp #(FBC+20)*8+FBL
         bcc @b
 @c:     rts
-.ifdef NULA
-BARB:   .byte 0, YELB & $AA, YELB & $AA, YELB, YELB ; (NULA: the even pixels
+.ifdef MODE2
+BARB:   .byte 0, YELB & $AA, YELB & $AA, YELB, YELB ; (MODE 2: the even pixels
 PIXG:   .byte $AA, $AA, $55, $55   ; decide; a dot's pixel the MODE 2 one it is in)
 .else
 BARB:   .byte $00, $88, $CC, $EE, $FF   ; 0..4 pixels lit from the left, yellow

@@ -51,6 +51,20 @@ sh build.sh nula               # build/lander.ssd, the NULA version
 NULA=1 sh test/run.sh          # its tests (the same reference, MODE 2's bytes)
 ```
 
+## The CPC-palette version
+
+`lander-cpc.ssd` is MODE 2 on any BBC Micro or Master, no NULA needed: the "Amstrad
+CPC palette", the 27 colours whose red, green and blue are each off, half or full,
+made as 1 x 2 dithers of MODE 2's eight colours (one on even lines, one on odd: two
+MODE 2 pixels one above the other are about square), a half channel lit on one line
+of the two.  Every colour the game uses gets a different one of the 27, the nearest
+assignment overall (`proto/nula.py`); the renderer is the NULA version's.
+
+```sh
+sh build.sh cpc                # build/lander.ssd, the CPC-palette version
+CPC=1 sh test/run.sh           # its tests
+```
+
 ## Building and testing
 
 You need [cc65](https://cc65.github.io) (`ca65`, `ld65`) and Python 3 with `numpy`.
@@ -63,7 +77,7 @@ sh test/run.sh       # the test suite (a few minutes)
 ```
 
 The build is deterministic: the disc images it produces are byte for byte the ones
-checked in (`test/identical.sh` checks both).
+checked in (`test/identical.sh` checks all three).
 
 The tests run the game's own 6502 code in py65; the first two compare its output byte
 for byte with the Python reference model:
@@ -90,9 +104,9 @@ for byte with the Python reference model:
 | `tools/landgen.py` | the renderer's tables for banks 4, 5 and 7 |
 | `tools/shipgen.py` | the ship: pre-rotated, pre-rasterised, compressed orientations |
 | `tools/gamegen.py` | the game's tables: thrust, the ship's screen line, the map, the crash's sound |
-| `proto/nula.py` | the NULA version's palette, colours, masks and letters |
+| `proto/nula.py` | the MODE 2 versions' palettes, colours, masks and letters |
 | `tools/mergebank.py`, `tools/mkdfs.py` | code segments into the bank images; the DFS disc |
-| `build.sh`, `lander.ssd`, `lander-nula.ssd` | the build, and the disc images it makes |
+| `build.sh`, `lander.ssd`, `lander-nula.ssd`, `lander-cpc.ssd` | the build, and the disc images it makes |
 | `proto/` | the Python reference model the 6502 matches pixel for pixel |
 | `test/` | the test suite (`test/run.sh` runs it) |
 | `ref/lander/` | what was taken from Lander: the ship blueprint, the flight model, notes |

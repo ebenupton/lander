@@ -36,17 +36,18 @@ set -e
 cd "$(dirname "$0")"
 B=build
 mkdir -p $B
-# `sh build.sh nula`: the VideoNULA build (MODE 2, sixteen flat colours: proto/nula.py),
-# into build/ likewise as build/lander.ssd, with build/variant saying which (the tests
-# read it and need NULA=1 in the environment to match).
-if [ "$1" = nula ]; then
-    export NULA=1
-    CA="-D NULA"
+# `sh build.sh nula`: the VideoNULA build (MODE 2, sixteen flat colours); `sh build.sh
+# cpc`: the CPC-palette build (MODE 2, 27 colours as 1 x 2 dithers) (proto/nula.py).  Into
+# build/ likewise as build/lander.ssd, with build/variant saying which (the tests read it
+# and need NULA=1 or CPC=1 in the environment to match).
+if [ "$1" = nula ] || [ "$1" = cpc ]; then
+    if [ "$1" = nula ]; then export NULA=1 CPC=0; CA="-D MODE2 -D NULA"
+    else export NULA=0 CPC=1; CA="-D MODE2 -D CPC"; fi
     BOOTMODE='MODE2:VDU23,1,0;0;0;0;'
     for c in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do BOOTMODE="${BOOTMODE}19,$c,0;0;"; done
-    echo nula > $B/variant
+    echo $1 > $B/variant
 else
-    export NULA=0
+    export NULA=0 CPC=0
     CA=
     BOOTMODE='MODE1:VDU23,1,0;0;0;0;19,1,0;0;19,2,0;0;19,3,0;0;'
     echo mode1 > $B/variant

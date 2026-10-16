@@ -58,6 +58,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import land as L      # noqa: E402
 import frame as F     # noqa: E402
 import landgen as G   # noqa: E402
+import landgen as LG  # noqa: E402
 import shipgen as SG  # noqa: E402
 import points as P    # noqa: E402
 
@@ -68,6 +69,9 @@ CAME = 0x07D6                                    # LAND's: the camera raise
 B6_SHIP = 0x8003
 DBG = bool(os.environ.get('SOAKDBG'))
 PIXM = [0x88, 0x44, 0x22, 0x11]                  # a MODE 1 byte's pixel p
+if LG.NU.enabled():                              # the NULA build: MODE 2's (even
+    PIXM = [LG.NU.mask(m) for m in PIXM]         # pixels show, proto/nula.py)
+LG.NU.check_build(B)
 DB = [G.dither_bytes(e) for e in range(35)]      # each dither: even, odd line bytes
 
 

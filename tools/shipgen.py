@@ -402,6 +402,8 @@ def write(out):
     tab('SPANS', data)
     L.append('        .segment "DTAB"')
     LM = [0, 0x88, 0xCC, 0xEE]
+    if LG.NU.enabled():            # the NULA build: MODE 2's masks (proto/nula.py)
+        LM = [LG.NU.mask(m) for m in LM]
     tab('KTN', [LM[i & 3] for i in range(42)])
     tab('BYN', [(i >> 2) * 8 for i in range(42)])
     L.append('        .code')

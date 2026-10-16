@@ -35,6 +35,22 @@ anywhere else, or the pad too fast or too tilted, and the ship is destroyed and,
 seconds later, back on the pad.  The engines cut out once the landscape has sunk off
 the bottom of the screen; the ship then coasts up and falls back.
 
+## The VideoNULA version
+
+`lander-nula.ssd` is the same game in MODE 2 for a BBC Micro or Master fitted with a
+VideoNULA: sixteen flat
+12-bit colours in place of MODE 1's dithers (black, three seas, the pad's grey, seven
+lands and four for the ship; each the average of the dither it replaces).  Without a
+NULA it runs with MODE 2's standard colours.  The renderer is unchanged: it still
+works in MODE 1's pixels, 256 across, and each MODE 2 pixel shows the even one of the
+two it covers, which only its masks and colour bytes have to know about.  The
+palette, the colours' assignments and the 3 x 7 letters are in `proto/nula.py`.
+
+```sh
+sh build.sh nula               # build/lander.ssd, the NULA version
+NULA=1 sh test/run.sh          # its tests (the same reference, MODE 2's bytes)
+```
+
 ## Building and testing
 
 You need [cc65](https://cc65.github.io) (`ca65`, `ld65`) and Python 3 with `numpy`.
@@ -46,8 +62,8 @@ sh build.sh          # build/lander.ssd
 sh test/run.sh       # the test suite (a few minutes)
 ```
 
-The build is deterministic: the disc image it produces is byte for byte the one
-checked in.
+The build is deterministic: the disc images it produces are byte for byte the ones
+checked in (`test/identical.sh` checks both).
 
 The tests run the game's own 6502 code in py65; the first two compare its output byte
 for byte with the Python reference model:
@@ -74,8 +90,9 @@ for byte with the Python reference model:
 | `tools/landgen.py` | the renderer's tables for banks 4, 5 and 7 |
 | `tools/shipgen.py` | the ship: pre-rotated, pre-rasterised, compressed orientations |
 | `tools/gamegen.py` | the game's tables: thrust, the ship's screen line, the map, the crash's sound |
+| `proto/nula.py` | the NULA version's palette, colours, masks and letters |
 | `tools/mergebank.py`, `tools/mkdfs.py` | code segments into the bank images; the DFS disc |
-| `build.sh`, `lander.ssd` | the build, and the disc image it makes |
+| `build.sh`, `lander.ssd`, `lander-nula.ssd` | the build, and the disc images it makes |
 | `proto/` | the Python reference model the 6502 matches pixel for pixel |
 | `test/` | the test suite (`test/run.sh` runs it) |
 | `ref/lander/` | what was taken from Lander: the ship blueprint, the flight model, notes |

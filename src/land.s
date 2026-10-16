@@ -37,6 +37,13 @@
 ; second, so a byte column is addressed by its half (scrh: $30, $31, $58, $59)
 ; and coff = (8 * column) & 255.
 ;
+; The NULA build (build.sh nula: -D NULA; proto/nula.py) is MODE 2 with the
+; VideoNULA's sixteen colours.  Everything here still works in MODE 1's
+; pixels, 256 across and four a byte; a MODE 2 byte is two pixels, each
+; showing the even one of the pair it covers, so only the masks (PM) and the
+; colour bytes (bank 5's, landgen's) differ, with the letters (nfont, gbyte)
+; and the palette (palette).  game.s's dots and map follow (.ifdef NULA).
+;
 ; Projection (project).  The camera is at tile (cxt, czt) plus sixteenths
 ; (cxs, czs), CAMH height units above the ground under the ship (hgnd) and
 ; CAME more when the game raises it.  The block drawn is NX = 11 columns (map
@@ -155,6 +162,16 @@
 ; ============================================================================
         .setcpu "6502"
         .include "tables.inc"
+; PM m: MODE 1 pixel mask m as drawn.  The NULA build (-D NULA: MODE 2, a byte
+; two pixels, each showing the even one of the two of LAND's it covers) makes
+; it the left pixel's bits ($AA) if m has pixel 0, the right's ($55) if pixel 2
+; (proto/nula.py's mask); else it is m.
+.ifdef NULA
+        .include "nula.inc"
+.define PM(m) ((((m) >> 3) & 1) * $AA | (((m) >> 1) & 1) * $55)
+.else
+.define PM(m) (m)
+.endif
 
 OSWRCH  = $FFEE
 OSWORD  = $FFF1
@@ -2165,14 +2182,14 @@ o_zt:   bcs oz_dt
 oz3a:   ldx ROWA+3,y
         stx mx
 oz1:    ldx ROWA+1,y
-        lda #$88                   ; pixel 0
+        lda #PM($88)               ; pixel 0
         cpx mn
         bne oz_mu
 oz2:    ldx ROWA+2,y
-        lda #$CC                   ; pixels 0, 1
+        lda #PM($CC)               ; pixels 0, 1
         cpx mn
         bne oz_mu
-        lda #$EE                   ; pixels 0, 1, 2
+        lda #PM($EE)               ; pixels 0, 1, 2
 oz_mu:  sta msk
         bit c_v1                   ; V set: the top not level
         bvs o_ft                   ; (always)
@@ -2528,10 +2545,10 @@ lahsh:  .byte >(LAHSB0), >(LAHSB1), >(LAHSB2), >(LAHSB3) ; LAHSBt's page
 enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3) ; run's ENTBt page
 ; MASKB,n: the pixels whose bit is set in n (pixel i, 0 leftmost, is $88 >> i);
 ; MASKN,n the rest (nearpost's)
-MASKB:  .byte $00, $88, $44, $CC, $22, $AA, $66, $EE
-        .byte $11, $99, $55, $DD, $33, $BB, $77, $FF
-MASKN:  .byte $FF, $77, $BB, $33, $DD, $55, $99, $11
-        .byte $EE, $66, $AA, $22, $CC, $44, $88, $00
+MASKB:  .byte PM($00), PM($88), PM($44), PM($CC), PM($22), PM($AA), PM($66), PM($EE)
+        .byte PM($11), PM($99), PM($55), PM($DD), PM($33), PM($BB), PM($77), PM($FF)
+MASKN:  .byte PM($FF), PM($77), PM($BB), PM($33), PM($DD), PM($55), PM($99), PM($11)
+        .byte PM($EE), PM($66), PM($AA), PM($22), PM($CC), PM($44), PM($88), PM($00)
 
 ; fsplit: a column rung ri splits, its top level: lines mx .. flr1-1 with the
 ; boxes split at bpos, the number of the column's pixels left of the rung at
@@ -2744,15 +2761,15 @@ fs_dif: stx lastri                 ; Y: the two even bytes' difference
         eor BE+4                   ; BE = box X's (bpos 0)
         sta BE
         tya
-        and #$88                   ; pixel 0 from box X-1
+        and #PM($88)               ; pixel 0 from box X-1
         eor BE
         sta BE+1
         tya
-        and #$CC                   ; pixels 0, 1
+        and #PM($CC)               ; pixels 0, 1
         eor BE
         sta BE+2
         tya
-        and #$EE                   ; pixels 0, 1, 2
+        and #PM($EE)               ; pixels 0, 1, 2
         eor BE
         sta BE+3
 fs_co:  lda CO-1,x                 ; the odd bytes likewise
@@ -2762,15 +2779,15 @@ fs_co:  lda CO-1,x                 ; the odd bytes likewise
         eor BO+4
         beq fs_oe
         tay
-        and #$88
+        and #PM($88)
         eor BO
         sta BO+1
         tya
-        and #$CC
+        and #PM($CC)
         eor BO
         sta BO+2
         tya
-        and #$EE
+        and #PM($EE)
         eor BO
         sta BO+3
 fs_ln:  lda BX,x
@@ -2866,14 +2883,14 @@ oz_dn:    sta mx
 oz3b:   ldx ROWA+3,y               ; (pages: cols')
         stx mn
 oz2b:   ldx ROWA+2,y
-        lda #$11                   ; pixel 3
+        lda #PM($11)               ; pixel 3
         cpx mn
         bne oz_m
 oz1b:   ldx ROWA+1,y
-        lda #$33                   ; pixels 2, 3
+        lda #PM($33)               ; pixels 2, 3
         cpx mn
         bne oz_m
-        lda #$77                   ; pixels 1, 2, 3
+        lda #PM($77)               ; pixels 1, 2, 3
 oz_m:     sta msk
         bit c_v1                   ; V set: the top not level
         jmp o_ft
@@ -3233,7 +3250,7 @@ bytes2: lda me
         sta vo
         rts
 
-LM:     .byte $00, $88, $CC, $EE, $FF ; LM,n: the n leftmost pixels
+LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF) ; LM,n: the n leftmost pixels
 
 ; run: lines X .. Y-1 (X < Y) of the column, ve on even lines and vo on odd,
 ; through the STAB for the screen and half (init's: for each line STA line,Y,
@@ -3678,12 +3695,16 @@ start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
         ldx ptr+1
         cpx #$58
         bne :-
+.ifdef NULA
+        jsr palette
+.else
         ldx #0
 :       lda vdu_init,x
         jsr OSWRCH
         inx
         cpx #vdu_end-vdu_init
         bne :-
+.endif
         jmp go
 
 cmd_load: .byte "LOAD TABLES 3000", 13
@@ -3722,6 +3743,45 @@ ldbank: pha
         bne :-
         rts
 
+; palette (NULA build): VideoNULA reset, its palette mode 1 (logical colours 8-15 their own, not
+; flashing), its 16 colours (NULAPAL, nula.inc: (colour << 4 | red), (green <<
+; 4 | blue)); then the ULA's control byte rewritten from the MOS's copy and
+; its palette made the identity, which on a machine without NULA undo what
+; the writes to its control and palette mirrors ($FE22, $FE23) did, leaving
+; MODE 2's own colours.  Clobbers A, X, Y, tmp.  Caller: start.
+.ifdef NULA
+palette:
+        sei
+        lda #$40                   ; NULA register 4: reset
+        sta $FE22
+        lda #$11                   ; register 1, 1: palette mode
+        sta $FE22
+        ldx #0
+:       lda nulapal,x
+        sta $FE23
+        inx
+        cpx #32
+        bne :-
+        lda $0248                  ; the ULA's control (the MOS's copy)
+        sta $FE20
+        ldx #15                    ; logical X to physical X: (X << 4) | (X
+:       txa                        ; eor 7)
+        asl a
+        asl a
+        asl a
+        asl a
+        sta tmp
+        txa
+        eor #7
+        ora tmp
+        sta $FE21
+        dex
+        bpl :-
+        cli
+        rts
+nulapal: NULAPAL
+.endif
+
 vdu_init:                          ; VDU 19,l,p,0,0,0: logical 1 cyan (6), 2
                                    ; magenta (5), 3 yellow (3)
         .byte 19, 1, 6, 0, 0, 0
@@ -3749,10 +3809,14 @@ glyphs: ldx #0
 @c:     stx tcol
         lda gchars,x
         sta oswblk
+.ifdef NULA
+        jsr nfont                  ; (NULA: the build's own letters)
+.else
         lda #10                    ; OSWORD 10: read the character's definition
         ldx #<oswblk
         ldy #>oswblk
         jsr OSWORD
+.endif
         lda tcol
         asl a
         asl a
@@ -3760,6 +3824,18 @@ glyphs: ldx #0
         asl a
         tax                        ; X = 16 * the index
         ldy #0
+.ifdef NULA
+@l:     lda oswblk+1,y             ; row Y: the left 4 pixels, then the right 4,
+        jsr gbyte                  ; as MODE 2 bytes (gbyte)
+        sta GLY,x
+        lda oswblk+1,y
+        asl a
+        asl a
+        asl a
+        asl a
+        jsr gbyte
+        sta GLY+8,x
+.else
 @l:     lda oswblk+1,y             ; row Y: the high nibble (the left 4 pixels)
         and #$F0                   ; in both halves of the byte: colour 3 where
                                    ; the pixel is set
@@ -3779,6 +3855,7 @@ glyphs: ldx #0
         asl a
         ora tmp
         sta GLY+8,x
+.endif
         inx
         iny
         cpy #8
@@ -3790,6 +3867,48 @@ glyphs: ldx #0
         rts
 gchars: .byte "0123456789. FPS"    ; (G_DOT 10, G_SP 11, G_F 12: readout's)
 gchars_end:
+.ifdef NULA
+; nfont: character oswblk's 8 rows into oswblk+1..8, as OSWORD 10 would give
+; them, from the build's letters (nula.inc's NFONT, by NFONTCH; proto/nula.py
+; FONT).  Clobbers A, X, Y.  Called by glyphs and glyphs5.
+nfont:  ldx #0
+:       lda nfch,x
+        cmp oswblk
+        beq :+
+        inx
+        bne :-
+:       txa
+        asl a
+        asl a
+        asl a
+        tax
+        ldy #0
+:       lda nfdat,x
+        sta oswblk+1,y
+        inx
+        iny
+        cpy #8
+        bne :-
+        rts
+nfch:   NFONTCH
+nfdat:  NFONT
+; gbyte: A's top 4 pixels (bits 7..4) as a MODE 2 byte in yellow (YELB): the
+; left pixel lit if either of the first two is, the right if either of the
+; others.  Clobbers tmp; X, Y kept.  Called by glyphs and glyphs5.
+gbyte:  sta tmp
+        lda #0
+        bit tmp
+        bmi :+
+        bvc :++
+:       lda #YELB & $AA
+:       asl tmp
+        asl tmp
+        bit tmp
+        bmi :+
+        bvc :++
+:       ora #YELB & $55
+:       rts
+.endif
 ; glyphs5: the same for the game's letters, lchars, into GLY5 ($BE00 in bank 5:
 ; paged in and write selected by the caller).  Caller: start.
 glyphs5:
@@ -3797,10 +3916,14 @@ glyphs5:
 @c:     stx tcol
         lda lchars,x
         sta oswblk
+.ifdef NULA
+        jsr nfont
+.else
         lda #10
         ldx #<oswblk
         ldy #>oswblk
         jsr OSWORD
+.endif
         lda tcol
         asl a
         asl a
@@ -3808,6 +3931,18 @@ glyphs5:
         asl a
         tax
         ldy #0
+.ifdef NULA
+@l:     lda oswblk+1,y
+        jsr gbyte
+        sta GLY5,x
+        lda oswblk+1,y
+        asl a
+        asl a
+        asl a
+        asl a
+        jsr gbyte
+        sta GLY5+8,x
+.else
 @l:     lda oswblk+1,y
         and #$F0
         sta tmp
@@ -3826,6 +3961,7 @@ glyphs5:
         asl a
         ora tmp
         sta GLY5+8,x
+.endif
         inx
         iny
         cpy #8
@@ -4685,7 +4821,7 @@ slow2:  ldx mn
         cpx flr1
         bcc @l
         rts
-PIXM:   .byte $88, $44, $22, $11   ; pixel p's two bits in a MODE 1 byte
+PIXM:   .byte PM($88), PM($44), PM($22), PM($11) ; pixel p's two bits in a MODE 1 byte
 
 ; ---------------------------------------------------------------- bank 5
         .segment "B5CODE"

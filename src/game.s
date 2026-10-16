@@ -1627,12 +1627,22 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         ldy #0
         and (g0),y
         sta gt5
+.ifdef NULA
+        lda #YELB                  ; (NULA: the colours' bytes in the pixel)
+        ldy plife,x
+        cpy #6
+        bcs :+
+        lda #MAGB
+:       and gt4
+.else
         lda gt4
         ldy plife,x
         cpy #6
         bcs :+
         and #$F0
-:       ora gt5
+:
+.endif
+        ora gt5
         ldy #0
         sta (g0),y
         lda gt2                    ; the column (x >> 2): TOPS no lower than y,
@@ -1671,7 +1681,11 @@ marker: ldx back
         asl a                      ; 1 if its fraction is 1/2 or more (C)
         lda sx+2
         adc #MAPX-1
+.ifdef NULA
+        and #62                    ; (NULA: both of a MODE 2 pixel's two)
+.else
         and #63
+.endif
         sta gt1
 @h:     lda gt0
         cmp mkl,x
@@ -1744,7 +1758,11 @@ mpix:   lda mdl
         sta gt3                    ; (the pixel's bits)
         bit mdc
         bpl :+
+.ifdef NULA
+        and #MAGB                  ; magenta
+.else
         and #$F0                   ; magenta
+.endif
         bne @w
 :       lda gt2                    ; the map's: MAPI + 16 line + byte, masked
         lsr a
@@ -1823,9 +1841,14 @@ status: ldx back
         cmp #(FBC+20)*8+FBL
         bcc @b
 @c:     rts
+.ifdef NULA
+BARB:   .byte 0, YELB & $AA, YELB & $AA, YELB, YELB ; (NULA: the even pixels
+PIXG:   .byte $AA, $AA, $55, $55   ; decide; a dot's pixel the MODE 2 one it is in)
+.else
 BARB:   .byte $00, $88, $CC, $EE, $FF   ; 0..4 pixels lit from the left, yellow
 PIXG:   .byte $88, $44, $22, $11   ; pixel 0..3's two bits in a byte (LAND's
                                    ; PIXM is in bank 4, unreadable from here)
+.endif
 
 ; ---------------------------------------------------------------- state
 gkb:    .byte 0                    ; the keys down (keys' bits)

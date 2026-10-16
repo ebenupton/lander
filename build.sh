@@ -36,9 +36,24 @@ set -e
 cd "$(dirname "$0")"
 B=build
 mkdir -p $B
+# `sh build.sh nula`: the VideoNULA build (MODE 2, sixteen flat colours: proto/nula.py),
+# into build/ likewise as build/lander.ssd, with build/variant saying which (the tests
+# read it and need NULA=1 in the environment to match).
+if [ "$1" = nula ]; then
+    export NULA=1
+    CA="-D NULA"
+    BOOTMODE='MODE2:VDU23,1,0;0;0;0;'
+    for c in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do BOOTMODE="${BOOTMODE}19,$c,0;0;"; done
+    echo nula > $B/variant
+else
+    export NULA=0
+    CA=
+    BOOTMODE='MODE1:VDU23,1,0;0;0;0;19,1,0;0;19,2,0;0;19,3,0;0;'
+    echo mode1 > $B/variant
+fi
 python3 tools/landgen.py $B                                                     # TABLES, TABLES2, TABLES7, tables.inc
 python3 tools/gamegen.py $B                                                     # gametab.inc
-ca65 -g --cpu 6502 -I src -I $B -o $B/land.o src/land.s -l $B/land.lst          # LAND, LANDS, the bank segments
+ca65 -g --cpu 6502 $CA -I src -I $B -o $B/land.o src/land.s -l $B/land.lst          # LAND, LANDS, the bank segments
 ld65 -C src/land.cfg -o $B/LAND $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/land.dbg
 python3 tools/mergebank.py $B $B/map.txt \
     TABLES:B4R,B4L,B4S2,B4S,B4C,B4V1,B4V2,B4V3,B4Z \
@@ -57,7 +72,7 @@ PY
 python3 tools/shipgen.py $B                                                     # shipspan.inc
 ca65 -g --cpu 6502 -I src -I $B -o $B/shipb.o src/shipb.s -l $B/shipb.lst       # SHIPB
 ld65 -C src/shipb.cfg -o $B/SHIPB $B/shipb.o -m $B/shipb_map.txt -Ln $B/shipb_labels.txt
-printf 'MODE1:VDU23,1,0;0;0;0;19,1,0;0;19,2,0;0;19,3,0;0;\r*LOAD LAND\r*RUN LANDS\r' > $B/BOOT   # (the loads unseen)
+printf "$BOOTMODE"'\r*LOAD LAND\r*RUN LANDS\r' > $B/BOOT   # (the loads unseen)
 python3 tools/mkdfs.py build $B/lander.ssd LAND \
     "!BOOT:$B/BOOT:0000:FFFF" "LAND:$B/LAND:1900:1900" "LANDS:$B/LANDS:7000:7000" \
     "TABLES:$B/TABLES:3000:3000" "TABLES2:$B/TABLES2:3000:3000" "SHIPB:$B/SHIPB:3000:3000" "TABLES7:$B/TABLES7:3000:3000"

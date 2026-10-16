@@ -100,6 +100,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'proto'))
 import land as L      # noqa: E402
 import frame as FR    # noqa: E402
 import swatch35 as SW  # noqa: E402
+import nula as NU     # noqa: E402
 
 BASE = 0x8000
 YSKY, YGND = FR.YSKY, FR.YGND
@@ -132,7 +133,9 @@ assert YSKY % 2 == 0 and YGND % 2 == 1 and R2OFF > 0 and NDI <= 176
 def dither_bytes(entry):
     """The MODE 1 bytes (even line, odd line) of swatch35 dither `entry`: pixel p (0..3)
     takes the cell's ink at (p & 1, line & 1); its colour's high bit is bit 7 - p of the
-    byte, its low bit 3 - p."""
+    byte, its low bit 3 - p.  The NULA build's: proto/nula.py's."""
+    if NU.enabled():
+        return NU.dither_bytes(entry)
     cl = SW.cell(*SW.ALL[entry])
     out = []
     for row in range(2):
@@ -294,6 +297,20 @@ def main():
                       TPO0=TPO[0], TPO1=TPO[1], TPO2=TPO[2], TPO3=TPO[3])
         for k, v in consts.items():
             f.write(f'{k:8s}= {v}\n')
+    if NU.enabled():                # nula.inc: the NULA build's palette and colour bytes
+        with open(os.path.join(out, 'nula.inc'), 'w') as f:
+            f.write('; tools/landgen.py: proto/nula.py\'s colours\n')
+            f.write(f'YELB    = ${NU.solid(NU.YELLOW):02X}\nMAGB    = ${NU.solid(NU.MAGENTA):02X}\n')
+            f.write('.macro NULAPAL\n')
+            for c, (r, g, b) in enumerate(NU.PAL):
+                f.write(f'        .byte ${c << 4 | r:02X}, ${g << 4 | b:02X}\n')
+            f.write('.endmacro\n')
+            chars = ''.join(NU.FONT)
+            f.write('.macro NFONTCH\n        .byte ' + ', '.join(f'${ord(c):02X}' for c in chars) + '\n.endmacro\n')
+            f.write('.macro NFONT\n')
+            for c in chars:
+                f.write('        .byte ' + ', '.join(f'${v:02X}' for v in NU.font_rows(c)) + f'  ; {c!r}\n')
+            f.write('.endmacro\n')
 
 
 if __name__ == '__main__':

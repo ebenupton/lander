@@ -41,6 +41,10 @@
 ; either way at most, one a frame while held); SPACE or SHIFT thrust (both
 ; full thrust; thrust goes the way the ship is tilted, so nose down flies
 ; forward); F toggles LAND's frame-rate readout.  Fuel burns while thrusting.
+; With a mouse at $FCAC..$FCAF (ginit's test: mdet) it steers instead, as
+; Lander's: its movement moves a pointer (gmx, gmy) whose polar form sets the
+; targets (attit), the left button full thrust, the middle hover (a quarter;
+; Lander's), the spawn puts the pointer back at its centre.
 ; Touching the ground over the pad (tiles 0..PADN-1 in x and z) slowly and
 ; within a pitch step of level lands: the ship sits still and refuels.
 ; Touching it anywhere else, or too fast or too tilted, crashes: CRASHT steps
@@ -96,6 +100,11 @@ bsg     = $9A                      ; and BOTS)
 SVIA_ORB = $FE40                   ; the system VIA: port B (bits 0-2 pick a
 SVIA_DDRA = $FE43                  ; latch bit, bit 3 sets it), port A's
 SVIA_ORA_NH = $FE4F                ; direction and port A without handshake
+MSXL    = $FCAC                    ; the mouse (where fitted): each read the
+MSXH    = $FCAD                    ; movement since the last, 14-bit, 4 a
+MSYL    = $FCAE                    ; count, y up; MSXH bits 6, 7 the left and
+MSYH    = $FCAF                    ; right buttons, MSYH bit 6 the middle, bit 7
+                                   ; the mouse present; read in this order
 
 ; Lander's constants are per main-loop step; here a step is a frame at 10 a
 ; second, taken as 1.25 Lander steps, and the velocities keep Lander's units
@@ -107,6 +116,7 @@ GRAV    = 240                      ; gravity a step: Lander's &30000 (of 2^24)
 THRS    = 3                        ; full thrust: THX, THZ, THY (127 a unit)
                                    ; << 3: 1016 at most (Lander's 1024); tadd
                                    ; then makes it 1.25 as much
+HOVS    = 1                        ; hover: << 1, a quarter of it (Lander's)
 LANDV   = 2048                     ; Lander's LANDING_SPEED, 1/8 tile a step:
                                    ; |gvx| + |gvy| + |gvz| must be below it
 UNDER   = 4                        ; the ship's centre above its underside, in
@@ -170,6 +180,25 @@ ginit:  lda #$30
         lda #$FF                   ; (noise control and attenuation as written:
         sta sctl                   ; $FF is the attenuation off)
         sta satt
+        lda MSXL                   ; the mouse: a read clears the counts, so a
+        lda MSXH                   ; second straight after reads no movement
+        lda MSYL                   ; and the present bit; anything else (an
+        lda MSYH                   ; empty bus reads back $FC) is no mouse
+        ldx #0
+        lda MSXL
+        bne :+
+        lda MSXH
+        and #$3F
+        bne :+
+        lda MSYL
+        bne :+
+        lda MSYH
+        cmp #$80
+        and #$3F
+        bne :+
+        bcc :+
+        inx
+:       stx mdet
         jsr spawn
         jmp gout
 SINI:   .byte $FF, $DF, $BF, $9F   ; noise, tone 2, 1, 0: attenuation 15 (off)
@@ -301,6 +330,10 @@ spawn:  lda #0
         sta sy+2
         lda #SPAWNK
         sta gk
+        .assert SPAWNK = 4, error, "the pointer's start is SPAWNK's direction"
+        lda #1                     ; the pointer a count off its centre towards
+        sta gmx                    ; SPAWNK, so the ship keeps it (Lander puts
+        sta gmy                    ; its pointer a unit off centre likewise)
         lda #SPAWNP
         sta gp
         lda #PADH                  ; the ground under it (hgnd's from then on)
@@ -456,7 +489,47 @@ keys:   lda #0
         lda #$0B                   ; auto-scan back on
         sta SVIA_ORB
         cli
-        lda gkb
+        lda mdet                   ; the mouse, if found at the start
+        beq @f
+        lda MSXL                   ; the movement into the pointer, x as it
+        sta gt0                    ; is, y reversed (Lander's y is towards the
+        lda MSXH                   ; player); the left button full thrust (16,
+        tax                        ; SPACE's bit), the middle hover (128); the
+        lda MSYL                   ; right (Lander's fire) nothing
+        sta gt2
+        lda MSYH
+        sta gt3
+        asl a                      ; (the present bit: attit or the keys)
+        lda #0
+        rol a
+        sta mous
+        txa
+        and #$40
+        beq :+
+        lda #16
+:       bit gt3
+        bvc :+
+        ora #128
+:       ora gkb
+        sta gkb
+        txa
+        jsr mdel
+        ldx #gmx-gmx
+        jsr madd
+        lda gt2
+        sta gt0
+        lda gt3
+        jsr mdel
+        lda #0                     ; (negated)
+        sec
+        sbc gt0
+        sta gt0
+        lda #0
+        sbc gt1
+        sta gt1
+        ldx #gmy-gmx
+        jsr madd
+@f:     lda gkb
         and #64
         cmp fkey
         beq :+
@@ -467,6 +540,47 @@ keys:   lda #0
         eor #1
         sta fpson
 :       rts
+
+; mdel: gt1:gt0 = the movement whose bits 8-13 are A's bits 0-5 (sign
+; extended) and bits 0-7 gt0, over 4: in counts.  Clobbers A, Y.  Called by
+; keys.
+mdel:   and #$3F
+        cmp #$20
+        bcc :+
+        ora #$C0
+:       ldy #2
+:       cmp #$80
+        ror a
+        ror gt0
+        dey
+        bne :-
+        sta gt1
+        rts
+; madd: the pointer's byte at gmx + X += gt1:gt0, held within -128..127
+; (Lander's pointer box, 1024 units).  Clobbers A, Y, gt0.  Called by keys.
+madd:   ldy #0
+        lda gmx,x
+        bpl :+
+        dey
+:       clc
+        adc gt0
+        sta gt0
+        tya
+        adc gt1
+        tay                        ; Y: the sum's high byte; in range if it is
+        lda gt0                    ; the low byte's sign
+        asl a
+        tya
+        adc #0
+        beq @ok
+        lda #$7F                   ; out: the nearer end
+        cpy #$80
+        bcc @st
+        lda #$80
+        bne @st
+@ok:    lda gt0
+@st:    sta gmx,x
+        rts
 
 ; ---------------------------------------------------------------- sound
 ; snd: the noise channel of the SN76489 for this frame, written only where it
@@ -539,7 +653,11 @@ psg:    sei
 ; if over the pad, within a pitch of level and slower than LANDV, else a
 ; crash (burst, GSHV 0, ctim CRASHT).  Finally parts.  Reads gkb, fuel, sy,
 ; CAME, HGV; writes gk, gp, ctim, thr, landed, gv*, s*, fuel, GSHV.  Clobbers A, X, Y, g0, g1, gt0..gt5, tt0, tt1.  Called by gstep.
-step:   lda gkb
+step:   lda mous                   ; the mouse: Lander's attitude from it
+        beq :+
+        jsr attit
+        jmp @att
+:       lda gkb
         lsr a
         bcc :+
         lda gk
@@ -567,22 +685,22 @@ step:   lda gkb
         lda gp
         beq :+
         dec gp
-:       lda ctim                   ; crashed: the dots only, then the pad
+:
+@att:   lda ctim                   ; crashed: the dots only, then the pad
         beq @fly
         dec ctim
         bne :+
         jsr spawn
 :       jmp parts
-@fly:
-        lda gkb                    ; Y = 1 if SPACE or SHIFT (both full thrust)
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        and #3
-        beq :+
-        lda #1
-:       tay
+@fly:   ldy #1                     ; Y = 1 if SPACE, SHIFT or the left button
+        lda gkb                    ; (full thrust), else 2 for the middle
+        and #$30                   ; (hover), else 0
+        bne :+
+        iny
+        lda gkb
+        bmi :+
+        ldy #0
+:
         lda fuel                   ; none without fuel
         ora fuel+1
         beq @off
@@ -639,12 +757,16 @@ step:   lda gkb
         sta gvx+1,x
         rts
 @th:
-        lda thr                    ; thrust: gt5 the shift (THRS), gt4 the fuel
-        beq @nt                    ; a step (5)
-        lda #THRS
-        sta gt5
-        lda #5
-        sta gt4
+        lda thr                    ; thrust: gt5 the shift, gt4 the fuel a step:
+        beq @nt                    ; full THRS and 5, hover HOVS and 3 (Lander's
+        ldx #THRS                  ; 4 and 2, times 1.25)
+        ldy #5
+        lsr a
+        bcs :+
+        ldx #HOVS
+        ldy #3
+:       stx gt5
+        sty gt4
         lda fuel                   ; fuel -= gt4, floor 0
         sec
         sbc gt4
@@ -667,7 +789,14 @@ step:   lda gkb
         lda THY,y
         ldx #gvy-gvx
         jsr tadd
-        jsr emit
+        lda thr                    ; a dot a step at full thrust, every fourth
+        lsr a                      ; hovering (Lander's 8 and 2)
+        bcs :+
+        inc hcnt
+        lda hcnt
+        and #3
+        bne @nt
+:       jsr emit
 @nt:    lda landed                 ; landed: still, refuelling REFUEL a step
         beq @mv                    ; up to FUELMX
         lda #0
@@ -764,6 +893,162 @@ step:   lda gkb
         jsr burst
         jmp parts
 @up:    jmp parts                  ; in the air: no ceiling
+
+; attit: the attitude from the mouse, as Lander's: the pointer (gmx, gmy)
+; in polar form, its angle the target direction (atan2(gmy, gmx) in 32nds:
+; right 0, towards the player 8, so the ship faces the way the mouse went)
+; and its distance r the target pitch, PFLAT + Lander's 11.25 degrees
+; sqrt(r*r/64 rounded down) in 10-degree pitches, 6 at most (r from 39.2
+; counts); each moves halfway to its target a step, at least a pitch or a
+; direction, the direction the short way round and at most 3 (Lander's
+; 67.5-degree cap halved).  At the centre the direction stays.  Reads gmx,
+; gmy; writes gk, gp.  Clobbers A, X, Y, gt0..gt5.  Called by step.
+attit:  lda gmx                    ; gt0 = |gmx|, gt1 = |gmy| (0..128)
+        bpl :+
+        eor #$FF
+        clc
+        adc #1
+:       sta gt0
+        lda gmy
+        bpl :+
+        eor #$FF
+        clc
+        adc #1
+:       sta gt1
+        ldx #6                     ; the pitch: 6 if either is 40 or more,
+        lda gt0                    ; else the thresholds R2 that r*r reaches
+        cmp #40
+        bcs @pt
+        lda gt1
+        cmp #40
+        bcs @pt
+        ldx gt0
+        ldy gt1
+        lda SQL,x
+        clc
+        adc SQL,y
+        sta gt2
+        lda SQH,x
+        adc SQH,y
+        sta gt3
+        ldx #0
+:       lda gt2
+        cmp R2L,x
+        lda gt3
+        sbc R2H,x
+        bcc @pt
+        inx
+        cpx #6
+        bne :-
+@pt:    txa
+        clc
+        adc #PFLAT
+        sec
+        sbc gp
+        jsr half
+        clc
+        adc gp
+        sta gp
+        lda gt0                    ; the direction: none at the centre
+        ora gt1
+        beq @r
+        lda gt0                    ; within the octant: atan(small / large)
+        cmp gt1
+        bcc :+
+        sta gt4
+        lda gt1
+        jsr octj
+        jmp @q
+:       lda gt1
+        sta gt4
+        lda gt0
+        jsr octj
+        eor #$FF                   ; (8 - that: nearer y)
+        sec
+        adc #8
+@q:     ldx gmx                    ; folded by the quadrant: gmx < 0, 16 - a;
+        bpl :+                     ; gmy < 0, - a
+        eor #$FF
+        sec
+        adc #16
+:       ldx gmy
+        bpl :+
+        eor #$FF
+        clc
+        adc #1
+:       sec                        ; d = target - gk, -16..15, held to -6..6
+        sbc gk
+        and #31
+        cmp #16
+        bcc :+
+        ora #$E0
+        cmp #<-6
+        bcs @h
+        lda #<-6
+        bne @h
+:       cmp #7
+        bcc @h
+        lda #6
+@h:     jsr half
+        clc
+        adc gk
+        and #NDIR-1
+        sta gk
+@r:     rts
+; half: A (signed) halved away from 0, so never 0 unless A is.  Called by
+; attit.
+half:   tax
+        beq @z
+        bmi :+
+        clc
+        adc #1
+        lsr a
+@z:     rts
+:       eor #$FF                   ; -((|A| + 1) >> 1)
+        clc
+        adc #2
+        lsr a
+        eor #$FF
+        clc
+        adc #1
+        rts
+; octj: A = atan(A / gt4) in 32nds of a turn, 0..4 (A <= gt4, gt4 > 0): the
+; quotient's 8 bits (256 A / gt4, a restoring division) against ATT, the
+; tangents of the half-way angles.  Clobbers A, X, Y, gt5.  Called by attit.
+octj:   cmp gt4
+        beq @4
+        ldy #8
+:       asl a
+        cmp gt4
+        bcc :+
+        sbc gt4
+:       rol gt5
+        dey
+        bne :--
+        lda gt5
+        ldx #0
+:       cmp ATT,x
+        bcc :+
+        inx
+        cpx #4
+        bne :-
+:       txa
+        rts
+@4:     lda #4
+        rts
+ATT:    .byte 26, 78, 137, 211     ; 256 tan 5.625, 16.875, 28.125, 39.375
+                                   ; degrees, rounded up
+R2L:    .byte <64, <128, <320, <640, <1024, <1536   ; r*r at Lander's 11.25
+R2H:    .byte >64, >128, >320, >640, >1024, >1536   ; sqrt 1, 2, 5, 10, 16, 24
+                                   ; degrees: 10, 20 .. 60 rounded
+SQL:                               ; n * n, n 0..39
+        .repeat 40, I
+        .byte <(I*I)
+        .endrepeat
+SQH:
+        .repeat 40, I
+        .byte >(I*I)
+        .endrepeat
 
 ; landoff: C set if the last frame's projection has the land wholly below the
 ; screen: every point (np a row) of every row (nr, 16 bytes apart in PY) past
@@ -1546,7 +1831,12 @@ PIXG:   .byte $88, $44, $22, $11   ; pixel 0..3's two bits in a byte (LAND's
 gkb:    .byte 0                    ; the keys down (keys' bits)
 gk:     .byte 0                    ; the ship's direction (0..NDIR-1) and pitch
 gp:     .byte 0                    ; (0..NPITCH-1, PFLAT level)
-thr:    .byte 0                    ; this step's thrust: 0 none, 1 full
+thr:    .byte 0                    ; this step's thrust: 0 none, 1 full, 2 hover
+mdet:   .byte 0                    ; 1: a mouse found at the start
+mous:   .byte 0                    ; 1: the mouse present this frame (attit)
+gmx:    .byte 0                    ; the pointer, signed, 4 mouse units a count
+gmy:    .byte 0                    ; (x right, y towards the player: Lander's)
+hcnt:   .byte 0                    ; hover's steps (a dot every fourth)
 landed: .byte 0                    ; 1: sitting on the pad
 ctim:   .byte 0                    ; crashed: steps left (0: flying)
 sx:     .res 3                     ; position: x, z, y, 24-bit, 65536 a tile (y

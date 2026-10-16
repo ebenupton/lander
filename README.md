@@ -19,6 +19,15 @@ ROMSEL or a Watford or Solidisk write-select board) and a DFS.  In jsbeeb choose
 | SPACE or SHIFT | thrust |
 | F | frame-rate readout on / off |
 
+With a mouse at &FCAC-&FCAF (found at start; the movement since the last read, as
+some Master upgrades provide) the mouse flies the ship as in Lander, and the
+keys above no longer steer.  The pointer's offset from where it was when the
+ship last spawned sets the target heading (its direction) and how far the nose
+tips that way (its distance: level near the centre, the full 60 degrees about
+160 mouse units out).  The ship moves halfway to each target every step.  Left
+button: full thrust.  Middle: hover, a quarter of the thrust for a bit over half
+the fuel (Lander's buttons; the right, Lander's fire, does nothing).
+
 You start level on the pad, the grey square in the middle of the map.  Thrust pushes
 the ship along its roof, so tip the nose the way you want to go.  Land slowly and
 within one pitch step of level, anywhere on the pad, to refuel; touch the ground

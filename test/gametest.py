@@ -9,7 +9,12 @@ frame.  For debugging src/game.s; exit status 0 unless a frame fails to run.
             R X (yaw right), F K (nose down), B M (nose up), T SPACE (thrust),
             H SHIFT (full thrust too), P F (LAND's frame-rate readout on or
             off: fpson, which nothing here reads).  The cursor keys, which
-            `keys` also scans for the same bits, are not faked.
+            `keys` also scans for the same bits, are not faked.  A part
+            may end in @dx,dy[,buttons]: the mouse moved dx, dy units in
+            each of those frames (multiples of 4, y up) with the buttons
+            held (L left: full thrust, M middle: hover, R right: nothing).
+
+    --mouse  the mouse fitted ($FCAC..$FCAF; else they read 0, no mouse)
 
 Each line: the frame number, the keys, the frame's cycles (frame()'s: see
 there), then state(): x, z (tiles), y (height units, 16 a tile), v (gvx,
@@ -69,8 +74,12 @@ def labels(f='labels.txt'):
 class Game:
     """LAND and the game in py65, with the faked bank switching and keyboard."""
 
-    def __init__(self):
+    def __init__(self, mouse=False):
         self.lab = labels()
+        self.mouse = mouse                       # the mouse at $FCAC..$FCAF:
+        self.mdx = self.mdy = 0                  # movement since the last read
+        self.mbut = ''                           # and the buttons held
+        self.mlat = (0, 0)                       # (as latched by $FCAC's read)
         self.banks = {4: bytearray(open(os.path.join(B, 'TABLES'), 'rb').read()),
                       5: bytearray(open(os.path.join(B, 'TABLES2'), 'rb').read()),
                       6: bytearray(open(os.path.join(B, 'SHIPB'), 'rb').read().ljust(0x4000, b'\0')),
@@ -93,6 +102,18 @@ class Game:
 
         def ora_r(addr):
             return self.sel | (0x80 if self.sel in self.held else 0)
+        def mouse_r(addr):
+            if not self.mouse:
+                return 0
+            if addr == 0xFCAC:
+                self.mlat = (self.mdx & 0x3FFF, self.mdy & 0x3FFF)
+                self.mdx = self.mdy = 0
+            x, y = self.mlat
+            return {0xFCAC: x & 0xFF,
+                    0xFCAD: x >> 8 | ('L' in self.mbut) << 6 | ('R' in self.mbut) << 7,
+                    0xFCAE: y & 0xFF,
+                    0xFCAF: y >> 8 | ('M' in self.mbut) << 6 | 0x80}[addr]
+        mem.subscribe_to_read([0xFCAC, 0xFCAD, 0xFCAE, 0xFCAF], mouse_r)
         mem.subscribe_to_write([ROMSEL], romsel)
         mem.subscribe_to_write([SVIA_ORA_NH], ora_w)
         mem.subscribe_to_read([SVIA_ORA_NH], ora_r)
@@ -141,12 +162,15 @@ class Game:
             v = [self.mpu.memory[a + i] for i in range(n)]
         return v
 
-    def frame(self, keys, vs=4):
+    def frame(self, keys, vs=4, mdx=0, mdy=0, mbut=''):
         """A frame with the keys (a string of KEYS' letters) held, vcount
         advanced by vs; the cycles of G_STEP, project, strips, G_PRE,
         B6_SHIP and G_POST, the bank calls through call5 and call6 with
         their paging (not B6_KEYS, flip or the JSRs' own 6)."""
         self.held = {KEYS[k] for k in keys}
+        self.mdx += mdx
+        self.mdy += mdy
+        self.mbut = mbut
         m = self.mpu.memory
         m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255
         c = self.call5(G_STEP)
@@ -169,23 +193,33 @@ class Game:
         def s16(v):
             x = v[0] | v[1] << 8
             return x - 65536 if x & 0x8000 else x
+        def s8(v):
+            return v - 256 if v & 128 else v
         r = self.rd
         return (f"x {s24(r('sx', 3)):7.3f} z {s24(r('sz', 3)):7.3f} y {s24(r('sy', 3)) * 16:6.2f}u "
                 f"v {s16(r('gvx', 2)):6d} {s16(r('gvy', 2)):6d} {s16(r('gvz', 2)):6d} "
-                f"k {r('gk')[0]:2d} p {r('gp')[0]} "
+                f"k {r('gk')[0]:2d} p {r('gp')[0]:2d} ptr {s8(r('gmx')[0]):4d} {s8(r('gmy')[0]):4d} "
                 f"fuel {r('fuel', 2)[0] | r('fuel', 2)[1] << 8:5d} landed {r('landed')[0]} "
                 f"ctim {r('ctim')[0]:2d} "
                 f"hg {self.mpu.memory[HGV]} came {self.mpu.memory[CAME]} shy {self.mpu.memory[GSHY]}")
 
 
 def main():
-    script = sys.argv[1] if len(sys.argv) > 1 else '10:,20:T,30:'
-    g = Game()
+    args = [a for a in sys.argv[1:] if a != '--mouse']
+    script = args[0] if args else '10:,20:T,30:'
+    g = Game(mouse='--mouse' in sys.argv[1:])
     f = 0
-    for part in script.split(','):
+    for part in script.split(';' if ';' in script else ','):
         n, keys = part.split(':')
+        mdx = mdy = 0
+        mbut = ''
+        if '@' in keys:
+            keys, m = keys.split('@')
+            m = m.split(',')
+            mdx, mdy = int(m[0]), int(m[1])
+            mbut = m[2] if len(m) > 2 else ''
         for _ in range(int(n)):
-            c = g.frame(keys)
+            c = g.frame(keys, mdx=mdx, mdy=mdy, mbut=mbut)
             print(f'{f:4d} {keys:4s} {c:7d} {g.state()}')
             f += 1
 

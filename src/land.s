@@ -119,9 +119,12 @@
 ;   $0B30         CX: the columns' map x
 ;   $0B60, $0BA0  CURT, CURB: this frame's column records (64 each)
 ;   $0C00, $0C80  TOPS, BOTS: each screen's (64 a screen, screen 1's at +64)
-;   $0D00-$0DC1   ENTL, ENTH: each line's entry in its STAB (lines
-;                 YSKY..YGND+1: 97 each)
 ;   $0E00, $1000, $1200, $1400  STAB for t = 0..3 (437 bytes each)
+;   $1600-$16C1   ENTL, ENTH: each line's entry in its STAB (lines
+;                 YSKY..YGND+1: 97 each)
+; Page $0D is never touched: the MOS's NMI routine (live on a Master: its
+; 1770 disc controller's) and the extended vectors (a ROM's OSBYTE hook) are
+; there, and interrupts are still on while init builds the tables.
 ;   $16C2-$1722   LAH: each line's 2 * (y >> 3)
 ;   $1740-$17A3   EINL,y for y = YSKY-1..YGND+3 (EINL = $1701): run2's table
 ;                 offsets by line
@@ -223,8 +226,8 @@ STD     = $0B20
 EINL    = $1701                    ; run2's table offsets by line (init's;
                                    ; EINL,x and EINL-1,x in one page)
 GLY     = $1800                    ; the readout's characters: 16 bytes each
-ENTL    = $0D00-YSKY               ; each line's entry in its STAB: low byte,
-ENTH    = $0D61-YSKY               ; and the page within the table (lines
+ENTL    = $1600-YSKY               ; each line's entry in its STAB: low byte,
+ENTH    = $1661-YSKY               ; and the page within the table (lines
                                    ; YSKY..YGND+1)
 TOPS    = $0C00                    ; by screen (+64 for screen 1) and column:
 BOTS    = $0C80                    ; the land's highest and lowest line last
@@ -233,6 +236,7 @@ CURB    = $0BA0
 STAB    = $0E00
 LAH     = $16C2-YSKY               ; each line's 2 * (y >> 3) (lines
                                    ; YSKY..YGND+1)
+        .assert ENTL + YSKY >= STAB + 6*$100 + 437 && ENTH + YGND+2 <= LAH + YSKY, error, "ENTL, ENTH: between STAB t=3 and LAH (page $0D is the MOS's)"
         .assert YGND+2-YSKY <= 97, error, "LAH, ENTL: 97 lines each"
         .assert <EINL + YGND+2 < $100 && LAH + YGND+2 < EINL + YSKY-1, error, "EINL: in its page, past LAH"
 CX      = $0B30                    ; the columns' map x (project)
@@ -3647,7 +3651,8 @@ start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
         lda #119                   ; OSBYTE 119: close the EXEC file (!BOOT).
         jsr OSBYTE                 ; No filing system call follows, so its
                                    ; workspace from $0E00 (and the MOS's pages
-                                   ; $0400..$0DFF) is LAND's
+                                   ; $0400..$0CFF) is LAND's; page $0D stays
+                                   ; the MOS's
         jsr glyphs                 ; GLY (the readout's)
         PAGE 5                     ; GLY5 (the game's labels: in bank 5)
         jsr glyphs5

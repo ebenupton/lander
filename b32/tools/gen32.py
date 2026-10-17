@@ -85,9 +85,17 @@ def gametab(out):
     GG.main()
     path = os.path.join(out, 'gametab.inc')
     lines = open(path).read().split('\n')
-    i = lines.index('MAPI:')
-    j = next(k for k in range(i + 1, len(lines)) if not lines[k].startswith('        .byte'))
-    open(path, 'w').write('\n'.join(lines[:i] + lines[j:]))
+    for name in ('MAPI:', 'THX:', 'THZ:', 'SHYT:'):         # (TQ, RSHIP instead)
+        i = lines.index(name)
+        j = next(k for k in range(i + 1, len(lines)) if not lines[k].startswith('        .byte'))
+        lines = lines[:i] + lines[j:]
+    lines = [ln for ln in lines if not ln.startswith(('THXL:', 'THXH:', 'THZL:', 'THZH:'))]
+    thx, _, _ = GG.thrust()
+    pf = GG.SG.PFLAT
+    tq = [thx[32 * (pf + p) + k] for p in range(GG.NPITCH - pf) for k in range(9)]
+    lines.append('TQ:     .byte ' + ', '.join(f'${v & 255:02X}' for v in tq))
+    lines.append(f'RSHIP = {L.recip(L.ZSHIP << 8)}')
+    open(path, 'w').write('\n'.join(lines) + '\n')
 
 
 def main():

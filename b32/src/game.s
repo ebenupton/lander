@@ -191,8 +191,8 @@ gr_st:  sta gt0
         adc #CAMH                  ; ship, units
         sec
         sbc gt0
-gsy:    tax                        ; the ship's line: HORIZON + SHYT[d] (d R /
-        lda SHYT,x                 ; 16, R = 19.7 the land's pixels a tile at
+gsy:    jsr shyt                   ; the ship's line: HORIZON + (d R + 2048) >>
+                                   ; 12 (d R / 16, R = 19.7 the land's pixels a tile at
         cmp #YSKY+14-HORIZON       ; depth ZSHIP), held so 14 lines up, 16 down,
         bcs :+                     ; stay within YSKY..YGND (d is 79..96 in
         lda #YSKY+14-HORIZON       ; play: lines 81..102, so the holds never
@@ -208,6 +208,55 @@ gsy:    tax                        ; the ship's line: HORIZON + SHYT[d] (d R /
         sta GSHK
         lda gp
         sta GSHP
+        rts
+
+; shyt: A = min(255, (A RSHIP + 2048) >> 12), the ship's line less HORIZON
+; for the camera A units above it (tools/gamegen.py's SHYT; RSHIP the land's
+; r at depth ZSHIP).  Clobbers A, Y, gt1..gt4.
+shyt:   sta gt4                    ; A RSHIP, 8 x 16: the multiplier's bits
+        lda #0                     ; from the top, the sum shifted up
+        sta gt1
+        sta gt2
+        sta gt3
+        ldy #8
+@m:     asl gt1
+        rol gt2
+        rol gt3
+        asl gt4
+        bcc :+
+        lda gt1
+        clc
+        adc #<RSHIP
+        sta gt1
+        lda gt2
+        adc #>RSHIP
+        sta gt2
+        bcc :+
+        inc gt3
+:       dey
+        bne @m
+        lda gt2                    ; + 2048, bits 12..19
+        clc
+        adc #8
+        sta gt2
+        bcc :+
+        inc gt3
+:       lda gt3
+        cmp #16
+        bcs @x                     ; (past 255: 255)
+        asl a
+        asl a
+        asl a
+        asl a
+        sta gt1
+        lda gt2
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora gt1
+        rts
+@x:     lda #255
         rts
 
 ; units: su = sy >> 4, the ship's height in units as 8.8 (su+1 whole units,
@@ -459,10 +508,10 @@ step:   lda landed                 ; on the pad: the attitude held
         lda #THRS
         sta gt5
         jsr throw                  ; gvx += 1.25 (THX[gp][gk] << gt5), gvz from
-        lda (g0),y                 ; THZ, gvy from THY[gp]
+        lda tx                     ; THZ, gvy from THY[gp]
         ldx #gvx-gvx
         jsr tadd
-        lda (g1),y
+        lda tz
         ldx #gvz-gvx
         jsr tadd
         ldy gp
@@ -588,21 +637,67 @@ landoff:
         rts
 
 
-; throw: g0 = THX's row for pitch gp, g1 = THZ's (THXL/H, THZL/H: 32 bytes a
-; pitch, one a direction), Y = gk, so (g0),y and (g1),y are the thrust's x
-; and z, 127 a unit.  Out: g0, g1, Y.  Clobbers A; X kept.  Called by step
-; and emit.
-throw:  ldy gp
-        lda THXL,y
-        sta g0
-        lda THXH,y
-        sta g0+1
-        lda THZL,y
-        sta g1
-        lda THZH,y
-        sta g1+1
-        ldy gk
+; throw: tx, tz = the thrust for pitch gp and direction gk, x and z, 127 a
+; unit (tools/gamegen.py's THX and THZ: round(127 sin a cos t), -round(127
+; sin a sin t)), from TQ, a quarter of them: THX by pitches 0..PFLAT from
+; level and directions 0..8 (sin a is odd in the pitch from level, cos t even
+; in t and cos (180 - t) = -cos t, and the rounding keeps both); THZ for
+; direction k is -THX for k - 8.  X kept (in tx's call); clobbers A, Y, gt0,
+; gt1, thxs.  Called by step and emit.
+throw:  stx thxs
+        lda gk
+        jsr thc
+        sta tx
+        lda gk
+        sec
+        sbc #8
+        jsr thc
+        eor #$FF
+        clc
+        adc #1
+        sta tz
+        ldx thxs
         rts
+; thc: THX for pitch gp and direction A & 31.  Clobbers X, Y, gt0, gt1.
+thc:    and #31
+        cmp #17                    ; 17..31: 32 - k (cos even)
+        bcc @a
+        eor #$FF                   ; (C set: ~k + 32 + 1)
+        adc #32
+@a:     ldx #0                     ; X: the sign, bit 7
+        cmp #9                     ; 9..16: 16 - k, negated
+        bcc @b
+        eor #$FF                   ; (C set: ~k + 16 + 1)
+        adc #16
+        ldx #$80
+@b:     sta gt0                    ; j, 0..8
+        lda gp                     ; |gp - PFLAT|, negated below level
+        sec
+        sbc #PFLAT
+        bcs @c
+        eor #$FF                   ; (C clear: + 1)
+        adc #1
+        tay
+        txa
+        eor #$80
+        tax
+        tya
+@c:     sta gt1                    ; TQ + 9 |gp - PFLAT| + j
+        asl a
+        asl a
+        asl a
+        adc gt1                    ; (C clear: 8 |p| < 256)
+        adc gt0
+        tay
+        lda TQ,y
+        cpx #$80                   ; (negative: C set, so ~v + 0 + 1)
+        bcc @d
+        eor #$FF
+        adc #0
+@d:     rts
+thxs:    .byte 0                    ; throw's X
+tx:     .byte 0                    ; throw's thrust, x and z
+tz:     .byte 0
 
 ; tadd: v (X: gvx, gvy or gvz's offset) += 1.25 (A << gt5), as A << gt5 then
 ; A << (gt5 - 2); for gt5 below 2 the second term is A asr 1 (right for gt5
@@ -760,10 +855,10 @@ emit:   ldx pnext
         lda #PLIFE
         sta plife,x
         jsr throw
-        lda (g0),y
+        lda tx
         jsr exh
         sta gt0                    ; (-THX / 2)
-        lda (g1),y
+        lda tz
         jsr exh
         sta gt1                    ; (-THZ / 2)
         jsr rand                   ; x: + jitter, sign-extended into pvxh:pvx

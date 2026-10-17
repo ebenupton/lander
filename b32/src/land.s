@@ -452,7 +452,10 @@ loop:   jsr gstep
         jsr project
         jsr strips
         jsr gpre
-        jsr gpost
+        lda GSHV                   ; the ship, unless crashed
+        beq :+
+        jsr ship
+:       jsr gpost
         jsr flip
         jmp loop
 
@@ -3460,6 +3463,10 @@ TENH5:  .repeat TNB+1, n
         .include "proj32.s"
         .segment "GAME"
         .include "game.s"
+        .segment "SHIP"
+        .include "ship32.s"
+        .segment "DBUFS"
+DBUF:   .res 256                   ; the ship's lines (ship32.s), a page
 ; MAP32 + 32 z + x: corner (x, z)'s height (bits 0-3) and tile (x, z)'s colour
 ; index (bits 4-7: DCE, DCO), b32/tools/gen32.py's.
         .segment "MAPD"

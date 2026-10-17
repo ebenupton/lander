@@ -12,14 +12,16 @@
 ; $1900; BOOT is LANDS, at $7000; the other segments are code for the banks,
 ; which build.sh splices into the table images at their addresses.  landsyms.inc
 ; (the symbols shipb.s needs, L_ before each) is cut from labels.txt; then
-; tools/shipgen.py and shipb.s make SHIPB (bank 6), and tools/mkdfs.py writes
-; lander.ssd: !BOOT, LAND, LANDS, TABLES, TABLES2, SHIPB, TABLES7.
+; tools/shipgen.py and shipb.s make SHIPB (bank 6).  tools/mkdfs.py writes
+; lander.ssd: the chooser (!BOOT, GO), $.TABLES7 (the same in every version)
+; and each version's LAND, LANDS, TABLES, TABLES2 and SHIPB in its directory
+; (M: MODE 1, C: CPC, N: NULA).
 ;
-; Starting.  !BOOT selects MODE 1 with every colour black and the cursor off,
-; *LOADs LAND and *RUNs LANDS.  LANDS (segment BOOT, the end of this file) finds
-; four sideways RAM banks (find_ram), patches each bank switch's write select
-; for the board (wpatch), loads each image through $3000 into its bank, closes !BOOT
-; (the filing system is then idle: its workspace from $0E00 is LAND's), makes
+; Starting.  The chooser selects the version's mode with every colour black
+; and the cursor off and its directory, *LOADs LAND and *RUNs LANDS.  LANDS
+; (segment BOOT, the end of this file) finds four sideways RAM banks
+; (find_ram), patches each bank switch's write select for the board (wpatch),
+; loads each image through $3000 into its bank, closes GO (the filing system is then idle: its workspace from $0E00 is LAND's), makes
 ; the glyphs, narrows the screen, clears screen 0, sets the palette and jumps
 ; to `go`.  go runs init, hooks the vertical sync event, turns the VIAs' other
 ; interrupts off, runs G_INIT (bank 5: the game's start) and enters the main
@@ -3634,15 +3636,16 @@ s2_o:   lda (zp_),y                ; an odd line (a row's last line is odd: the
 s2_m:   jmp s2_n
 
 ; ---------------------------------------------------------------- LANDS
-; LANDS: the start-up, a separate file *RUN at $7000 by !BOOT (which has set
-; MODE 1, the palette all black and the cursor off, and *LOADed LAND at $1900).
+; LANDS: the start-up, a separate file *RUN at $7000 by GO (the chooser has
+; set the mode, the palette all black, the cursor off and the version's
+; directory, and GO has *LOADed LAND at $1900).
 ; It runs one time: the sideways banks are found (find_ram) and pg4..pg7's
 ; and setup's write selects patched for the board (wpatch); the four bank files are
 ; *LOADed at $3000 in turn and copied up (ldbank: TABLES7 to bank 7, SHIPB to
 ; 6, TABLES2 to 5, TABLES to 4, which is left paged in); the EXEC file is
 ; closed; the readout's and the game's glyphs are made (glyphs, glyphs5); the
 ; CRTC narrows the screen to 64 bytes by 20 rows; the shown screen is cleared
-; and the palette set; then LAND's `go`.  LANDS sits at $7000..$7408, inside
+; and the palette set; then LAND's `go`.  LANDS sits at $7000..$75FF, inside
 ; screen 1 ($5800..$7FFF), which init clears: nothing returns here.
         .segment "BOOT"
 start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
@@ -3667,7 +3670,7 @@ start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
         ldy #>cmd_load
         lda #BANK
         jsr ldbank
-        lda #119                   ; OSBYTE 119: close the EXEC file (!BOOT).
+        lda #119                   ; OSBYTE 119: close the EXEC file (GO).
         jsr OSBYTE                 ; No filing system call follows, so its
                                    ; workspace from $0E00 (and the MOS's pages
                                    ; $0400..$0CFF) is LAND's; page $0D stays
@@ -3711,7 +3714,7 @@ start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
 
 cmd_load: .byte "LOAD TABLES 3000", 13
 cmd_load3: .byte "LOAD SHIPB 3000", 13
-cmd_load7: .byte "LOAD TABLES7 3000", 13
+cmd_load7: .byte "LOAD $.TABLES7 3000", 13
 cmd_load2: .byte "LOAD TABLES2 3000", 13
 
 ; ldbank: the *LOAD command at Y:X (OSCLI: a file to $3000, 16K at most: LANDS
@@ -3745,7 +3748,7 @@ ldbank: pha
         bne :-
         rts
 
-; palette (MODE 2 builds).  CPC: VDU 20, the default palette (!BOOT left
+; palette (MODE 2 builds).  CPC: VDU 20, the default palette (the chooser left
 ; every colour black).  NULA: VideoNULA reset, its palette mode 1 (logical
 ; colours 8-15 their own, not flashing), its 16 colours (NULAPAL, mode2.inc:
 ; (colour << 4 | red), (green << 4 | blue)); then the ULA's control byte
@@ -5199,7 +5202,7 @@ wpatch: lda board
 @r:     rts
 
 ; no_ram: fewer than four banks: the message, then back to the MOS (RTS to the
-; *RUN).  !BOOT left the palette black and the cursor off, so the message
+; *RUN).  The chooser left the palette black and the cursor off, so the message
 ; starts with VDU 20 (the default palette) and VDU 23,1,1;0;0;0; (cursor on),
 ; followed by one byte over, a VDU 0, which does nothing.
 no_ram: ldx #0

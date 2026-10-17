@@ -1,10 +1,21 @@
 #!/bin/sh
-# LAND's build: build/lander.ssd, a DFS disc.  SHIFT+BREAK runs !BOOT (MODE 1, the
-# palette black and the cursor off, *LOAD LAND, *RUN LANDS); LANDS, LAND's start, loads
-# TABLES, TABLES2, SHIPB and TABLES7 into sideways RAM banks 4, 5, 6 and 7.
-# Needs ca65 and ld65 (cc65) and Python 3 with numpy.
+# LAND's build: build/lander.ssd, a DFS disc holding three versions: MODE 1 (directory
+# M), MODE 2 with the CPC palette (C) and MODE 2 with the VideoNULA's (N); see
+# proto/nula.py.  SHIFT+BREAK runs !BOOT, an EXEC file that types in and runs the chooser
+# (src/menu.bas): it tests for a VideoNULA, offers the versions (the NULA one only when
+# found), sets the chosen mode with the palette black and the cursor off, selects the
+# version's directory and EXECs GO (*LOAD LAND, *RUN LANDS); LANDS, LAND's start, loads
+# TABLES, TABLES2, SHIPB and $.TABLES7 (the same in every version) into sideways RAM
+# banks 4, 5, 6 and 7.  Needs ca65 and ld65 (cc65) and Python 3 with numpy and scipy.
 #
-# Steps (everything into build/):
+#   sh build.sh              the disc: each version built in turn (MODE 1 last, so it is
+#                            what build/ holds after), its files kept in build/disc/
+#   sh build.sh VERSION      one version (mode1, cpc or nula) into build/ and no disc: for
+#                            the tests, which need NULA=1 or CPC=1 in the environment to
+#                            match (build/variant says which was built)
+#   DP11_MOUSE=1 sh build.sh with the mouse (src/game.s; off without)
+#
+# Steps for a version (everything into build/):
 #   1. tools/landgen.py: the renderer's tables, TABLES (bank 4), TABLES2 (bank 5) and
 #      TABLES7 (bank 7), and tables.inc (their addresses and the constants) for land.s.
 #   2. tools/gamegen.py: gametab.inc, the game's tables (game.s, .included by land.s).
@@ -17,7 +28,7 @@
 #      the setTl..setBh tables), as L_name, from ld65's labels.txt.
 #   6. tools/shipgen.py: shipspan.inc, the ship's pre-rasterised spans; then ca65/ld65
 #      on src/shipb.s (src/shipb.cfg): SHIPB (bank 6).
-#   7. !BOOT, then tools/mkdfs.py: the disc.
+# then for the disc, !BOOT and GO, and tools/mkdfs.py.
 #
 # The bank code segments and their room (src/land.cfg places them; tools/landgen.py's
 # docstring has every table):
@@ -36,25 +47,20 @@ set -e
 cd "$(dirname "$0")"
 B=build
 mkdir -p $B
-# `sh build.sh nula`: the VideoNULA build (MODE 2, sixteen flat colours); `sh build.sh
-# cpc`: the CPC-palette build (MODE 2, 27 colours as checkerboard dithers) (proto/nula.py).  Into
-# build/ likewise as build/lander.ssd, with build/variant saying which (the tests read it
-# and need NULA=1 or CPC=1 in the environment to match).
-if [ "$1" = nula ] || [ "$1" = cpc ]; then
-    if [ "$1" = nula ]; then export NULA=1 CPC=0; CA="-D MODE2 -D NULA"
-    else export NULA=0 CPC=1; CA="-D MODE2 -D CPC"; fi
-    BOOTMODE='MODE2:VDU23,1,0;0;0;0;'
-    for c in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do BOOTMODE="${BOOTMODE}19,$c,0;0;"; done
-    echo $1 > $B/variant
-else
-    export NULA=0 CPC=0
-    CA=
-    BOOTMODE='MODE1:VDU23,1,0;0;0;0;19,1,0;0;19,2,0;0;19,3,0;0;'
-    echo mode1 > $B/variant
-fi
+MOUSE=
+[ "${DP11_MOUSE:-0}" != 0 ] && MOUSE="-D DP11_MOUSE"
+
+one() {                                                                         # the version $1 into build/
+case $1 in
+    nula) export NULA=1 CPC=0; CA="-D MODE2 -D NULA" ;;
+    cpc) export NULA=0 CPC=1; CA="-D MODE2 -D CPC" ;;
+    mode1) export NULA=0 CPC=0; CA= ;;
+    *) echo "build.sh: no version $1 (mode1, cpc, nula)" >&2; exit 1 ;;
+esac
+echo $1 > $B/variant
 python3 tools/landgen.py $B                                                     # TABLES, TABLES2, TABLES7, tables.inc
 python3 tools/gamegen.py $B                                                     # gametab.inc
-ca65 -g --cpu 6502 $CA -I src -I $B -o $B/land.o src/land.s -l $B/land.lst          # LAND, LANDS, the bank segments
+ca65 -g --cpu 6502 $CA $MOUSE -I src -I $B -o $B/land.o src/land.s -l $B/land.lst   # LAND, LANDS, the bank segments
 ld65 -C src/land.cfg -o $B/LAND $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/land.dbg
 python3 tools/mergebank.py $B $B/map.txt \
     TABLES:B4R,B4L,B4S2,B4S,B4C,B4V1,B4V2,B4V3,B4Z \
@@ -73,8 +79,27 @@ PY
 python3 tools/shipgen.py $B                                                     # shipspan.inc
 ca65 -g --cpu 6502 -I src -I $B -o $B/shipb.o src/shipb.s -l $B/shipb.lst       # SHIPB
 ld65 -C src/shipb.cfg -o $B/SHIPB $B/shipb.o -m $B/shipb_map.txt -Ln $B/shipb_labels.txt
-printf "$BOOTMODE"'\r*LOAD LAND\r*RUN LANDS\r' > $B/BOOT   # (the loads unseen)
-python3 tools/mkdfs.py build $B/lander.ssd LAND \
-    "!BOOT:$B/BOOT:0000:FFFF" "LAND:$B/LAND:1900:1900" "LANDS:$B/LANDS:7000:7000" \
-    "TABLES:$B/TABLES:3000:3000" "TABLES2:$B/TABLES2:3000:3000" "SHIPB:$B/SHIPB:3000:3000" "TABLES7:$B/TABLES7:3000:3000"
-echo "$B/lander.ssd: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, SHIPB $(wc -c < $B/SHIPB | tr -d ' ')"
+echo "$1: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, LANDS $(wc -c < $B/LANDS | tr -d ' '), SHIPB $(wc -c < $B/SHIPB | tr -d ' ')"
+}
+
+if [ -n "$1" ]; then
+    one $1
+    exit 0
+fi
+rm -rf $B/disc
+for v in cpc:C nula:N mode1:M; do
+    one ${v%:*}
+    mkdir -p $B/disc/${v#*:}
+    cp $B/LAND $B/LANDS $B/TABLES $B/TABLES2 $B/SHIPB $B/TABLES7 $B/disc/${v#*:}/
+done
+for d in C N; do cmp -s $B/disc/$d/TABLES7 $B/disc/M/TABLES7 || { echo "build.sh: TABLES7 differs in $d" >&2; exit 1; }; done
+{ printf 'VDU21\rNEW\r'; tr '\n' '\r' < src/menu.bas; printf 'RUN\r'; } > $B/BOOT      # the chooser typed in, unseen
+printf '*LOAD LAND\r*RUN LANDS\r' > $B/GO                                       # (the loads unseen: the palette black)
+F=
+for d in M C N; do
+    F="$F $d.LAND:$B/disc/$d/LAND:1900:1900 $d.LANDS:$B/disc/$d/LANDS:7000:7000 $d.TABLES:$B/disc/$d/TABLES:3000:3000"
+    F="$F $d.TABLES2:$B/disc/$d/TABLES2:3000:3000 $d.SHIPB:$B/disc/$d/SHIPB:3000:3000"
+done
+python3 tools/mkdfs.py build $B/lander.ssd LANDER \
+    "!BOOT:$B/BOOT:0000:FFFF" "GO:$B/GO:0000:FFFF" "TABLES7:$B/disc/M/TABLES7:3000:3000" $F
+echo "$B/lander.ssd: MODE 1 (M), CPC (C) and NULA (N) versions"

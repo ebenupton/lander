@@ -14,7 +14,9 @@ frame.  For debugging src/game.s; exit status 0 unless a frame fails to run.
             each of those frames (multiples of 4, y up) with the buttons
             held (L left: full thrust, M middle: hover, R right: nothing).
 
-    --mouse  the mouse fitted ($FCAC..$FCAF; else they read 0, no mouse)
+    --mouse  the mouse fitted ($FCAC..$FCAF; else they read 0, no mouse).
+             Only a build with DP11_MOUSE reads it (state() then shows the
+             pointer, ptr)
 
 Each line: the frame number, the keys, the frame's cycles (frame()'s: see
 there), then state(): x, z (tiles), y (height units, 16 a tile), v (gvx,
@@ -198,7 +200,8 @@ class Game:
         r = self.rd
         return (f"x {s24(r('sx', 3)):7.3f} z {s24(r('sz', 3)):7.3f} y {s24(r('sy', 3)) * 16:6.2f}u "
                 f"v {s16(r('gvx', 2)):6d} {s16(r('gvy', 2)):6d} {s16(r('gvz', 2)):6d} "
-                f"k {r('gk')[0]:2d} p {r('gp')[0]:2d} ptr {s8(r('gmx')[0]):4d} {s8(r('gmy')[0]):4d} "
+                f"k {r('gk')[0]:2d} p {r('gp')[0]:2d} "
+                + (f"ptr {s8(r('gmx')[0]):4d} {s8(r('gmy')[0]):4d} " if 'gmx' in self.lab else '') +
                 f"fuel {r('fuel', 2)[0] | r('fuel', 2)[1] << 8:5d} landed {r('landed')[0]} "
                 f"ctim {r('ctim')[0]:2d} "
                 f"hg {self.mpu.memory[HGV]} came {self.mpu.memory[CAME]} shy {self.mpu.memory[GSHY]}")

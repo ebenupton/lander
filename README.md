@@ -6,9 +6,22 @@ flight model, a landing pad, fuel, a map and sound, at about ten frames a second
 a 2 MHz 6502.
 
 The disc image is `lander.ssd` (also built to `build/lander.ssd`).  It needs a Model B
-with 64K of sideways RAM (four writable 16K banks in any sockets, written through
-ROMSEL or a Watford or Solidisk write-select board) and a DFS.  In jsbeeb choose
-"BBC B with 8271 (DFS 1.2)" and load the disc; SHIFT+BREAK boots it.
+or Master with 64K of sideways RAM (four writable 16K banks in any sockets, written
+through ROMSEL or a Watford or Solidisk write-select board) and a DFS.  In jsbeeb
+choose "BBC B with 8271 (DFS 1.2)" and load the disc; SHIFT+BREAK boots it.
+
+The disc boots to a chooser:
+
+| Key | Version |
+|---|---|
+| 1 | MODE 1: four colours, the landscape's shades as 2 x 2 dithers |
+| 2 | MODE 2: the CPC palette, 27 colours as checkerboard dithers |
+| 3 | MODE 2: VideoNULA, sixteen flat 12-bit colours (offered only when a NULA is found) |
+
+The NULA test is a timing one (the NULA's registers cannot be read): the ULA's
+CRTC clock is set to 2 MHz, then &44 written to &FE22.  Without a NULA &FE22 is a
+copy of &FE20, so the clock drops back to 1 MHz and the frames take twice as long;
+a NULA takes the write as its own (a reset) and the frames keep their length.
 
 ## Playing
 
@@ -19,8 +32,9 @@ ROMSEL or a Watford or Solidisk write-select board) and a DFS.  In jsbeeb choose
 | SPACE or SHIFT | thrust |
 | F | frame-rate readout on / off |
 
-With a mouse at &FCAC-&FCAF (found at start; the movement since the last read, as
-some Master upgrades provide) the mouse flies the ship as in Lander, and the
+Built with `DP11_MOUSE=1 sh build.sh` (it is off by default), a mouse at
+&FCAC-&FCAF (found at start; the movement since the last read, as some Master
+upgrades provide) also flies the ship: it flies the ship as in Lander, and the
 keys above no longer steer.  The pointer's offset from where it was when the
 ship last spawned sets the target heading (its direction) and how far the nose
 tips that way (its distance: level near the centre, the full 60 degrees about
@@ -35,49 +49,40 @@ anywhere else, or the pad too fast or too tilted, and the ship is destroyed and,
 seconds later, back on the pad.  The engines cut out once the landscape has sunk off
 the bottom of the screen; the ship then coasts up and falls back.
 
-## The VideoNULA version
+## The MODE 2 versions
 
-`lander-nula.ssd` is the same game in MODE 2 for a BBC Micro or Master fitted with a
-VideoNULA: sixteen flat
-12-bit colours in place of MODE 1's dithers (black, three seas, the pad's grey, seven
-lands and four for the ship; each the average of the dither it replaces).  Without a
-NULA it runs with MODE 2's standard colours.  The renderer is unchanged: it still
-works in MODE 1's pixels, 256 across, and each MODE 2 pixel shows the even one of the
-two it covers, which only its masks and colour bytes have to know about.  The
-palette, the colours' assignments and the 3 x 7 letters are in `proto/nula.py`.
+Both are the same game in MODE 2.  The renderer is unchanged: it still works in MODE
+1's pixels, 256 across, and each MODE 2 pixel shows the even one of the two it
+covers, which only its masks and colour bytes have to know about.  The palettes, the
+colours' assignments and the 3 x 7 letters are in `proto/nula.py`.
 
-```sh
-sh build.sh nula               # build/lander.ssd, the NULA version
-NULA=1 sh test/run.sh          # its tests (the same reference, MODE 2's bytes)
-```
-
-## The CPC-palette version
-
-`lander-cpc.ssd` is MODE 2 on any BBC Micro or Master, no NULA needed: the "Amstrad
-CPC palette", the 27 colours whose red, green and blue are each off, half or full,
-made as 1 x 2 dithers of MODE 2's eight colours (two MODE 2 pixels one above the
-other are about square), the phase toggled on alternate columns so each is a
-checkerboard, a half channel lit on one pixel of the two.  Every colour the game uses gets a different one of the 27, the nearest
-assignment overall (`proto/nula.py`); the renderer is the NULA version's.
-
-```sh
-sh build.sh cpc                # build/lander.ssd, the CPC-palette version
-CPC=1 sh test/run.sh           # its tests
-```
+- VideoNULA: sixteen flat 12-bit colours in place of MODE 1's dithers (black, three
+  seas, the pad's grey, seven lands and four for the ship; each the average of the
+  dither it replaces).
+- CPC palette, no NULA needed: the "Amstrad CPC palette", the 27 colours whose red,
+  green and blue are each off, half or full, made as 1 x 2 dithers of MODE 2's eight
+  colours (two MODE 2 pixels one above the other are about square), the phase
+  toggled on alternate columns so each is a checkerboard, a half channel lit on one
+  pixel of the two.  Every colour the game uses gets a different one of the 27, the
+  nearest assignment overall.
 
 ## Building and testing
 
-You need [cc65](https://cc65.github.io) (`ca65`, `ld65`) and Python 3 with `numpy`.
+You need [cc65](https://cc65.github.io) (`ca65`, `ld65`) and Python 3 with `numpy`
+and `scipy`.
 The tests need [`py65`](https://github.com/mnaberez/py65); the optional renders need
 Pillow.
 
 ```sh
-sh build.sh          # build/lander.ssd
-sh test/run.sh       # the test suite (a few minutes)
+sh build.sh                            # build/lander.ssd: every version, MODE 1 left in build/
+sh test/run.sh                         # the test suite on MODE 1 (a few minutes)
+sh build.sh cpc && CPC=1 sh test/run.sh    # one version alone (no disc) and its tests
+sh build.sh nula && NULA=1 sh test/run.sh
 ```
 
-The build is deterministic: the disc images it produces are byte for byte the ones
-checked in (`test/identical.sh` checks all three).
+The build is deterministic: the disc it produces is byte for byte the one checked in
+(`test/identical.sh`).  On the disc each version's files are in a directory of their
+own (M, C, N), with `$.TABLES7`, the same in all three, shared.
 
 The tests run the game's own 6502 code in py65; the first two compare its output byte
 for byte with the Python reference model:
@@ -106,7 +111,8 @@ for byte with the Python reference model:
 | `tools/gamegen.py` | the game's tables: thrust, the ship's screen line, the map, the crash's sound |
 | `proto/nula.py` | the MODE 2 versions' palettes, colours, masks and letters |
 | `tools/mergebank.py`, `tools/mkdfs.py` | code segments into the bank images; the DFS disc |
-| `build.sh`, `lander.ssd`, `lander-nula.ssd`, `lander-cpc.ssd` | the build, and the disc images it makes |
+| `src/menu.bas` | the chooser (typed in by `!BOOT`) |
+| `build.sh`, `lander.ssd` | the build, and the disc image it makes |
 | `proto/` | the Python reference model the 6502 matches pixel for pixel |
 | `test/` | the test suite (`test/run.sh` runs it) |
 | `ref/lander/` | what was taken from Lander: the ship blueprint, the flight model, notes |

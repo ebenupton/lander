@@ -41,8 +41,8 @@
 ; either way at most, one a frame while held); SPACE or SHIFT thrust (both
 ; full thrust; thrust goes the way the ship is tilted, so nose down flies
 ; forward); F toggles LAND's frame-rate readout.  Fuel burns while thrusting.
-; With a mouse at $FCAC..$FCAF (ginit's test: mdet) it steers instead, as
-; Lander's: its movement moves a pointer (gmx, gmy) whose polar form sets the
+; Built with DP11_MOUSE (off by default: `DP11_MOUSE=1 sh build.sh`), a
+; mouse at $FCAC..$FCAF (ginit's test: mdet) steers instead, as Lander's: its movement moves a pointer (gmx, gmy) whose polar form sets the
 ; targets (attit), the left button full thrust, the middle hover (a quarter;
 ; Lander's), the spawn puts the pointer back at its centre.
 ; Touching the ground over the pad (tiles 0..PADN-1 in x and z) slowly and
@@ -100,11 +100,13 @@ bsg     = $9A                      ; and BOTS)
 SVIA_ORB = $FE40                   ; the system VIA: port B (bits 0-2 pick a
 SVIA_DDRA = $FE43                  ; latch bit, bit 3 sets it), port A's
 SVIA_ORA_NH = $FE4F                ; direction and port A without handshake
+.ifdef DP11_MOUSE
 MSXL    = $FCAC                    ; the mouse (where fitted): each read the
 MSXH    = $FCAD                    ; movement since the last, 14-bit, 4 a
 MSYL    = $FCAE                    ; count, y up; MSXH bits 6, 7 the left and
 MSYH    = $FCAF                    ; right buttons, MSYH bit 6 the middle, bit 7
                                    ; the mouse present; read in this order
+.endif
 
 ; Lander's constants are per main-loop step; here a step is a frame at 10 a
 ; second, taken as 1.25 Lander steps, and the velocities keep Lander's units
@@ -116,7 +118,9 @@ GRAV    = 240                      ; gravity a step: Lander's &30000 (of 2^24)
 THRS    = 3                        ; full thrust: THX, THZ, THY (127 a unit)
                                    ; << 3: 1016 at most (Lander's 1024); tadd
                                    ; then makes it 1.25 as much
+.ifdef DP11_MOUSE
 HOVS    = 1                        ; hover: << 1, a quarter of it (Lander's)
+.endif
 LANDV   = 2048                     ; Lander's LANDING_SPEED, 1/8 tile a step:
                                    ; |gvx| + |gvy| + |gvz| must be below it
 UNDER   = 4                        ; the ship's centre above its underside, in
@@ -180,6 +184,7 @@ ginit:  lda #$30
         lda #$FF                   ; (noise control and attenuation as written:
         sta sctl                   ; $FF is the attenuation off)
         sta satt
+.ifdef DP11_MOUSE
         lda MSXL                   ; the mouse: a read clears the counts, so a
         lda MSXH                   ; second straight after reads no movement
         lda MSYL                   ; and the present bit; anything else (an
@@ -199,6 +204,7 @@ ginit:  lda #$30
         bcc :+
         inx
 :       stx mdet
+.endif
         jsr spawn
         jmp gout
 SINI:   .byte $FF, $DF, $BF, $9F   ; noise, tone 2, 1, 0: attenuation 15 (off)
@@ -330,10 +336,12 @@ spawn:  lda #0
         sta sy+2
         lda #SPAWNK
         sta gk
+.ifdef DP11_MOUSE
         .assert SPAWNK = 4, error, "the pointer's start is SPAWNK's direction"
         lda #1                     ; the pointer a count off its centre towards
         sta gmx                    ; SPAWNK, so the ship keeps it (Lander puts
         sta gmy                    ; its pointer a unit off centre likewise)
+.endif
         lda #SPAWNP
         sta gp
         lda #PADH                  ; the ground under it (hgnd's from then on)
@@ -489,6 +497,7 @@ keys:   lda #0
         lda #$0B                   ; auto-scan back on
         sta SVIA_ORB
         cli
+.ifdef DP11_MOUSE
         lda mdet                   ; the mouse, if found at the start
         beq @f
         lda MSXL                   ; the movement into the pointer, x as it
@@ -529,7 +538,9 @@ keys:   lda #0
         sta gt1
         ldx #gmy-gmx
         jsr madd
-@f:     lda gkb
+@f:
+.endif
+        lda gkb
         and #64
         cmp fkey
         beq :+
@@ -541,6 +552,7 @@ keys:   lda #0
         sta fpson
 :       rts
 
+.ifdef DP11_MOUSE
 ; mdel: gt1:gt0 = the movement whose bits 8-13 are A's bits 0-5 (sign
 ; extended) and bits 0-7 gt0, over 4: in counts.  Clobbers A, Y.  Called by
 ; keys.
@@ -581,6 +593,7 @@ madd:   ldy #0
 @ok:    lda gt0
 @st:    sta gmx,x
         rts
+.endif
 
 ; ---------------------------------------------------------------- sound
 ; snd: the noise channel of the SN76489 for this frame, written only where it
@@ -653,11 +666,15 @@ psg:    sei
 ; if over the pad, within a pitch of level and slower than LANDV, else a
 ; crash (burst, GSHV 0, ctim CRASHT).  Finally parts.  Reads gkb, fuel, sy,
 ; CAME, HGV; writes gk, gp, ctim, thr, landed, gv*, s*, fuel, GSHV.  Clobbers A, X, Y, g0, g1, gt0..gt5, tt0, tt1.  Called by gstep.
+.ifdef DP11_MOUSE
 step:   lda mous                   ; the mouse: Lander's attitude from it
         beq :+
         jsr attit
         jmp @att
 :       lda gkb
+.else
+step:   lda gkb
+.endif
         lsr a
         bcc :+
         lda gk
@@ -692,7 +709,9 @@ step:   lda mous                   ; the mouse: Lander's attitude from it
         bne :+
         jsr spawn
 :       jmp parts
-@fly:   ldy #1                     ; Y = 1 if SPACE, SHIFT or the left button
+@fly:
+.ifdef DP11_MOUSE
+        ldy #1                     ; Y = 1 if SPACE, SHIFT or the left button
         lda gkb                    ; (full thrust), else 2 for the middle
         and #$30                   ; (hover), else 0
         bne :+
@@ -701,6 +720,17 @@ step:   lda mous                   ; the mouse: Lander's attitude from it
         bmi :+
         ldy #0
 :
+.else
+        lda gkb                    ; Y = 1 if SPACE or SHIFT (both full thrust)
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        and #3
+        beq :+
+        lda #1
+:       tay
+.endif
         lda fuel                   ; none without fuel
         ora fuel+1
         beq @off
@@ -757,6 +787,7 @@ step:   lda mous                   ; the mouse: Lander's attitude from it
         sta gvx+1,x
         rts
 @th:
+.ifdef DP11_MOUSE
         lda thr                    ; thrust: gt5 the shift, gt4 the fuel a step:
         beq @nt                    ; full THRS and 5, hover HOVS and 3 (Lander's
         ldx #THRS                  ; 4 and 2, times 1.25)
@@ -767,6 +798,14 @@ step:   lda mous                   ; the mouse: Lander's attitude from it
         ldy #3
 :       stx gt5
         sty gt4
+.else
+        lda thr                    ; thrust: gt5 the shift (THRS), gt4 the fuel
+        beq @nt                    ; a step (5)
+        lda #THRS
+        sta gt5
+        lda #5
+        sta gt4
+.endif
         lda fuel                   ; fuel -= gt4, floor 0
         sec
         sbc gt4
@@ -789,6 +828,7 @@ step:   lda mous                   ; the mouse: Lander's attitude from it
         lda THY,y
         ldx #gvy-gvx
         jsr tadd
+.ifdef DP11_MOUSE
         lda thr                    ; a dot a step at full thrust, every fourth
         lsr a                      ; hovering (Lander's 8 and 2)
         bcs :+
@@ -796,7 +836,9 @@ step:   lda mous                   ; the mouse: Lander's attitude from it
         lda hcnt
         and #3
         bne @nt
-:       jsr emit
+:
+.endif
+        jsr emit
 @nt:    lda landed                 ; landed: still, refuelling REFUEL a step
         beq @mv                    ; up to FUELMX
         lda #0
@@ -894,6 +936,7 @@ step:   lda mous                   ; the mouse: Lander's attitude from it
         jmp parts
 @up:    jmp parts                  ; in the air: no ceiling
 
+.ifdef DP11_MOUSE
 ; attit: the attitude from the mouse, as Lander's: the pointer (gmx, gmy)
 ; in polar form, its angle the target direction (atan2(gmy, gmx) in 32nds:
 ; right 0, towards the player 8, so the ship faces the way the mouse went)
@@ -1049,6 +1092,7 @@ SQH:
         .repeat 40, I
         .byte >(I*I)
         .endrepeat
+.endif
 
 ; landoff: C set if the last frame's projection has the land wholly below the
 ; screen: every point (np a row) of every row (nr, 16 bytes apart in PY) past
@@ -1854,12 +1898,16 @@ PIXG:   .byte $88, $44, $22, $11   ; pixel 0..3's two bits in a byte (LAND's
 gkb:    .byte 0                    ; the keys down (keys' bits)
 gk:     .byte 0                    ; the ship's direction (0..NDIR-1) and pitch
 gp:     .byte 0                    ; (0..NPITCH-1, PFLAT level)
+.ifdef DP11_MOUSE
 thr:    .byte 0                    ; this step's thrust: 0 none, 1 full, 2 hover
 mdet:   .byte 0                    ; 1: a mouse found at the start
 mous:   .byte 0                    ; 1: the mouse present this frame (attit)
 gmx:    .byte 0                    ; the pointer, signed, 4 mouse units a count
 gmy:    .byte 0                    ; (x right, y towards the player: Lander's)
 hcnt:   .byte 0                    ; hover's steps (a dot every fourth)
+.else
+thr:    .byte 0                    ; this step's thrust: 0 none, 1 full
+.endif
 landed: .byte 0                    ; 1: sitting on the pad
 ctim:   .byte 0                    ; crashed: steps left (0: flying)
 sx:     .res 3                     ; position: x, z, y, 24-bit, 65536 a tile (y

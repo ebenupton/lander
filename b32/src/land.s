@@ -3448,17 +3448,13 @@ readout:
         sta fps10
         lda #>4000
         adc #0
-        ldy MT0                    ; (A: the dividend's high byte, 15 or 16)
+        sta fps10+1
+        lda MT0
         beq @f0
-        ldy #0                     ; the 16 by 8 division a byte at a time:
-@fh:    cmp MT0                    ; the high byte's quotient (16 at most) by
-        bcc @fl                    ; subtraction into fps10+1, the remainder
-        sbc MT0                    ; in A
-        iny
-        bne @fh                    ; (always)
-@fl:    sty fps10+1
-        ldy #8                     ; then the low byte's into fps10
+        lda #0                     ; the 16 by 8 division: quotient into fps10,
+        ldy #16                    ; the remainder in A
 @fd:    asl fps10
+        rol fps10+1
         rol a
         bcs @fs                    ; (past 255: s > 127)
         cmp MT0
@@ -3468,8 +3464,8 @@ readout:
 @fn:    dey
         bne @fd
         beq @fz                    ; (always)
-@f0:    sty fps10                  ; (Y 0)
-        sty fps10+1
+@f0:    sta fps10
+        sta fps10+1
 @fz:
         lda #0
         sta tcol
@@ -3524,12 +3520,13 @@ putg:   asl a
         asl a
         asl a
         tay                        ; Y = 8 tcol: the panel's row 8 (64 bytes a
-:       lda GLY,x                  ; row, 8 a character); unrolled (the
-        sta PANEL+8*64,y           ; anonymous label kept for the count)
-        .repeat 7, i
-        lda GLY+i+1,x
-        sta PANEL+8*64+i+1,y
-        .endrepeat
+:       lda GLY,x                  ; row, 8 a character)
+        sta PANEL+8*64,y
+        inx
+        iny
+        tya
+        and #7
+        bne :-
         inc tcol
         rts
 GLY:    .incbin "GLYPHS"           ; the readout's 15 characters, 8 bytes each

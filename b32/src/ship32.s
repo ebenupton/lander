@@ -128,8 +128,8 @@ shipdraw:
         lda byt                    ; high: scrb + 2 (byt >> 3) + the column's
         lsr a
         lsr a
-        and #$FE
-        clc
+        lsr a
+        asl a                      ; (C clear: bit 7 of byt >> 3 is 0)
         adc scrb
         sta sptr+1
         lda GSHX                   ; sptr = line byt's byte in the column 5
@@ -317,8 +317,9 @@ seg7:   eor (sptr),y
         sta sptr
         and #6
         beq slrow
-lnx:    lda dp
-        clc
+lnx:    lda dp                     ; (C clear: the ADC #2 carries only to
+                                   ; sptr 0 or 1, and #6 = 0, slrow's; slrow
+                                   ; clears it)
         adc #16
         sta dp
         dec bl
@@ -367,6 +368,7 @@ slrow:   lda sptr
         sta sptr
         inc sptr+1
         inc sptr+1
+        clc                        ; (lnx's ADC #16)
         jmp lnx
 PNL:    .byte 0, <pn6, <pn5, <pn4, <pn3, <pn2, <pn1
 CNL:    .byte 0, <cn6, <cn5, <cn4, <cn3, <cn2, <cn1
@@ -400,23 +402,30 @@ rast:   ldy GSHP                   ; the angles
         sta NVIS
         sta NNEG
         ldx #16                    ; the 17 points, 16 down to 0
-@pt:    lda VQX,x                  ; px = ca X - sa Y, py = sa X + ca Y
-        ldy ca                     ; (X: the point throughout; smul, tq8
-        jsr smul                   ; keep X)
+@pt:    lda VQY,x                  ; px = ca X - sa Y (sa Y first, into
+        ldy sa                     ; pxl, pxh), py = sa X + ca Y (X: the
+        jsr smul                   ; point throughout; smul, tq8 keep X)
         sta pxl
         sty pxh
-        lda VQY,x
-        ldy sa
+        lda VQX,x
+        ldy ca
         jsr smul
-        sta st
-        lda pxl
         sec
-        sbc st
+        sbc pxl
         sta pxl
-        sty st
-        lda pxh
-        sbc st
-        sta pxh
+        tya
+        sbc pxh                    ; (A: px's high byte)
+        asl pxl                    ; px8 = (px + 32) >> 6: (px << 2)'s high
+        rol a                      ; byte plus its low byte's bit 7 (px's
+        asl pxl                    ; bit 5, the + 32's carry)
+        rol a
+        asl pxl
+        adc #0
+        sta px8
+        ldy cb                     ; Xr = cb px8 + sb Z (sb Z after py)
+        jsr smul
+        sta xrl
+        sty xrh
         lda VQX,x
         ldy sa
         jsr smul
@@ -431,21 +440,6 @@ rast:   ldy GSHP                   ; the angles
         tya
         adc pyh
         sta pyh
-        lda pxl                    ; px8 = (px + 32) >> 6: ((px + 32) << 2)'s
-        clc                        ; high byte
-        adc #32
-        sta pxl
-        lda pxh
-        adc #0
-        asl pxl
-        rol a
-        asl pxl
-        rol a
-        sta px8
-        ldy cb                     ; Xr = cb px8 + sb Z
-        jsr smul
-        sta xrl
-        sty xrh
         lda VQZ,x
         ldy sb
         jsr smul
@@ -455,22 +449,19 @@ rast:   ldy GSHP                   ; the angles
         tya
         adc xrh
         sta xrh
-        lda VQZ,x                  ; Zr = cb Z - sb px8
-        ldy cb
+        lda px8                    ; Zr = cb Z - sb px8 (sb px8 first, into
+        ldy sb                     ; zrl, zrh)
         jsr smul
         sta zrl
         sty zrh
-        lda px8
-        ldy sb
+        lda VQZ,x
+        ldy cb
         jsr smul
-        sta st
-        lda zrl
         sec
-        sbc st
+        sbc zrl
         sta zrl
-        sty st
-        lda zrh
-        sbc st
+        tya
+        sbc zrh
         sta zrh
         cpx #9
         bcs @nm
@@ -600,7 +591,7 @@ rast:   ldy GSHP                   ; the angles
         ldx #0                     ; each face in order: its span, a step on
         cpx NFL                    ; (X = 0: none set up)
         beq @scan
-@fl:    jsr fline                  ; (fline keeps X: ecore restores it)
+@fl:    jsr fline                  ; (fline keeps X: ecore keeps it)
         inx
         cpx NFL
         bcc @fl
@@ -617,35 +608,34 @@ rast:   ldy GSHP                   ; the angles
         sta YHI
         jmp @end
 @px:    sta WB                     ; LB read back: boundaries into WB, faces
-        clc                        ; into WF
-        adc #20
-        tay
-        lda LB,y
-        sta WF
-        lda lx0
-        cmp OXL
+        cmp OXL                    ; into WF (A = lx0, from @scan)
         bpl :+
         sta OXL
-:       lda lx1
+:       clc                        ; (A = lx0 on both paths here)
+        adc #20
+        tay                        ; Y = lx0 + 20
+        lda lx1
         cmp OXR
         bmi :+
         sta OXR
 :       clc                        ; (A = lx1 on both paths here) the end,
         adc #20                    ; lx1 + 20, into @se's compare
         sta @se+1
-        ldx #0                     ; (Y = lx0 + 20 still, from @px)
+        lda LB,y                   ; the first face: A = WF,x, the current
+        sta WF                     ; face, through the scan
+        ldx #0
 @sc:    iny                        ; Y = lxs + 20
 @se:    cpy #$00                   ; (lx1 + 20: patched above)
         beq @sd
-        lda LB,y
-        cmp WF,x
+        cmp LB,y                   ; (A = WF,x)
         beq @sc
-        inx                        ; a change of face at lxs
-        sta WF,x
-        tya                        ; lxs = Y - 20
+        tya                        ; a change of face at lxs = Y - 20
         sec
         sbc #20
+        inx
         sta WB,x
+        lda LB,y                   ; the new face, A = WF,x again
+        sta WF,x
         jmp @sc
 @sd:    inx                        ; the end, lx1: X = n, the faces
         lda lx1
@@ -773,32 +763,24 @@ fset:   ldx fi
         sta FBX,x
         lda cx3+2
         sta FCX3,x
-        txa                        ; the long edge a-c
-        tay
+        txa                        ; the long edge a-c (X 2: corner c, slot
+        ldx #2                     ; NFL), then the short a-b (X 1: corner b,
+@ed:    tay                        ; slot NFL + EOFS); ecore keeps X and Y
         lda cx3
         sta EX,y
-        lda cx3+2
+        lda cx3,x
         sec
         sbc cx3
         sta edx
-        lda cy3+2
+        lda cy3,x
         sec
-        sbc cy3
+        sbc cy3                    ; (Z: dy 0, for ecore)
         jsr ecore
-        txa                        ; the short a-b
+        tya
         clc
         adc #EOFS
-        tay
-        lda cx3
-        sta EX,y
-        lda cx3+1
-        sec
-        sbc cx3
-        sta edx
-        lda cy3+1
-        sec
-        sbc cy3
-        jsr ecore
+        dex
+        bne @ed
         clc
         rts
 csw:    lda cy3+1,x                ; corners X and X + 1 swapped if X + 1's y
@@ -822,34 +804,35 @@ ecore:  sta ED,y
         sta dvx
         lda #0                     ; (EQ, ER: stored below on every path)
         sta EE,y
-        stx ef
-        sty ey
+        sty ey                     ; (X: div8 keeps it, nothing here uses it)
         lda edx
         bpl @p
         eor #$FF                   ; dx < 0: |dx| div dy = q', rem; q = -q' -
         clc                        ; (rem > 0), r = dy - rem (or 0)
         adc #1
 @p:     sta dvd                    ; (dx >= 0: q, rem)
-        jsr div8
+        jsr div8                   ; (A = rem)
         ldy ey
-        sta ER,y
-        lda dvd
         bit edx                    ; dx's sign again (div8 keeps edx)
-        bpl @q
-        eor #$FF                   ; -q' - 1
-        ldx ER,y
+        bpl @pp
+        cmp #0                     ; (C set) rem 0?
         beq :+
-        sta EQ,y
-        lda ED,y
-        sec
-        sbc ER,y                   ; (rem < dy: no borrow, C set)
+        eor #$FF                   ; r = dy - rem: ~rem + dy + 1 (C set), the
+        adc ED,y                   ; carry as SBC's (no borrow: rem < dy)
         sta ER,y
-        bcs @r
-:       clc
-        adc #1                     ; (rem 0: -q')
+        bcc @c                     ; (a borrow: as the old code did, q = r + 1)
+        lda dvd
+        eor #$FF                   ; q = -q' - 1
+        bcs @q                     ; (always: C from the ADC)
+:       sta ER,y                   ; rem 0: r = 0, q = 0 - q' (C set by the CMP)
+        sbc dvd
+        .byte $2C                  ; (BIT abs: skips the ADC)
+@c:     adc #1
 @q:     sta EQ,y
-@r:     ldx ef
-        ldy ey
+        rts
+@pp:    sta ER,y                   ; dx >= 0: q, rem
+        lda dvd
+        sta EQ,y
         rts
 @z:     sta EE,y                   ; dy 0: A = 0; no steps
         sta EQ,y
@@ -933,9 +916,10 @@ estep:  tay
 ; smul: A:Y (low, high) = A times Y, signed 8 x 8: the unsigned product of the
 ; bytes, less 256 B where A < 0 and 256 A where B < 0.  X kept.
 smul:   sta smA
-        sty smB0
-        tya                        ; smB = B >> 1, C its bit 0
-        lsr a
+        asl a                      ; C: A's sign, into smB's bit 7 (the 8th
+        sty smB0                   ; ROR smB hands it back in C)
+        tya                        ; smB = B >> 1, bit 7 A's sign; C bit 0
+        ror a
         sta smB
         lda #0                     ; (C kept)
         bcc @m1                    ; bit 0: 0 + smA has no carry, so LSR
@@ -977,72 +961,57 @@ smul:   sta smA
         adc smA
 @m8:    ror a
         ror smB
-        bit smA                    ; (A high, smB low)
-        bpl :+
-        sec
-        sbc smB0
-:       bit smB0
-        bpl :+
-        sec
-        sbc smA
+        bcc :+                     ; (A high, smB low; C: A's sign, smB's bit 7
+        sbc smB0                   ; at entry) A < 0: less 256 B (C set)
+:       cpy #$80                   ; B < 0 (Y = B throughout): less 256 A
+        bcc :+
+        sbc smA                    ; (C set)
 :       tay
         lda smB
         rts
 
 BIT8:   .byte 1, 2, 4, 8, 16, 32, 64, 128
 
-; tq8: tql, tqh = (V TQ) >> 8, V = A:Y (low, high) signed, TQ = 100: 25 V,
-; then << 2, its top two bytes.  X, Y kept; clobbers A, tqa, tqb.
-tq8:    sta tqa                    ; V, sign-extended to 24 bits; tqb = V
-        sta tqb
+; tq8: tql, tqh = (V TQ) >> 8, V = A:Y (low, high) signed, TQ = 100: the
+; unsigned V times %01100100 by right shifts (H:M = H in tqb, M in A; the bits
+; shifted out of M are the product's low byte, dropped), then 100 off the high
+; byte if V < 0 (100 x 65536 / 256 = $6400).  X kept; clobbers A, Y, tqa, tqb.
+tq8:    sta tqa                    ; V: tqa, tqa+1
         sty tqa+1
-        sty tqb+1
-        lda #0
-        cpy #$80
-        bcc :+
-        lda #$FF
-:       sta tqa+2
-:       asl tqb                    ; tqb = 8 V (its high byte in A)
-        rol tqb+1
-        rol a
-:       asl tqb                    ; (the : lines keep the file's count)
-        rol tqb+1
-        rol a
-:       asl tqb
-        rol tqb+1
-        rol a
-        sta tqb+2
-        clc                        ; tqa = 9 V
-        lda tqa
-        adc tqb
-        sta tqa
-        lda tqa+1
-        adc tqb+1
-        sta tqa+1
-        lda tqa+2
-        adc tqb+2
-        sta tqa+2
-        asl tqb                    ; tqb = 16 V
-        rol tqb+1
-        rol tqb+2
-        clc                        ; 25 V: tqa, tqa+1, A
-        lda tqa
-        adc tqb
-        sta tqa
-        lda tqa+1
-        adc tqb+1
-        sta tqa+1
-        lda tqa+2
-        adc tqb+2
-        asl tqa                    ; << 2: 100 V
-        rol tqa+1
-        rol a
-        asl tqa
-        rol tqa+1
-        rol a
-        sta tqh
-        lda tqa+1
+        sty tqb                    ; H:M = V (bits 0, 1 clear: nothing)
+:       lsr tqb                    ; bit 2: >> 1
+        ror a
+:       lsr tqb                    ; bit 3
+        ror a
+:       lsr tqb                    ; bit 4
+        ror a
+        clc                        ; bit 5: H:M += V, then >> 1 (the carry in)
+        adc tqa
+        tay
+        lda tqb
+        adc tqa+1
+        ror a
+        sta tqb
+        tya
+        ror a
+        clc                        ; bit 6: likewise
+        adc tqa
+        tay
+        lda tqb
+        adc tqa+1
+        ror a
+        sta tqb
+        tya
+        ror a
+        lsr tqb                    ; bit 7: >> 1
+        ror a
         sta tql
+        lda tqb
+        ldy tqa+1                  ; V < 0: the high byte less 100
+        bpl :+
+        sec
+        sbc #100
+:       sta tqh
         rts
 
 ; ---------------------------------------------------------------- state

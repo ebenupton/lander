@@ -15,8 +15,10 @@ project, strips, gpre, ship, gpost, readout, flip.
 
 ## The goal: CYCLES a frame, paid for in BYTES
 Cycles a frame are what we are buying.  Bytes are the currency: everything that grows the
-program comes out of ONE free block (about 1100 bytes, all the memory left).  So every
-proposal must state both honestly:
+program comes out of ONE free block (about 1100 bytes, all the memory left).  The going
+rate, measured on the first round's accepted rewrites: about 40 cycles a frame per byte.
+A speed rewrite that spends bytes should beat that; a size rewrite that costs cycles should
+cost well under it per byte saved.  So every proposal must state both honestly:
 - `cycles_saved_per_frame`: per-execution saving x executions a frame.  Your window
   shows each line's measured cycles a frame (the profile of a 129-frame scripted flight);
   divide by the instruction's cycles to get its executions.  Negative if slower.
@@ -35,6 +37,13 @@ Changes that save both are best.
 in game.s: segment BOOT) runs once and is then discarded -- its bytes and cycles cost
 nothing.  Moving run-time work into it (precomputing a table it fills in a hole or the
 free block) costs only the table's run-time bytes.  Do not optimise the loader itself.
+
+## Second round
+This code has had one round already (about 110 rewrites).  What is left is harder: look
+for structural savings (work that is repeated across calls, values recomputed that could
+be kept, loops that could carry state in registers, tests that could be hoisted) as well as
+local ones.  Do not undo a first-round change.  Page phase: code addresses shift with any
+size change; a rewrite that only moves code to dodge a page crossing is not wanted.
 
 ## The instruction set: plain NMOS 6502
 No `stz`, `bra`, `phx`/`plx`/`phy`/`ply`, `inc a`, `bit #`, `(zp)` without an index,

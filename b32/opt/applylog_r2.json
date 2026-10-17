@@ -1,0 +1,889 @@
+[
+ {
+  "id": "c00#0",
+  "kind": "speed",
+  "claimed_cycles": 1830,
+  "claimed_bytes": 13,
+  "status": "accepted",
+  "cycles_saved": 1880.4,
+  "bytes_delta": 13
+ },
+ {
+  "id": "c02#0",
+  "kind": "speed",
+  "claimed_cycles": 1250,
+  "claimed_bytes": -12,
+  "status": "accepted",
+  "cycles_saved": -124.0,
+  "bytes_delta": -12
+ },
+ {
+  "id": "c04#0",
+  "kind": "speed",
+  "claimed_cycles": 670,
+  "claimed_bytes": -10,
+  "status": "accepted",
+  "cycles_saved": 750.0,
+  "bytes_delta": -10
+ },
+ {
+  "id": "c01#0",
+  "kind": "speed",
+  "claimed_cycles": 420,
+  "claimed_bytes": -9,
+  "status": "accepted",
+  "cycles_saved": 551.0,
+  "bytes_delta": -9
+ },
+ {
+  "id": "c08#0",
+  "kind": "speed",
+  "claimed_cycles": 420,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 369.0,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c26#0",
+  "kind": "speed",
+  "claimed_cycles": 290,
+  "claimed_bytes": -34,
+  "status": "accepted",
+  "cycles_saved": 291.1,
+  "bytes_delta": -36
+ },
+ {
+  "id": "c03#0",
+  "kind": "speed",
+  "claimed_cycles": 226.7,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 202.3,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c12#0",
+  "kind": "speed",
+  "claimed_cycles": 210,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 239.9,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c19#0",
+  "kind": "speed",
+  "claimed_cycles": 138,
+  "claimed_bytes": -14,
+  "status": "accepted",
+  "cycles_saved": 119.1,
+  "bytes_delta": -14
+ },
+ {
+  "id": "c20#0",
+  "kind": "speed",
+  "claimed_cycles": 138,
+  "claimed_bytes": -8,
+  "status": "accepted",
+  "cycles_saved": 148.5,
+  "bytes_delta": -8
+ },
+ {
+  "id": "c25#0",
+  "kind": "speed",
+  "claimed_cycles": 134,
+  "claimed_bytes": -23,
+  "status": "accepted",
+  "cycles_saved": 156.5,
+  "bytes_delta": -23
+ },
+ {
+  "id": "c07#1",
+  "kind": "speed",
+  "claimed_cycles": 131,
+  "claimed_bytes": -4,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/proj32.s"
+ },
+ {
+  "id": "c09#0",
+  "kind": "speed",
+  "claimed_cycles": 131,
+  "claimed_bytes": -4,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/proj32.s"
+ },
+ {
+  "id": "c08#1",
+  "kind": "speed",
+  "claimed_cycles": 130,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 115.3,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c07#0",
+  "kind": "speed",
+  "claimed_cycles": 115,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 116.7,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c15#1",
+  "kind": "speed",
+  "claimed_cycles": 115,
+  "claimed_bytes": 5,
+  "status": "accepted",
+  "cycles_saved": 132.1,
+  "bytes_delta": 5
+ },
+ {
+  "id": "c29#0",
+  "kind": "speed",
+  "claimed_cycles": 86,
+  "claimed_bytes": -28,
+  "status": "accepted",
+  "cycles_saved": 181.9,
+  "bytes_delta": -28
+ },
+ {
+  "id": "c14#0",
+  "kind": "speed",
+  "claimed_cycles": 85,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 74.9,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c33#0",
+  "kind": "speed",
+  "claimed_cycles": 72,
+  "claimed_bytes": 1,
+  "status": "accepted",
+  "cycles_saved": 65.9,
+  "bytes_delta": 1
+ },
+ {
+  "id": "c14#1",
+  "kind": "speed",
+  "claimed_cycles": 66,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 68.6,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c15#0",
+  "kind": "speed",
+  "claimed_cycles": 61,
+  "claimed_bytes": 0,
+  "status": "accepted",
+  "cycles_saved": 61.7,
+  "bytes_delta": 0
+ },
+ {
+  "id": "c27#1",
+  "kind": "speed",
+  "claimed_cycles": 60,
+  "claimed_bytes": -14,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c13#0",
+  "kind": "speed",
+  "claimed_cycles": 59,
+  "claimed_bytes": 0,
+  "status": "accepted",
+  "cycles_saved": 59.5,
+  "bytes_delta": 0
+ },
+ {
+  "id": "c06#0",
+  "kind": "speed",
+  "claimed_cycles": 54,
+  "claimed_bytes": -1,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c06#1",
+  "kind": "speed",
+  "claimed_cycles": 54,
+  "claimed_bytes": 1,
+  "status": "accepted",
+  "cycles_saved": 52.0,
+  "bytes_delta": 1
+ },
+ {
+  "id": "c11#0",
+  "kind": "speed",
+  "claimed_cycles": 53,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 56.0,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c27#0",
+  "kind": "speed",
+  "claimed_cycles": 53,
+  "claimed_bytes": 0,
+  "status": "accepted",
+  "cycles_saved": 53.8,
+  "bytes_delta": 0
+ },
+ {
+  "id": "c34#0",
+  "kind": "speed",
+  "claimed_cycles": 49,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 49.9,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c16#0",
+  "kind": "speed",
+  "claimed_cycles": 48,
+  "claimed_bytes": -3,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/proj32.s"
+ },
+ {
+  "id": "c29#4",
+  "kind": "speed",
+  "claimed_cycles": 46,
+  "claimed_bytes": 1,
+  "status": "accepted",
+  "cycles_saved": 44.6,
+  "bytes_delta": 1
+ },
+ {
+  "id": "c29#2",
+  "kind": "speed",
+  "claimed_cycles": 45,
+  "claimed_bytes": -8,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c20#1",
+  "kind": "speed",
+  "claimed_cycles": 44,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 54.7,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c29#3",
+  "kind": "speed",
+  "claimed_cycles": 43,
+  "claimed_bytes": -7,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c38#0",
+  "kind": "speed",
+  "claimed_cycles": 43,
+  "claimed_bytes": -7,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c38#1",
+  "kind": "speed",
+  "claimed_cycles": 43,
+  "claimed_bytes": -7,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c12#1",
+  "kind": "speed",
+  "claimed_cycles": 40,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 30.2,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c19#1",
+  "kind": "speed",
+  "claimed_cycles": 38,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 32.3,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c22#0",
+  "kind": "speed",
+  "claimed_cycles": 33,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 93.8,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c28#0",
+  "kind": "speed",
+  "claimed_cycles": 33,
+  "claimed_bytes": -11,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c17#0",
+  "kind": "speed",
+  "claimed_cycles": 30,
+  "claimed_bytes": -3,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/land.s"
+ },
+ {
+  "id": "c19#2",
+  "kind": "speed",
+  "claimed_cycles": 29.6,
+  "claimed_bytes": -3,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/game.s"
+ },
+ {
+  "id": "c09#1",
+  "kind": "speed",
+  "claimed_cycles": 27.8,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 26.4,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c18#0",
+  "kind": "speed",
+  "claimed_cycles": 26.7,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 10.4,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c33#1",
+  "kind": "speed",
+  "claimed_cycles": 25,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 45.9,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c17#1",
+  "kind": "speed",
+  "claimed_cycles": 23,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 4.6,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c22#1",
+  "kind": "speed",
+  "claimed_cycles": 23,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 50.4,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c05#0",
+  "kind": "speed",
+  "claimed_cycles": 21,
+  "claimed_bytes": 0,
+  "status": "accepted",
+  "cycles_saved": 21.3,
+  "bytes_delta": 0
+ },
+ {
+  "id": "c26#1",
+  "kind": "speed",
+  "claimed_cycles": 18,
+  "claimed_bytes": 0,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/land.s"
+ },
+ {
+  "id": "c32#0",
+  "kind": "speed",
+  "claimed_cycles": 15.3,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 17.7,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c17#2",
+  "kind": "speed",
+  "claimed_cycles": 15,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 8.3,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c32#1",
+  "kind": "speed",
+  "claimed_cycles": 14,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 14.0,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c37#0",
+  "kind": "speed",
+  "claimed_cycles": 12.8,
+  "claimed_bytes": -4,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c20#2",
+  "kind": "speed",
+  "claimed_cycles": 12,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 68.8,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c10#0",
+  "kind": "speed",
+  "claimed_cycles": 11,
+  "claimed_bytes": 0,
+  "status": "accepted",
+  "cycles_saved": 11.1,
+  "bytes_delta": 0
+ },
+ {
+  "id": "c33#2",
+  "kind": "speed",
+  "claimed_cycles": 11,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 11.1,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c31#1",
+  "kind": "speed",
+  "claimed_cycles": 9.9,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 18.3,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c29#1",
+  "kind": "speed",
+  "claimed_cycles": 8,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 10.0,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c32#2",
+  "kind": "speed",
+  "claimed_cycles": 7.4,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 9.8,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c17#3",
+  "kind": "speed",
+  "claimed_cycles": 6.7,
+  "claimed_bytes": 0,
+  "status": "accepted",
+  "cycles_saved": 6.7,
+  "bytes_delta": 0
+ },
+ {
+  "id": "c21#0",
+  "kind": "speed",
+  "claimed_cycles": 4,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 3.0,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c39#0",
+  "kind": "size",
+  "claimed_cycles": -80,
+  "claimed_bytes": -151,
+  "status": "accepted",
+  "cycles_saved": -73.2,
+  "bytes_delta": -151
+ },
+ {
+  "id": "c41#0",
+  "kind": "size",
+  "claimed_cycles": -30,
+  "claimed_bytes": -35,
+  "status": "accepted",
+  "cycles_saved": 4.7,
+  "bytes_delta": -35
+ },
+ {
+  "id": "c23#0",
+  "kind": "size",
+  "claimed_cycles": -29,
+  "claimed_bytes": -33,
+  "status": "accepted",
+  "cycles_saved": -108.5,
+  "bytes_delta": -33
+ },
+ {
+  "id": "c42#0",
+  "kind": "size",
+  "claimed_cycles": -19,
+  "claimed_bytes": -21,
+  "status": "accepted",
+  "cycles_saved": -36.9,
+  "bytes_delta": -22
+ },
+ {
+  "id": "c40#0",
+  "kind": "size",
+  "claimed_cycles": -4.4,
+  "claimed_bytes": -20,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/ship32.s"
+ },
+ {
+  "id": "c35#0",
+  "kind": "size",
+  "claimed_cycles": -60,
+  "claimed_bytes": -17,
+  "status": "accepted",
+  "cycles_saved": -79.1,
+  "bytes_delta": -17
+ },
+ {
+  "id": "c43#0",
+  "kind": "size",
+  "claimed_cycles": 10,
+  "claimed_bytes": -9,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/land.s"
+ },
+ {
+  "id": "c44#1",
+  "kind": "size",
+  "claimed_cycles": -7,
+  "claimed_bytes": -9,
+  "status": "accepted",
+  "cycles_saved": -33.9,
+  "bytes_delta": -9
+ },
+ {
+  "id": "c49#0",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -9,
+  "status": "accepted",
+  "cycles_saved": 20.7,
+  "bytes_delta": -9
+ },
+ {
+  "id": "c43#5",
+  "kind": "size",
+  "claimed_cycles": -74,
+  "claimed_bytes": -8,
+  "status": "accepted",
+  "cycles_saved": -85.6,
+  "bytes_delta": -8
+ },
+ {
+  "id": "c46#1",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -8,
+  "status": "accepted",
+  "cycles_saved": -20.7,
+  "bytes_delta": -8
+ },
+ {
+  "id": "c48#0",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -8,
+  "status": "accepted",
+  "cycles_saved": 0.8,
+  "bytes_delta": -8
+ },
+ {
+  "id": "c31#0",
+  "kind": "size",
+  "claimed_cycles": -3.4,
+  "claimed_bytes": -7,
+  "status": "accepted",
+  "cycles_saved": -210.9,
+  "bytes_delta": -7
+ },
+ {
+  "id": "c44#0",
+  "kind": "size",
+  "claimed_cycles": 12,
+  "claimed_bytes": -7,
+  "status": "accepted",
+  "cycles_saved": -44.5,
+  "bytes_delta": -7
+ },
+ {
+  "id": "c41#1",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -5,
+  "status": "accepted",
+  "cycles_saved": -1.8,
+  "bytes_delta": -5
+ },
+ {
+  "id": "c42#2",
+  "kind": "size",
+  "claimed_cycles": 6,
+  "claimed_bytes": -5,
+  "status": "accepted",
+  "cycles_saved": 59.5,
+  "bytes_delta": -5
+ },
+ {
+  "id": "c46#0",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -5,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/game.s"
+ },
+ {
+  "id": "c46#2",
+  "kind": "size",
+  "claimed_cycles": 1.4,
+  "claimed_bytes": -5,
+  "status": "accepted",
+  "cycles_saved": -6.7,
+  "bytes_delta": -5
+ },
+ {
+  "id": "c47#0",
+  "kind": "size",
+  "claimed_cycles": 1.2,
+  "claimed_bytes": -5,
+  "status": "accepted",
+  "cycles_saved": 6.2,
+  "bytes_delta": -5
+ },
+ {
+  "id": "c39#1",
+  "kind": "size",
+  "claimed_cycles": 1.7,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 5.6,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c40#1",
+  "kind": "size",
+  "claimed_cycles": 4,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 8.8,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c42#1",
+  "kind": "size",
+  "claimed_cycles": 6,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": 3.0,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c46#3",
+  "kind": "size",
+  "claimed_cycles": 1.3,
+  "claimed_bytes": -3,
+  "status": "accepted",
+  "cycles_saved": -675.7,
+  "bytes_delta": -3
+ },
+ {
+  "id": "c40#2",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": -23.2,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c42#3",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 19.7,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c42#4",
+  "kind": "size",
+  "claimed_cycles": 1,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 2.7,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c43#3c",
+  "kind": "size",
+  "claimed_cycles": 1,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 32.6,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c43#4",
+  "kind": "size",
+  "claimed_cycles": 2,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 7.2,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c44#2",
+  "kind": "size",
+  "claimed_cycles": 1.7,
+  "claimed_bytes": -2,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/game.s"
+ },
+ {
+  "id": "c45#0",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": -0.9,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c45#1",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 1.7,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c48#1",
+  "kind": "size",
+  "claimed_cycles": -12,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": 14.6,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c49#1",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -2,
+  "status": "accepted",
+  "cycles_saved": -0.8,
+  "bytes_delta": -2
+ },
+ {
+  "id": "c41#2",
+  "kind": "size",
+  "claimed_cycles": 1.6,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": -0.8,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c41#3",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 0.0,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c42#5",
+  "kind": "size",
+  "claimed_cycles": 1,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 3.5,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c43#1",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 0.0,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c43#2",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 0.0,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c44#3",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": -1.4,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c46#4",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/land.s"
+ },
+ {
+  "id": "c48#2",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": 0.1,
+  "bytes_delta": -1
+ },
+ {
+  "id": "c48#3",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "rejected: old_text not found in /Users/ebenupton/bandfill/b32/src/land.s"
+ },
+ {
+  "id": "c49#2",
+  "kind": "size",
+  "claimed_cycles": 0,
+  "claimed_bytes": -1,
+  "status": "accepted",
+  "cycles_saved": -7.6,
+  "bytes_delta": -1
+ }
+]

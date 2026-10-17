@@ -47,14 +47,12 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         asl a
         sta RN16
         lda ZB                     ; DCUR = 16 ZB - DI0 - czs (row 0's as a
-        sec                        ; corner row), computed so that nothing
-        sbc #9                     ; passes a byte (16 ZB can)
+        asl a                      ; corner row), mod 256 (the same byte); the
+        asl a                      ; fourth ASL's C: ZB's bit 4, set for ZB =
+        asl a                      ; 16 or 17 (as hgnd)
         asl a
-        asl a
-        asl a
-        asl a
-        sbc #DI0-9*16-1            ; (C clear: subtracts DI0 - 144)
-        .assert DI0 > 9*16 && ZFCLIP >= 9 && ZBACK-ZSKIP >= 9, error, "DCUR: 16 (ZB - 9), DI0 - 144 must be bytes"
+        sbc #<DI0                  ; (C set: subtracts DI0)
+        .assert ZFCLIP = 16, error, "DCUR: ZB (ZFCLIP or ZFCLIP+1) has bit 4 set"
         sec
         sbc czs
         sta DCUR
@@ -117,15 +115,13 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         lda WH
         ldy WH+1
         jsr lerp4
-        pha
+        sta WH                     ; HLO, HHI: the row's heights' range (A = WH;
+        sta HLO                    ; lerp4 keeps WH, HLO, HHI: it clobbers only
+        sta HHI                    ; A, Y, MT0, MT1, MQB)
         lda WH+NX-2
         ldy WH+NX-1
         jsr lerp4
         sta WH+NX-1
-        pla
-        sta WH                     ; HLO, HHI: the row's heights' range (A = WH)
-        sta HLO
-        sta HHI
         ldy #NX-1                  ; (two heights a pass: NX-1 even)
 @hr:    lda WH,y
         cmp HLO
@@ -157,16 +153,17 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         bpl :-
         ldx RK
         jsr xrow                   ; the x's into PX + 16 k
-        ldx RK                     ; the next row, or done
-        cpx RN16
+        lda RK                     ; the next row, or done
+        cmp RN16
         beq @fin
-        txa
-        adc #16                    ; (C clear: cpx RN16 found X < RN16, both
-        tax                        ; 16 k, so X + 16 <= $F0 can't carry; then
-        lda DCUR                   ; sbc #15 with C clear takes 16)
+        adc #16                    ; (C clear: cmp RN16 found RK < RN16, both
+        sta RK                     ; 16 k, so RK + 16 <= $F0 can't carry; then
+        tax                        ; sbc #15 with C clear takes 16)
+        lda DCUR
         sbc #15
         sta DCUR
-        jmp @row
+        jmp @nf                    ; (X = RK, not 0: @row's STX and row-0 test
+                                   ; skipped)
 @fin:   ldx RN16                   ; the near row's y's at least the row
         ldy #NX                    ; before's + 1 (254 at most before: + 1
 :       lda PY-16,x                ; stays in a byte)
@@ -207,8 +204,7 @@ lrow:   lda #16
 :       lda HT,y                   ; keeps X and Y)
         sta MT0                    ; a
         lda HT+16,y
-        sta MT1                    ; b (as lerp4's sty MT1 left it)
-        jsr lerp4e                 ; lerp4 past its sta MT0, sty MT1, tya
+        jsr lerp4e                 ; lerp4 past its sta MT0, tya (A = b)
         sta WH,x
         iny
         inx
@@ -223,7 +219,7 @@ lrow:   lda #16
 lerp4:  sta MT0
 
         tya
-lerp4e: sec                        ; (lrow's entry: A = b = MT1, MT0 = a)
+lerp4e: sec                        ; (lrow's entry: A = b, MT0 = a)
         sbc MT0                    ; d = b - a (C set: d >= 0)
         beq @z
         bcc @n
@@ -254,20 +250,26 @@ lerp4e: sec                        ; (lrow's entry: A = b = MT1, MT0 = a)
 ; kept; clobbers MT1, MQB.
 mul4:   sta MT1
         lda LQ
-        sta MQB
-        lda #0
         .repeat 4, k
+        .if k = 0
+        lsr a                      ; bit 0 from A; MQB = q >> 1 (as before)
+        sta MQB
+        lda #0                     ; (C kept)
+        bcc :+
+        lda MT1                    ; 0 + MT1
+        .else
         lsr MQB
         bcc :+
         clc
         adc MT1
+        .endif
 :
         .if k < 3
         asl MT1
         .endif
         .endrepeat
-        clc
-        rts
+        rts                        ; C clear: the last bcc's, or its adc's
+                                   ; (the sum at most 225)
         .segment "SG1"
         .code
 
@@ -278,54 +280,52 @@ mul4:   sta MT1
 ; HORIZON is its top byte; it is stepped down by 16 r (Q0) a height.
 ; In: rl, rh = r; HGV; EYV; HLO, HHI.  Clobbers A, X, Y, Y0..Y0+2,
 ; Q0..Q0+2.
-ytab:   lda HGV                    ; m = CAMH + hg - HLO
+ytab:   lda rh                     ; Q = 4 r, the multiplicand (r < 8192:
+        sta Q0+1                   ; eyrow's assert, so 4 r < 32768)
+        lda rl
+        asl a
+        rol Q0+1
+        asl a
+        rol Q0+1
+        sta Q0
+        lda HGV                    ; m = CAMH + hg - HLO
         clc
         adc #CAMH
         sec
         sbc HLO
-        lsr a                      ; m r + 2048, 8 x 16 from m's bottom bit:
+        lsr a                      ; 4 m r + 8192, 8 x 16 from m's bottom bit:
         sta Y0                     ; the sum's top bytes in A and Y0+1, started
-        lda #0                     ; at 2048 (A = 8), shifted down into Y0 as
+        lda #0                     ; at 8192 (A = 32), shifted down into Y0 as
         sta Y0+1                   ; m's bits leave it
         ldx #8
-        txa
+        lda #32
 @m:     bcc :+
         tay
         lda Y0+1
         clc
-        adc rl
+        adc Q0
         sta Y0+1
         tya
-        adc rh
+        adc Q0+1
 :       ror a
         ror Y0+1
         ror Y0
         dex
         bne @m
-:       asl Y0                     ; 16 times: 16 m r + 32768
-        rol Y0+1
-        rol a
-        asl Y0
-        rol Y0+1
-        rol a
-        asl Y0
-        rol Y0+1
+:       asl Y0                     ; 4 times: 16 m r + 32768 (4 m r + 8192 <
+        rol Y0+1                   ; 2^22: no bit lost)
         rol a
         asl Y0
         rol Y0+1
         rol a
         sta Y0+2
-:       lda rl                     ; Q = 16 r
-        sta Q0
-        lda rh
-        sta Q0+1
-        lda #0
-        ldy #4
+:       lda #0                     ; Q = 16 r: 4 r shifted twice more
+        asl Q0
+        rol Q0+1
+        rol a
 :       asl Q0
         rol Q0+1
         rol a
-        dey
-        bne :-
         sta Q0+2
         ldy HLO
 @h:     lda Y0+2                   ; the line less HORIZON, + EYV + HORIZON
@@ -363,7 +363,8 @@ ytab:   lda HGV                    ; m = CAMH + hg - HLO
 ; xrow: PX + X + i, the row's x's (land.project's sx): the ends on the clip
 ; planes from Q = 1152 r, corners 1..NX-2 from B1 and r (the module's header).
 ; In: X = 16 k, rl, rh = r, cxs.  Clobbers A, X, Y, Y0..Y0+2 (M), Q0..Q0+2.
-xrow:   lda rh                     ; Q = r << 7 ...
+xrow:   lda rh                     ; Q = r << 7 ... (rh also seeds Y0+2,
+        sta Y0+2                   ; r << 2's high byte, below)
         lsr a
         sta Q0+2
         lda rl
@@ -372,14 +373,12 @@ xrow:   lda rh                     ; Q = r << 7 ...
         lda #0
         ror a
         sta Q0
-        lda rh                     ; ... + r << 10 (low byte 0): r << 2,
-        sta Y0+2                   ; its high byte shifted in Y0+2, its low
-        lda rl                     ; byte in A
+        lda rl                     ; ... + r << 10 (low byte 0): r << 2,
+        asl a                      ; its high byte shifted in Y0+2, its low
+        rol Y0+2                   ; byte in A
         asl a
-        rol Y0+2
-        asl a
-        rol Y0+2
-        clc
+        rol Y0+2                   ; (C clear after: rh < 32, bit 6 clear)
+        .assert DI0 > 128, error, "xrow: r < 8192 (rh < 32): no carry out of r << 2"
         adc Q0+1
         sta Q0+1
         tay                        ; (Q0+1 kept for the right end's carry)
@@ -397,19 +396,19 @@ xrow:   lda rh                     ; Q = r << 7 ...
         sbc Q0+2
         sta PX,x
         lda cxs                    ; M = Q + 16 cxs r: 16 cxs r first, cxs's
-        sta MT1                    ; bits from the bottom, each adding r << 8
-        lda #0                     ; to the sum (A its top byte), shifted down
-        sta Y0                     ; after each (exact: its low 4 bits stay 0;
-        sta Y0+1                   ; under 2^24, r < 9440)
-        lsr MT1                    ; bit 0 (the sum 0 before it)
+        sta Y0                     ; bits (0..15) from the bottom of Y0 itself,
+        lda #0                     ; each ror Y0 shifting the next into C as
+        sta Y0+1                   ; the sum (A its top byte) shifts down into
+                                   ; it (exact: its low 4 bits end 0, cxs's
+                                   ; gone after 5 shifts; under 2^24, r < 9440)
+        lsr Y0                     ; bit 0 (the sum 0 before it)
         bcc :+
         lda rl
         sta Y0+1
         lda rh
 :       lsr a
         ror Y0+1
-        ror Y0
-        lsr MT1                    ; bit 1
+        ror Y0                     ; C: bit 1
         bcc @b2
         tay
         clc
@@ -420,8 +419,7 @@ xrow:   lda rh                     ; Q = r << 7 ...
         adc rh
 @b2:    ror a                      ; (the add's carry in)
         ror Y0+1
-        ror Y0
-        lsr MT1                    ; bit 2
+        ror Y0                     ; C: bit 2
         bcc :+
         tay
         clc
@@ -432,8 +430,7 @@ xrow:   lda rh                     ; Q = r << 7 ...
         adc rh
 :       ror a
         ror Y0+1
-        ror Y0
-        lsr MT1                    ; bit 3
+        ror Y0                     ; C: bit 3
         bcc @b4
         tay
         clc
@@ -454,17 +451,17 @@ xrow:   lda rh                     ; Q = r << 7 ...
         adc Q0+1
         sta Y0+1
         tya
-        adc Q0+2
-        sta Y0+2
+        adc Q0+2                   ; M's top byte M2, not stored: B's high
+        eor #$7F                   ; byte is (0 - M2 - borrow) ^ $80 =
+        tay                        ; (M2 ^ $7F) + C, its C added below
         lda #0                     ; 32768 - M, its top two bytes (floor /
         sec                        ; 256), + 32768 (bit 15 flipped), + r: B1
         sbc Y0
         lda #$80
         sbc Y0+1
         sta Y0+1                   ; (B's low byte)
-        lda #0
-        sbc Y0+2
-        eor #$80
+        tya
+        adc #0
         tay                        ; (B's high byte, kept in Y)
         .repeat NX-2, I            ; corners 1..NX-2: r more each, unrolled
         lda Y0+1
@@ -500,7 +497,7 @@ hgnd:   lda ZB                     ; X = 16 (ZB - ZSHIP) + 4 + (cxs >= 8): 16 ZB
         cpy #8
         adc #0
         tax
-        lda cxs                    ; across: q = (cxs + 8) & 15
+        tya                        ; across: q = (cxs + 8) & 15 (Y = cxs)
         eor #8
         sta LQ
         lda HT,x                   ; hx0, the ship's row

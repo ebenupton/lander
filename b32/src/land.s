@@ -263,18 +263,18 @@ HT      = $0880                    ; the rows' raw heights, 16 a row (project)
 CLE     = $0900                    ; pcol5's window of box bytes: 16 a row, even
 CLO     = $09A0                    ; and odd lines
 TX      = $BC                    ; the strip's top row's points (0 and NX+1:
-TY      = $0A50                    ; the margins)
+TY      = $0A40                    ; the margins)
 BX      = $CC                    ; and its bottom row's
-BY      = $0A70
+BY      = $0A50
 LO      = $DC                    ; each rung's pixels: LO..HI-1 (HI = LO:
 HI      = $EC                    ; none)
-RTPL    = $0AA0                    ; and its transitions' base: pixel x's line
+RTPL    = $0A60                    ; and its transitions' base: pixel x's line
                                    ; is in RTBUF's page at offset RTPL + x + 1
-CE      = $0AC0                    ; each box's byte on even and odd lines
-CO      = $0AD0
-SPB     = $0AE0                    ; the slow way's: each pixel's box at the top
-STL     = $0AF0                    ; and its transitions (4 a pixel: line, step)
-STD     = $0B00
+CE      = $0A70                    ; each box's byte on even and odd lines
+CO      = $0A80
+SPB     = $0A90                    ; the slow way's: each pixel's box at the top
+STL     = $0AA0                    ; and its transitions (4 a pixel: line, step)
+STD     = $0AB0
 ENTL    = ENTB0-YSKY               ; each line's entry in its STAB: low byte,
 ENTH    = ENTB1-YSKY               ; and the page within the table (lines
                                    ; YSKY..YGND+1: ENTB0, ENTB1 in LOWD)
@@ -287,7 +287,7 @@ LAH     = LAHB-YSKY                ; each line's 2 * (y >> 3) (lines
                                    ; YSKY..YGND+1: LAHB in P1)
 STABN   = 437                      ; a STAB's bytes (init's): SG0, SG1 follow
         .assert YGND+2-YSKY = 97, error, "LAH, ENTL, ENTH: 97 lines each (b32.cfg's packing)"
-CX      = $0B10                    ; the columns' map x (project)
+CX      = $0AC0                    ; the columns' map x (project)
 BCL     = $B9                    ; this strip's bottom points past YGND: a
                                    ; count (0: none)
 ZB      = $07D1                    ; ZBACK less the first row's j: row k's map
@@ -3503,22 +3503,31 @@ pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:
                                    ; none yet)
 SHF:    .byte 0                    ; zsh4's: HT to shift a row on (1) or back
                                    ; ($FF) with HTN; 0 none
-        .segment "LOWD"
         .code
 fpson:  .byte 1                    ; the readout on (game.s's F toggles it)
 rdlast: .byte 1                    ; readout's: the s row 8 shows (1: none; s is
                                    ; 0 or a sum of dvs each >= FMIN)
-        .segment "LOWD"
+        .segment "LDL"
 dvs:    .res 8                     ; flip's: the last eight frames' vertical
                                    ; syncs (init zeroes them)
 dvi:    .res 1                     ; the next entry
 vlast:  .res 1                     ; vcount at the last flip
-; the line tables (init's), each in one page (b32.cfg: LOWD, P1)
+; the line tables (init's): each at offset $40..$9F of its page (b32.cfg: LDT,
+; P2T, P1T), so that the table less YSKY, indexed by a line YSKY..YGND+1, stays
+; in the page (an indexed read crossing a page costs a cycle)
+        .segment "LDT"
 ENTB0:  .res YGND+2-YSKY
+        .segment "P2T"
 ENTB1:  .res YGND+2-YSKY
-        .segment "P1"
+        .segment "P1T"
 LAHB:   .res YGND+2-YSKY
         .code
+.macro LTPAGE t
+        .assert <t >= YSKY && <t + YGND+1-YSKY <= $FF, error, "a line table crosses a page"
+.endmacro
+        LTPAGE ENTB0
+        LTPAGE ENTB1
+        LTPAGE LAHB
 RUNXB:  .res YGND+2-YSKY           ; run's line entries, low bytes (init's)
 
         .include "b32tab.inc"     ; DCE, DCO

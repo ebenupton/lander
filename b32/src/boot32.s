@@ -99,16 +99,15 @@ takeover:
 @z0:    dex                        ; leftovers otherwise; init makes the tables
         sta $00,x                  ; over it)
         bne @z0
-        ldx #<__P1_SIZE__
+        ldx #$ED                   ; (to the stack)
 @z1:    dex
         sta $0100,x
         bne @z1
-        ldx #<__P2B_SIZE__
+        ldx #$FA
 @z2:    dex
         sta $0206,x
         bne @z2
-        .assert __P1_START__ = $0100 && __P2B_START__ = $0206 && __P2B_SIZE__ = $FA, error, "takeover: P1, P2B"
-        .assert __P1_START__ + __P1_SIZE__ + 19 = $0200, error, "takeover: the stack's 19 bytes"
+        .assert __P1H_START__ + __P1H_SIZE__ + 19 = $0200, error, "takeover: the stack's 19 bytes"
         tay
         ldx #>$0300
         stx ptr+1
@@ -168,5 +167,5 @@ palv:   .repeat 16, e
         .byte e << 4 | ((($3560 >> (4 * (((e >> 3) & 1) * 2 + ((e >> 1) & 1)))) & 7) ^ 7)
         .endrepeat
 cmd_main: .byte "LOAD L32M", 13
-        .import __P1_START__, __P1_SIZE__, __P2B_START__, __P2B_SIZE__
+        .import __P1H_START__, __P1H_SIZE__
         .import __IMG_START__, __IMG_LAST__

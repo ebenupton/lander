@@ -633,7 +633,7 @@ thc:    and #31
         eor #$FF
         adc #0
 @d:     rts
-        .segment "P1"
+        .segment "P1L"
 thxs:   .res 1                     ; throw's X
 tx:     .res 1                     ; throw's thrust, x and z
 tz:     .res 1
@@ -1244,7 +1244,7 @@ marker: lda #0                     ; (no tile: address 0)
 PIXG    = PIXM                     ; pixel 0..3's bits (LAND's)
 
 ; ---------------------------------------------------------------- state
-        .segment "P1"              ; (uninitialised: the loader zeroes it)
+        .segment "P1L"              ; (uninitialised: the loader zeroes it)
 gkb:    .res 1                    ; the keys down (keys' bits)
 gk:     .res 1                    ; the ship's direction (0..NDIR-1) and pitch
 gp:     .res 1                    ; (0..NPITCH-1, PFLAT level)
@@ -1273,7 +1273,7 @@ mka:    .res 2                     ; marker's: the tile's first byte ($xx00:
 mkb:    .res 2                     ; none) and what its two held
         .segment "GAME"
         .include "gametab.inc"
-        .segment "GA0"             ; (the dots: b32.cfg's GA0, GA1, G1C, LOWP)
+        .segment "GA0"             ; (the dots: b32.cfg's GA0, GA1, P1L, LOWP)
 plife:  .res NPART                 ; the dots: life (0 dead); position x, z (8.8
 ppx:    .res NPART                 ; tiles), y (8.8 units); velocity x, z (1/256
 ppxh:   .res NPART                 ; tile), y (1/256 unit)
@@ -1283,7 +1283,7 @@ ppzh:   .res NPART
 ppy:    .res NPART
 ppyh:   .res NPART
 pvx:    .res NPART
-        .segment "G1C"
+        .segment "P1L"
 pvxh:   .res NPART
         .segment "LOWP"
 pvz:    .res NPART

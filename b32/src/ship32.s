@@ -28,7 +28,7 @@
 
         .include "ship32.inc"
         .pushseg                   ; (shtab's) by boundary w: the mask of the
-        .segment "LOWD"            ; pixels before w in its byte, the byte's
+        .segment "LDL"             ; pixels before w in its byte, the byte's
 KTN:    .res 48                    ; offset, the next byte's first pixel
         .segment "SG0"             ; (b32.cfg's packing)
 BYN:    .res 48
@@ -1047,7 +1047,7 @@ tq8:    sta tqa                    ; V, sign-extended to 24 bits; tqb = V
 
 ; ---------------------------------------------------------------- state
 dk:     .byte $FF                  ; the attitude DBUF holds ($FF: none)
-        .segment "P2B"             ; (scratch, uninitialised: low RAM)
+        .segment "LDH"             ; (scratch, uninitialised: b32.cfg's LDH, P2H, P1H)
 dpi:    .res 1
 dal:    .res 1
 bxl:    .res 1                    ; the box (inclusive)
@@ -1078,6 +1078,7 @@ cy3:    .res 3
 EOFS    = 9                        ; the edges' arrays: long edges by face slot
 FID:    .res 9                     ; 0..8, short ones at + EOFS; face slot data
 FAY:    .res 9
+        .segment "P2H"
 FBY:    .res 9
 FCY:    .res 9
 FBX:    .res 9
@@ -1085,6 +1086,7 @@ FCX3:   .res 9
 EX:     .res 18
 EE:     .res 18
 EQ:     .res 18
+        .segment "P1H"
 ER:     .res 18
 ED:     .res 18
 ef:     .res 1
@@ -1092,7 +1094,7 @@ ey:     .res 1
 edx:    .res 1
 YLO:    .res 1
 YHI:    .res 1
-        .segment "SG0"             ; (scratch: b32.cfg's SG0, G1B, G1A, P1)
+        .segment "SG0"             ; (scratch: b32.cfg's SG0, G1B, G1A, P2L)
 WB:     .res 8                     ; its boundaries and faces
 bh:     .res 1                    ; the open band's header ($FF: none)
 bln:    .res 1                    ; its lines
@@ -1103,9 +1105,9 @@ PATTOP: .res 1                    ; PATF's next
 PATN:   .res 16
         .segment "G1A"
 PATON:  .res 16
-        .segment "P1"
-PATF:   .res 96
         .segment "G1B"
+PATF:   .res 96
+        .segment "P2L"
 LB:     .res 48                    ; the line's pixels' faces, by offset + 20
 
 ; shtab: KTN, BYN, LIM + w for w 0..47 ($00, $88, $CC, $EE by w & 3; 8 (w

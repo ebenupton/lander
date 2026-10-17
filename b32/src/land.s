@@ -180,6 +180,7 @@
 ; ============================================================================
         .setcpu "6502"
         .include "tables.inc"
+        .include "qrtab.inc"
 ; PM m: MODE 1 pixel mask m as drawn.  The MODE 2 builds (-D MODE2: a byte
 ; two pixels, each showing the even one of the two of LAND's it covers) make
 ; it the left pixel's bits ($AA) if m has pixel 0, the right's ($55) if pixel 2
@@ -1539,9 +1540,45 @@ dv2:    asl a
         sbc ra2                    ; (C set: rem >= a)
         sta rr2
 :       rts
-; div8: dvd = dvd div dvx, A = dvd mod dvx (8-bit, dvx not 0), by shifts and
-; subtractions.  X kept; clobbers Y.
-div8:   lda #0
+; div8: dvd = dvd div dvx, A = dvd mod dvx (8-bit, dvx 2 or more).  Small
+; ones (dvd < 32) at once: dvd < dvx (0, dvd); dvx 16..31 (1, dvd - dvx); dvx
+; 2..15 from qrtab (gen32.py's: (q << 4) | r, rows QRA for 2..8, QRB 9..15,
+; QOA/QOB + dvx their offsets less dvx); the rest by shifts and subtractions.
+; X kept; clobbers Y.  Callers: t_flo (dvx = |dy| >= 2), divs (dvx = 2a).
+div8:   lda dvd
+        cmp dvx
+        bcc @lt                    ; dvd < dvx: q 0, r dvd
+        cmp #32
+        bcs @sl                    ; (dvd 32 on: the loop)
+        ldy dvx
+        cpy #16
+        bcs @one                   ; dvx 16..31: q 1
+        cpy #9
+        bcs @b
+        adc QOA-2,y                ; (C clear) rows 2..8
+        tay
+        lda QRA,y
+@up:    tay                        ; q = the high nibble, r the low
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta dvd
+        tya
+        and #$0F
+        rts
+@b:     adc QOB-9,y                ; (C set: the offsets one less) rows 9..15
+        tay
+        lda QRB,y
+        jmp @up
+@one:   sbc dvx                    ; (C set) r = dvd - dvx
+        ldy #1
+        sty dvd
+        rts
+@lt:    ldy #0                     ; (A = dvd: r)
+        sty dvd
+        rts
+@sl:    lda #0
         ldy #8
 @l:     asl dvd
         rol a
@@ -3487,6 +3524,9 @@ RUNXB:  .res YGND+2-YSKY           ; run's line entries, low bytes (init's)
 ; then JMP t_back; TENxL, TENxH + n: the entry for n stores, TBLKx + 3 (TNB -
 ; n); tenl, tenh: the tables' addresses by the row (traceb patches its sites:
 ; the entries for n and for n + 1).
+QOA:    QRA_OFF                    ; div8's row offsets (qrtab.inc)
+QOB:    QRB_OFF
+QRB:    QRB_DATA                   ; (QRA is after the panel: one page)
         .segment "FILLS"
 TBLK4:  .repeat TNB, i
         sta ROWA-TNB+i,x
@@ -3529,6 +3569,8 @@ MAP32:  .incbin "MAP32"
 PANEL:  .incbin "PANELMAP"
         .res 64
         .assert * - PANEL = 9*64, error, "PANEL: 9 rows"
+QRA:    QRA_DATA                   ; div8's table, rows 2..8 (qrtab.inc): here,
+        .assert >QRA = >(* - 1), error, "QRA: one page"  ; at a fixed address, in one page
 ; R7L, R7H + di: r, the row's pixels a tile at depth index di (d = 16 (DI0 +
 ; di)): land.recip(d) = (2^21 + k) div 2k, k = DI0 + di; init's.
         .segment "GA0"

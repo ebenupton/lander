@@ -119,6 +119,22 @@ def glyphs():
     return out
 
 
+def qrtab():
+    """qrtab.inc: div8's table: for divisor d 2..15 and dividend D d..31, (D div d)
+    << 4 | D mod d (both under 16).  QRA rows d 2..8, QRB rows 9..15, each row D = d..31
+    in order; QOA + d - 2 (QOB + d - 9): row d's start less d (QOB's less 1 more: its
+    ADC has C set), so the entry is at QRA + (QOA[d] + D) mod 256."""
+    rows = {}
+    for lo, hi, name in ((2, 8, 'QRA'), (9, 15, 'QRB')):
+        t, off = [], []
+        for d in range(lo, hi + 1):
+            off.append((len(t) - d - (1 if name == 'QRB' else 0)) & 255)
+            t += [(D // d) << 4 | (D % d) for D in range(d, 32)]
+        assert len(t) <= 256
+        rows[name] = (t, off)
+    return rows
+
+
 def gametab(out):
     """gametab.inc: tools/gamegen.py's tables less MAPI (the panel's map is drawn at
     the start from MAP32), MAPX, MAPZ for the 32-tile map."""
@@ -148,6 +164,14 @@ def main():
     open(os.path.join(out, 'MAP32'), 'wb').write(map32())
     open(os.path.join(out, 'PANELMAP'), 'wb').write(panel())
     open(os.path.join(out, 'GLYPHS'), 'wb').write(glyphs())
+    with open(os.path.join(out, 'qrtab.inc'), 'w') as f:
+        f.write('; b32/tools/gen32.py\'s qrtab: div8\'s table (land.s .includes the parts)\n')
+        for name, (t, off) in qrtab().items():
+            f.write(f'.macro {name}_DATA\n')
+            for i in range(0, len(t), 16):
+                f.write('        .byte ' + ', '.join(f'${v:02X}' for v in t[i:i + 16]) + '\n')
+            f.write('.endmacro\n')
+            f.write(f'.macro {name}_OFF\n        .byte ' + ', '.join(f'${v:02X}' for v in off) + '\n.endmacro\n')
     with open(os.path.join(out, 'b32tab.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py: a colour index\'s dither bytes, even and odd lines\n')
         bs = [G.dither_bytes(e) for e in colours()]

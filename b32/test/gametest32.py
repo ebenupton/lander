@@ -10,6 +10,7 @@ the frame, the keys, the frame's cycles (gstep, project, strips, gpre, gpost), t
 the ship's state.  Importable: Game().frame(keys, vs) and state().
 """
 import os
+import random
 import sys
 
 from py65.devices.mpu6502 import MPU
@@ -47,10 +48,11 @@ class Game:
         mem.subscribe_to_write([SVIA_ORA_NH], ora_w)
         mem.subscribe_to_read([SVIA_ORA_NH], ora_r)
         self.mpu = MPU(memory=mem)
-        for addr, name in ((0x1900, 'LAND'), (0x7000, 'BOOT'), (0x8000, 'DEV')):
+        mem._subject[0:0x8000] = random.Random(32).randbytes(0x8000)   # the MOS's leftovers
+        for addr, name in ((0x1900, 'L32M'), (0x7000, 'L32')):
             data = open(os.path.join(B, name), 'rb').read()
             mem._subject[addr:addr + len(data)] = data
-        self.call(self.lab['init'])
+        self.call(self.lab['takeover'])
         mem._subject[0x5000:0x8000] = bytes(0x3000)   # (go's: the loader ran from them)
         self.mpu.memory[self.lab['back']] = 0
         self.call(self.lab['setback'])
@@ -72,14 +74,19 @@ class Game:
         a = self.lab[name]
         return [self.mpu.memory[a + i] for i in range(n)]
 
-    def frame(self, keys, vs=4):
+    def frame(self, keys, vs=None):
         self.held = {KEYS[k] for k in keys}
         m = self.mpu.memory
-        m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255
         c = 0
-        for r in ('gstep', 'project', 'strips', 'gpre', 'gpost'):
+        if vs is None:                  # the last frame's syncs: its cycles, 40000
+            vs = max(4, -(-getattr(self, 'last', 0) // 40000))   # a sync, FMIN at least
+        m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255
+        for r in ('gstep', 'project', 'strips', 'gpre', 'ship', 'gpost', 'readout'):
+            if r == 'ship' and not m[GSHV]:
+                continue
             c += self.call(self.lab[r])
         self.call(self.lab['flip'])
+        self.last = c
         return c
 
     def state(self):

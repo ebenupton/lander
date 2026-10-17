@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 
-SRC = 'b32/src/land.s'
+SRC = "b32/src/land.s"
 B, CFG = sys.argv[1], sys.argv[2]
 text = open(SRC).read()
 pat = re.compile(r'^LAYPAD  = \d+', re.M)

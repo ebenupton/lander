@@ -187,10 +187,12 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         bpl :--
 @x:     rts
         .assert <PY = 0, error, "PY page-aligned"
-RK:     .byte 0                    ; prow32's: the row's 16 k
-RN16:   .byte 0                    ; 16 RN
-DCUR:   .byte 0                    ; the row's di as a corner row
+        .segment "HIB"
+RK:     .res 1                     ; prow32's: the row's 16 k
+RN16:   .res 1                     ; 16 RN
+DCUR:   .res 1                     ; the row's di as a corner row
 YT:     .res 16                    ; ytab's: line by height
+        .code
 
 ; lrow: WH = a clip row's heights, HT + Y + i lerped towards HT + Y + 16 + i
 ; by 16 - czs sixteenths (land.lerp(a, b, 256 - fz)), i = 0..NX-1.
@@ -272,7 +274,9 @@ mul4:   sta MT1
         .endrepeat
         clc
         rts
-MQB:    .byte 0                    ; mul4's multiplier
+        .segment "HIB"
+MQB:    .res 1                     ; mul4's multiplier
+        .code
 
 ; ytab: YT + h = corner height h's line in the row: HORIZON + ((CAMH + hg - h)
 ; r + 2048) >> 12, plus EYV, held at 254 (land.project's sy), for h = HLO..HHI
@@ -360,8 +364,10 @@ ytab:   lda HGV                    ; (CAMH + hg - HLO) r, 8 x 16: the
         bne @h                     ; (always)
 @x:     rts
         .assert HORIZON = -16, error, "ytab: HORIZON -16"
-HLO:    .byte 0                    ; the row's least and greatest heights
-HHI:    .byte 0
+        .segment "HIB"
+HLO:    .res 1                     ; the row's least and greatest heights
+HHI:    .res 1
+        .code
 
 ; xrow: PX + X + i, the row's x's (land.project's sx): the ends on the clip
 ; planes from Q = 1152 r, corners 1..NX-2 from B1 and r (the module's header).

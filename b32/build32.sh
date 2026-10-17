@@ -1,6 +1,14 @@
 #!/bin/sh
-# The 32K build, development stage: build32/LAND (main RAM from $1900), build32/TABLES
-# and TABLES7 (the banks' images, for py65 at $8000 and $C000), build32/CMAP.
+# The 32K build (branch b32): build32/lander32.ssd, Lander for a 32K Model B with no
+# sideways RAM.  SHIFT+BREAK: !BOOT (an EXEC file) sets MODE 1 with every colour black
+# and the cursor off, then *RUN L32: the loader (b32/src/boot32.s, $7000), which loads
+# L32M ($1900-$4FFF: the program, its tables, the map), hands the machine over from the
+# MOS and starts.  Needs ca65, ld65, Python 3 with numpy.
+#   b32/tools/gen32.py   the renderer's and the game's tables (tables.inc, b32tab.inc,
+#                        gametab.inc, MAP32)
+#   b32/tools/ship32.py  the ship's model data (ship32.inc)
+# The tests (b32/test/: soak32.py, shiptest32.py, gametest32.py) run L32M and L32 in
+# py65.
 set -e
 cd "$(dirname "$0")/.."
 B=build32
@@ -8,5 +16,8 @@ mkdir -p $B
 python3 b32/tools/gen32.py $B
 python3 b32/tools/ship32.py $B
 ca65 -g --cpu 6502 -I b32/src -I $B --bin-include-dir $B -o $B/land.o b32/src/land.s -l $B/land.lst
-ld65 -C b32/src/b32dev.cfg -o $B/LAND $B/land.o -m $B/map.txt -Ln $B/labels.txt
-echo "LAND $(wc -c < $B/LAND | tr -d ' ') bytes"
+ld65 -C b32/src/b32.cfg -o $B/x.bin $B/land.o -m $B/map.txt -Ln $B/labels.txt
+printf 'MODE1\rVDU19,1,0;0;19,2,0;0;19,3,0;0;23,1,0;0;0;0;\r*RUN L32\r' > $B/BOOT
+python3 tools/mkdfs.py build $B/lander32.ssd LANDER32 "!BOOT:$B/BOOT:0000:FFFF" \
+    "L32:$B/L32:7000:7000" "L32M:$B/L32M:1900:1900"
+echo "L32M $(wc -c < $B/L32M | tr -d ' ') bytes, L32 $(wc -c < $B/L32 | tr -d ' '); $B/lander32.ssd"

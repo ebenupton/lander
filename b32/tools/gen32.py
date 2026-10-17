@@ -26,7 +26,7 @@ import landgen as G   # noqa: E402
 import land as L      # noqa: E402
 import gamegen as GG  # noqa: E402
 
-LAND0, LAND1, PANEL = 0x5000, 0x6800, 0x4800
+LAND0, LAND1, PANEL = 0x5000, 0x6800, 0x1200
 SCR = (LAND0 - 0x1000, LAND1 - 0x1000)      # the buffers' virtual screen starts
 B7SHIFT = 0x4000                            # bank 7's tables at $C000 (dev)
 MAP32 = 0x3800                              # 32 bytes a map row
@@ -107,12 +107,12 @@ def main():
         bs = [G.dither_bytes(e) for e in colours()]
         f.write('DCE:    .byte ' + ', '.join(f'${b[0]:02X}' for b in bs) + '\n')
         f.write('DCO:    .byte ' + ', '.join(f'${b[1]:02X}' for b in bs) + '\n')
-        rs = [L.recip((G.DI0 + di) * 16) for di in range(G.NDI)]
-        assert max(rs) < 8192
-        for nm, sh in (('R7L', 0), ('R7H', 8)):
-            f.write(f'{nm}:\n')
-            for i in range(0, len(rs), 16):
-                f.write('        .byte ' + ', '.join(f'${(r >> sh) & 255:02X}' for r in rs[i:i + 16]) + '\n')
+        cl = [2 if e == L.PADC else 0 if e in L.SEAC else 1 for e in colours()]
+        f.write('MAPC:   .byte ' + ', '.join(str(c) for c in cl + [0] * (16 - len(cl))) + '\n')
+        pd = G.dither_bytes(L.PADC)
+        f.write(f'PADE:   .byte ${pd[0]:02X}\nPADO:   .byte ${pd[1]:02X}\n')
+        assert all(L.recip((G.DI0 + di) * 16) == (2 ** 21 + G.DI0 + di) // (2 * (G.DI0 + di))
+                   for di in range(G.NDI))           # (init's R7L, R7H)
     EYS = 255 - max(L.HORIZON + (((L.CAMH + L.HMAX) * L.recip((G.DI0 + di) * 16) + L.HSCALE * 128)
                                   // (L.HSCALE * 256)) for di in range(G.NDI))
     with open(os.path.join(out, 'tables.inc'), 'w') as f:
@@ -121,7 +121,7 @@ def main():
         addr.update(LAND0=LAND0, LAND1=LAND1, PANEL=PANEL)
         for k, v in addr.items():
             f.write(f'{k:8s}= ${v:04X}\n')
-        consts = dict(TNB=G.TNB, HMAX=L.HMAX, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, NZ=L.NZ,
+        consts = dict(TNB=64, HMAX=L.HMAX, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, NZ=L.NZ,
                       ZBACK=L.ZBACK, ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=G.DI0,
                       NCLP=G.NCLP, XL=L.XL, XR=L.XR, LQOFF=G.LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH,
                       EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON, YSKY=G.YSKY,

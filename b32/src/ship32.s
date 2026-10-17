@@ -27,6 +27,12 @@
 ; ============================================================================
 
         .include "ship32.inc"
+        .pushseg
+        .segment "HIB"
+KTN:    .res 48                    ; (shtab's) by boundary w: the mask of the
+BYN:    .res 48                    ; pixels before w in its byte, the byte's
+LIM:    .res 48                    ; offset, the next byte's first pixel
+        .popseg
 
 ; zero page: the walker's (src/shipb.s's names, LAND's spare $8D-$9F and TRL;
 ; all dead when the ship is drawn)
@@ -174,14 +180,20 @@ band:   ldy #1
         sta lk+1                   ; the first read's slot byte, 7 - n
         lda PNL,x
         sta lj+1
+        lda PNH,x
+        sta lj+2
         lda SGL,x
         sta ij+1
         lda SGH,x
         sta ij+2
         lda FLL,x
         sta fj+1
+        lda FLH,x
+        sta fj+2
         lda CNL,x
         sta bcj+1
+        lda CNH,x
+        sta bcj+2
         lda sptr+1                 ; ptb = the line after sptr's
         sta ptb+1
         ldx sptr
@@ -227,7 +239,7 @@ band:   ldy #1
 :       sta pm
         lda PATON,y                ; Y: the pattern's end in PATF
         tay
-bcj:    jmp cn1                    ; (low byte patched: cn_(7-n))
+bcj:    jmp cn1                    ; (patched: cn_(7-n))
 
 page:   sta dp+1                   ; A, DBUF's page, into the reads
         .repeat 6, j
@@ -324,7 +336,7 @@ lnx:    lda dp
         sta bl
         lda #0
         sta nb
-fj:     jmp fl1                    ; (operand low byte patched: fl_(7-n))
+fj:     jmp fl1                    ; (patched: fl_(7-n))
 .macro FLIP j
 .ident(.sprintf("fl%d", j)):
         lda c0+j
@@ -357,7 +369,7 @@ line:
 lk:     adc #0                     ; (operand: 7 - n)
         sta in+1
         adc #1
-lj:     jmp pn1                    ; (low byte patched: pn_(7-n))
+lj:     jmp pn1                    ; (patched: pn_(7-n))
 slrow:   lda sptr
         sec
         sbc #8
@@ -370,7 +382,9 @@ CNL:    .byte 0, <cn6, <cn5, <cn4, <cn3, <cn2, <cn1
 SGL:    .byte 0, <seg6, <seg5, <seg4, <seg3, <seg2, <seg1
 SGH:    .byte 0, >seg6, >seg5, >seg4, >seg3, >seg2, >seg1
 FLL:    .byte 0, <fl6, <fl5, <fl4, <fl3, <fl2, <fl1
-        .assert >pn1 = >pn6 && >cn1 = >(cn6+12) && >fl1 = >fl6, error, "each chain in one page: lj, bcj, fj patch the low byte"
+PNH:    .byte 0, >pn6, >pn5, >pn4, >pn3, >pn2, >pn1
+CNH:    .byte 0, >cn6, >cn5, >cn4, >cn3, >cn2, >cn1
+FLH:    .byte 0, >fl6, >fl5, >fl4, >fl3, >fl2, >fl1
 
 ; ---------------------------------------------------------------- rast
 ; rast: DBUF, PATN, PATON, PATF, FCE, FCX and the box's offsets for GSHK,
@@ -1002,9 +1016,8 @@ smul:   sta smA
 :       tay
         lda smB
         rts
-smA:    .byte 0
-smB:    .byte 0
-smB0:   .byte 0
+
+BIT8:   .byte 1, 2, 4, 8, 16, 32, 64, 128
 
 ; tq8: tql, tqh = (V TQ) >> 8, V = A:Y (low, high) signed, TQ = 100: 25 V,
 ; then << 2, its top two bytes.  X kept; clobbers A, Y, tqa, tqb.
@@ -1053,48 +1066,46 @@ tq8:    sta tqa                    ; V, sign-extended to 24 bits
         adc tqb+2
         sta tqa+2
         rts
-tqa:    .res 3
-tqb:    .res 3
 
 ; ---------------------------------------------------------------- state
 dk:     .byte $FF                  ; the attitude DBUF holds ($FF: none)
-dpi:    .byte 0
-dal:    .byte 0
-bxl:    .byte 0                    ; the box (inclusive)
-bxr:    .byte 0
-byt:    .byte 0
-byb:    .byte 0
-OYT:    .byte 0                    ; its offsets from the centre
-OYB:    .byte 0
-OXL:    .byte 0
-OXR:    .byte 0
+        .segment "LOW2"            ; (scratch, uninitialised: low RAM)
+dpi:    .res 1
+dal:    .res 1
+bxl:    .res 1                    ; the box (inclusive)
+bxr:    .res 1
+byt:    .res 1
+byb:    .res 1
+OYT:    .res 1                    ; its offsets from the centre
+OYB:    .res 1
+OXL:    .res 1
+OXR:    .res 1
 FCE:    .res 9                     ; faces' dithers: even line, even ^ odd
 FCX:    .res 9
-ca:     .byte 0                    ; the angles' cosines, sines
-sa:     .byte 0
-cb:     .byte 0
-sb:     .byte 0
-pi:     .byte 0                    ; xform's point and its sums
-pxl:    .byte 0
-pxh:    .byte 0
-pyl:    .byte 0
-pyh:    .byte 0
-px8:    .byte 0
-xrl:    .byte 0
-xrh:    .byte 0
-zrl:    .byte 0
-zrh:    .byte 0
-tql:    .byte 0
-tqh:    .byte 0
+ca:     .res 1                    ; the angles' cosines, sines
+sa:     .res 1
+cb:     .res 1
+sb:     .res 1
+pi:     .res 1                    ; xform's point and its sums
+pxl:    .res 1
+pxh:    .res 1
+pyl:    .res 1
+pyh:    .res 1
+px8:    .res 1
+xrl:    .res 1
+xrh:    .res 1
+zrl:    .res 1
+zrh:    .res 1
+tql:    .res 1
+tqh:    .res 1
 SXV:    .res 9                     ; the vertices' pixel offsets
 SYV:    .res 9
-NVIS:   .byte 0                    ; normals: shown, "negative x" (bit f)
-NNEG:   .byte 0
+NVIS:   .res 1                    ; normals: shown, "negative x" (bit f)
+NNEG:   .res 1
 NBR:    .res 8                     ; (4096 - py) >> 9
-BIT8:   .byte 1, 2, 4, 8, 16, 32, 64, 128
-NFL:    .byte 0                    ; the faces set up
-fi:     .byte 0
-fj2:    .byte 0
+NFL:    .res 1                    ; the faces set up
+fi:     .res 1
+fj2:    .res 1
 cx3:    .res 3                     ; fset's corners
 cy3:    .res 3
 EOFS    = 9                        ; the edges' arrays: long edges by face slot
@@ -1109,27 +1120,55 @@ EE:     .res 18
 EQ:     .res 18
 ER:     .res 18
 ED:     .res 18
-ef:     .byte 0
-ey:     .byte 0
-edx:    .byte 0
-sxl:     .byte 0
-sxr:     .byte 0
-yc:     .byte 0                    ; the line
-YLO:    .byte 0
-YHI:    .byte 0
-lx0:    .byte 0                    ; its extent
-lx1:    .byte 0
-lxs:    .byte 0
-wn:     .byte 0
+ef:     .res 1
+ey:     .res 1
+edx:    .res 1
+sxl:     .res 1
+sxr:     .res 1
+yc:     .res 1                    ; the line
+YLO:    .res 1
+YHI:    .res 1
+lx0:    .res 1                    ; its extent
+lx1:    .res 1
+lxs:    .res 1
+tqa:    .res 3                     ; tq8's
+tqb:    .res 3
+smA:    .res 1                     ; smul's
+smB:    .res 1
+smB0:   .res 1
+        .segment "LOWD"            ; (scratch: page $0D)
+wn:     .res 1
 WB:     .res 8                     ; its boundaries and faces
 WF:     .res 8
-db:     .byte 0                    ; DBUF's next byte
-bh:     .byte 0                    ; the open band's header ($FF: none)
-bln:    .byte 0                    ; its lines
-NPAT:   .byte 0                    ; the patterns: the last made
-PEND:   .byte 0                    ; the open band's faces
-PATTOP: .byte 0                    ; PATF's next
+db:     .res 1                    ; DBUF's next byte
+bh:     .res 1                    ; the open band's header ($FF: none)
+bln:    .res 1                    ; its lines
+NPAT:   .res 1                    ; the patterns: the last made
+PEND:   .res 1                    ; the open band's faces
+PATTOP: .res 1                    ; PATF's next
 PATN:   .res 16
 PATON:  .res 16
 PATF:   .res 96
 LB:     .res 48                    ; the line's pixels' faces, by offset + 20
+
+; shtab: KTN, BYN, LIM + w for w 0..47 ($00, $88, $CC, $EE by w & 3; 8 (w
+; >> 2); 4 ((w >> 2) + 1)).  Run once (init).  Clobbers A, X.
+        .segment "BOOT"
+shtab:  ldx #47
+:       txa
+        and #3
+        tay
+        lda ktv,y
+        sta KTN,x
+        txa
+        and #$FC
+        asl a
+        sta BYN,x
+        lsr a
+        clc
+        adc #4
+        sta LIM,x
+        dex
+        bpl :-
+        rts
+ktv:    .byte $00, $88, $CC, $EE

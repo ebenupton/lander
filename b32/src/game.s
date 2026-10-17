@@ -695,9 +695,11 @@ thc:    and #31
         eor #$FF
         adc #0
 @d:     rts
-thxs:    .byte 0                    ; throw's X
-tx:     .byte 0                    ; throw's thrust, x and z
-tz:     .byte 0
+        .segment "HIB"
+thxs:   .res 1                     ; throw's X
+tx:     .res 1                     ; throw's thrust, x and z
+tz:     .res 1
+        .segment "GAME"
 
 ; tadd: v (X: gvx, gvy or gvz's offset) += 1.25 (A << gt5), as A << gt5 then
 ; A << (gt5 - 2); for gt5 below 2 the second term is A asr 1 (right for gt5
@@ -1253,18 +1255,177 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         sta (bsg),y
 @o:     rts
 
-; marker: the ship's dot on the map (the panel): to come.
-marker: rts
+; marker: the ship's dot on the map (the panel, ship and map drawn by the
+; loader through mappix): 2 x 2 pixels, magenta, its top line MAPZ - z's tile
+; (one less from a half tile on), its left pixel the tile's first (MAPX on,
+; 2 pixels a tile), one on from a half tile; none while GSHV is 0.  When it
+; moves the old one is put back from the map (mdot, A 0).  Clobbers A, X, Y,
+; g0, g1, gt0..gt5, mdl, mdp, mdc.  Called by gpost.
+marker: lda #$FF                   ; (no dot)
+        sta gt0
+        lda GSHV
+        beq @h
+        lda sz+1                   ; the line (C: the fraction under a half)
+        eor #$FF
+        asl a
+        lda #MAPZ
+        sbc sz+2
+        and #MAPN-1
+        sta gt0
+        lda sx+2                   ; the pixel
+        clc
+        adc #MAPX
+        asl a
+        sta gt1
+        lda sx+1
+        asl a                      ; (C: the fraction a half or more)
+        lda gt1
+        adc #0
+        and #2*MAPN-1
+        sta gt1
+@h:     lda gt0
+        cmp mkl
+        bne :+
+        lda gt1
+        cmp mkp
+        beq @r                     ; (unmoved)
+:       lda mkl                    ; the old dot back to the map's pixels
+        bmi :+
+        sta mdl
+        lda mkp
+        sta mdp
+        lda #0
+        jsr mdot
+:       lda gt1                    ; the new one remembered and drawn
+        sta mkp
+        sta mdp
+        lda gt0
+        sta mkl
+        bmi @r
+        sta mdl
+        lda #$80
+        jmp mdot
+@r:     rts
+; mdot: the four pixels (mdp, mdl), (mdp+1, mdl), (mdp+1, mdl+1), (mdp,
+; mdl+1), magenta (A $80) or the map's own (A 0).  mdp, mdl kept.
+mdot:   sta mdc
+        jsr mappix
+        inc mdp
+        jsr mappix
+        inc mdl
+        jsr mappix
+        dec mdp
+        jsr mappix
+        dec mdl
+        rts
+; mappix: the map's pixel mdp & 63 of line mdl & 31 in the panel (PANEL + 128
+; (line >> 3) + 8 (pixel >> 2) + (line & 7)): magenta (mdc bit 7) or its tile's
+; colour: tile x = pixel / 2 - MAPX, z = MAPZ - line, its class (MAPC by
+; MAP32's colour index): sea (colour 1), land (3), the pad (PADE, PADO, its
+; dither by the line).  Clobbers A, X, Y, g0, gt2..gt5.
+mappix: lda mdl
+        and #MAPN-1
+        sta gt2                    ; (the line)
+        and #7
+        sta g0
+        lda mdp
+        and #2*MAPN-1
+        sta gt3                    ; (the pixel)
+        and #$FC
+        asl a
+        ora g0
+        sta g0
+        lda gt2
+        and #8
+        beq :+
+        lda g0
+        ora #$80
+        sta g0
+:       lda gt2
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>PANEL
+        sta g0+1
+        lda gt3
+        and #3
+        tay
+        lda PIXM,y
+        sta gt4                    ; (the pixel's bits)
+        bit mdc
+        bpl :+
+        and #$F0                   ; magenta
+        bne @w
+:       lda #MAPZ                  ; its tile: z, then x
+        sec
+        sbc gt2
+        and #MAPN-1
+        sta gt5
+        lda gt3
+        lsr a
+        sec
+        sbc #MAPX
+        and #MAPN-1
+        ldy gt5                    ; MAP32 + 32 z + x: (z & 7) << 5 | x, page
+        sta gt5                    ; + (z >> 3)
+        tya
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        ora gt5
+        tax
+        tya
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>MAP32
+        sta @m+2
+@m:     lda MAP32,x
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        tax
+        lda MAPC,x                 ; the class: 0 sea, 1 land, 2 the pad
+        beq @s
+        lsr a
+        bcs @l
+        lda gt2                    ; the pad: its dither by the line
+        lsr a
+        lda PADE
+        bcc :+
+        lda PADO
+:       and gt4
+        jmp @w
+@s:     lda #$0F                   ; sea: colour 1
+        and gt4
+        jmp @w
+@l:     lda gt4                    ; land: colour 3
+@w:     sta gt5                    ; the pixel's bits replaced in the byte
+        lda gt4
+        eor #$FF
+        ldy #0
+        and (g0),y
+        ora gt5
+        sta (g0),y
+        rts
+
 PIXG    = PIXM                     ; pixel 0..3's bits (LAND's)
 
 ; ---------------------------------------------------------------- state
-gkb:    .byte 0                    ; the keys down (keys' bits)
-gk:     .byte 0                    ; the ship's direction (0..NDIR-1) and pitch
-gp:     .byte 0                    ; (0..NPITCH-1, PFLAT level)
-thr:    .byte 0                    ; this step's thrust: 0 none, 1 full (2
+        .segment "HIB"             ; (uninitialised: the loader zeroes it)
+gkb:    .res 1                    ; the keys down (keys' bits)
+gk:     .res 1                    ; the ship's direction (0..NDIR-1) and pitch
+gp:     .res 1                    ; (0..NPITCH-1, PFLAT level)
+thr:    .res 1                    ; this step's thrust: 0 none, 1 full (2
                                    ; hover: DP11_MOUSE)
-landed: .byte 0                    ; 1: sitting on the pad
-ctim:   .byte 0                    ; crashed: steps left (0: flying)
+landed: .res 1                    ; 1: sitting on the pad
+ctim:   .res 1                    ; crashed: steps left (0: flying)
 sx:     .res 3                     ; position: x, z, y, 24-bit, 65536 a tile (y
 sz:     .res 3                     ; 4096 a height unit)
 sy:     .res 3
@@ -1272,16 +1433,24 @@ gvx:    .res 2                     ; velocity, 16-bit, 16384 a tile/Lander step
 gvy:    .res 2                     ; (consecutive: step runs X over them)
 gvz:     .res 2
 su:     .res 2                     ; the ship's height in units, 8.8 (units')
-fkey:   .byte 0                    ; (keys': F's bit last time)
-sstp:   .byte 0                    ; (snd's: the crash's step)
-dpass:  .byte 0                    ; (dots': 0 the far dots, $80 the near)
-tt0:    .byte 0                    ; (tadd's)
-tt1:    .byte 0
-sctl:   .byte $FF                  ; the noise control and attenuation bytes as
-satt:   .byte $FF                  ; last written
-rnd:    .byte 0                    ; rand's state
-scrg:   .byte 0                    ; the screen being written to (high byte)
-pnext:  .byte 0                    ; emit's last dot
+fkey:   .res 1                    ; (keys': F's bit last time)
+sstp:   .res 1                    ; (snd's: the crash's step)
+dpass:  .res 1                    ; (dots': 0 the far dots, $80 the near)
+tt0:    .res 1                    ; (tadd's)
+tt1:    .res 1
+sctl:   .res 1                     ; the noise control and attenuation bytes as
+satt:   .res 1                     ; last written (ginit's: $FF)
+rnd:    .res 1                    ; rand's state
+scrg:   .res 1                    ; the screen being written to (high byte)
+pnext:  .res 1                    ; emit's last dot
+mkl:    .res 1                     ; the map's dot: line ($FF none) and left
+mkp:    .res 1                     ; pixel
+mdl:    .res 1                     ; (mdot's: line, pixel, colour)
+mdp:    .res 1
+mdc:    .res 1
+        .segment "GAME"
+        .include "gametab.inc"
+        .segment "LOW1"            ; (the dots: page 1, and LOWP)
 plife:  .res NPART                 ; the dots: life (0 dead); position x, z (8.8
 ppx:    .res NPART                 ; tiles), y (8.8 units); velocity x, z (1/256
 ppxh:   .res NPART                 ; tile), y (1/256 unit)
@@ -1291,14 +1460,8 @@ ppy:    .res NPART
 ppyh:   .res NPART
 pvx:    .res NPART
 pvxh:   .res NPART
+        .segment "LOWP"
 pvz:    .res NPART
 pvzh:   .res NPART
 pvy:    .res NPART
 pvyh:   .res NPART
-mkl:    .res 1                     ; the map's dot: line ($FF none) and left
-mkp:    .res 1                     ; pixel
-mdl:    .res 1                     ; (mdot's: line, pixel, colour)
-mdp:    .res 1
-mdc:    .res 1
-
-        .include "gametab.inc"

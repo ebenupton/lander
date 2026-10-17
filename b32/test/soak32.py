@@ -26,7 +26,7 @@ Environment:
 The machine: build/LAND at $1900; TABLES, TABLES2, SHIPB and TABLES7 as
 sideways banks 4..7, a write to ROMSEL ($FE30) paging one in at $8000 (the
 bank paged out keeps the writes made to it).  No OS, no hardware beyond that:
-the CRTC and VIA addresses are plain memory.  `init` is run once, then `back`
+the CRTC and VIA addresses are plain memory.  `takeover` (the loader's, init's caller) is run once, then `back`
 set to 0 and `setback` run, as LAND's start does.
 
 A frame: the camera (cxt, cxs, czt, czs) and CAME set; vcount set to vflip + 4
@@ -50,6 +50,7 @@ min, max: the call's, as if by JSR, with the bank already paged: no call6);
 exit status 1 if any frame failed.
 """
 import os
+import random
 import sys
 
 os.environ['LAND_MAP'] = '32'
@@ -128,16 +129,17 @@ def consts():
 
 def machine():
     """py65 with LAND at $1900, bank 4's image at $8000, bank 7's at $C000 and the
-    colour map at CMAPE (flat: no paging), `init` run and the land buffer drawn set
+    colour map at CMAPE (flat: no paging), `takeover` run and the land buffer drawn set
     to 0: (mpu, labels)."""
     lab = labels()
     k = consts()
     mpu = MPU(memory=ObservableMemory())
     m = mpu.memory
-    for addr, name in ((0x1900, 'LAND'), (0x7000, 'BOOT'), (0x8000, 'DEV')):
+    m[0:0x8000] = random.Random(32).randbytes(0x8000)   # the MOS's leftovers
+    for addr, name in ((0x1900, 'L32M'), (0x7000, 'L32')):
         data = open(os.path.join(B, name), 'rb').read()
         m[addr:addr + len(data)] = data
-    call(mpu, lab['init'])
+    call(mpu, lab['takeover'])
     m[0x5000:0x8000] = bytes(0x3000)              # (go's: the loader ran from them)
     m[lab['back']] = 0
     call(mpu, lab['setback'])

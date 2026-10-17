@@ -220,9 +220,9 @@ UVIA_ACR = $FE6B                   ; (0: timer 2 counts the clock)
 CR_ROWS = 20                       ; the CRTC's character rows displayed (R6),
 CR_VSYNC = 28                      ; the row of its vertical sync (R7) and its
 CR_TOTAL = 39                      ; rows a frame (R4 + 1, the MODE's), of 512us
-T2ROW0  = $FF - ((CR_TOTAL-CR_VSYNC)*512 - 1280)/256  ; T2H at least: at most
-                                   ; 4352us since the sync, 1280us (2.5 rows)
-                                   ; before row 0 (flip's)
+T2ROW0  = $FF - EV1US/256 + 3     ; T2H at least: at most 7680us since the
+                                   ; sync, before irq's E1 (at EV1US) takes
+                                   ; lfront for the land's segment (flip's)
 T2DEND  = $FF - (CR_TOTAL-CR_VSYNC+CR_ROWS)*512/256  ; T2H at least: at most
                                    ; 15872us, the display's end (strips')
 WRSEL_WATFORD = $FF30              ; a Watford board's write select: a store to
@@ -252,6 +252,7 @@ BOARD_SOLIDISK = 2
 MARGIN  = 0                        ; pixels beyond the bottom row's ends before
                                    ; rounding out to a byte boundary (setup)
 
+DBUF    = $0300                    ; the ship's lines (ship32.s), a page
 ROWA    = $0400
 ROWB    = $0500
 RTBUF   = $0600
@@ -285,7 +286,7 @@ CURB    = $0BA0
 STAB    = $0E00
 LAH     = $16C2-YSKY               ; each line's 2 * (y >> 3) (lines
                                    ; YSKY..YGND+1)
-        .assert ENTL + YSKY >= STAB + 6*$100 + 437 && ENTH + YGND+2 <= LAH + YSKY, error, "ENTL, ENTH: between STAB t=3 and LAH (page $0D is the MOS's)"
+        .assert ENTL + YSKY >= STAB + 2*$100 + 437 && ENTH + YGND+2 <= LAH + YSKY, error, "ENTL, ENTH: past STAB 1, before LAH"
         .assert YGND+2-YSKY <= 97, error, "LAH, ENTL: 97 lines each"
 CX      = $0B30                    ; the columns' map x (project)
 BCL     = $07D5                    ; this strip's bottom points past YGND: a
@@ -431,12 +432,11 @@ mo:     .res 1
 
         .code
 ; ---------------------------------------------------------------- start
-; go: LAND's first byte, at its load address.  LANDS jumps here with the four
-; banks loaded, bank 4 paged in and write selected, the screen narrowed and
-; screen 0 cleared.  Never returns.
-; go: the main loop (the display and the ship to come): the game's start,
-; then each frame the game's step, the projection, the strips, the dots
-; beyond the ship, (the ship,) the nearer dots and the map's marker, flip.
+; go: the loader's (boot32.s) last jump, with the machine taken over and the
+; tables made.  The land buffers cleared, screen 0 the one drawn (setback), the
+; game's start; then each frame the game's step, the projection, the strips,
+; the dots beyond the ship, the ship (unless crashed), the nearer dots and the
+; map's marker, the readout, flip.  Never returns.
 go:     lda #0                     ; the land buffers black (the loader ran
         tay                        ; from them)
         sta ptr
@@ -447,6 +447,8 @@ go:     lda #0                     ; the land buffers black (the loader ran
         bne :-
         inc ptr+1
         bpl :-                     ; (to $7FFF)
+        sta back                   ; screen 0 first
+        jsr setback
         jsr ginit
 loop:   jsr gstep
         jsr project
@@ -456,8 +458,92 @@ loop:   jsr gstep
         beq :+
         jsr ship
 :       jsr gpost
+        jsr readout
         jsr flip
         jmp loop
+
+; ---------------------------------------------------------------- the display
+; Two CRTC frames a field (vertical rupture), 39 rows of 8 lines in all, the
+; vertical sync at row 28 as a one-frame MODE 1 has it:
+;   the panel: rows 0..7, R4 7, the first 5 displayed (R6 5), 16 characters
+;     wide (R1 16, at the left), from PANEL: the map and the readout; the
+;     other 3 rows black border;
+;   the land: rows 8..38, R4 30, 12 displayed (R6 12), 64 wide, from the
+;     front land buffer (lfront), its sync at its row 20 (R7 20).
+; A frame's start address is taken at its start (VCC 0); R4 is compared at
+; each row's end and R6 at each row's start, so each frame's are written while
+; it runs, the next's start address too.  Three interrupts (irq):
+;   E0, the sync (the system VIA's CA1): vcount, timer 2 restarted (the time
+;     since the sync), the panel's R1, R6, start; timer 1 for E1;
+;   E1, EV1US later, the panel's row 5 (its display over): R4 7, R7 20, the
+;     land's R1, R6 and start (lfront); timer 1 for E2;
+;   E2, EV2US on, the land's row 0: R4 30.
+EV1US   = 11*512 + 5*512 + 250     ; the sync to E1: the panel's row 5 (it
+                                   ; starts 11 rows after the sync)
+EV2US   = 3*512 + 300              ; E1 to E2: the land's row 0 (+ 300us)
+SVIA_IFR = $FE4D
+SVIA_IER = $FE4E
+UVIA_T1L = $FE64                   ; the user VIA's timer 1 (low, high: a
+UVIA_T1H = $FE65                   ; one-shot, ACR 0)
+UVIA_IFR = $FE6D
+UVIA_IER = $FE6E
+.macro CRW r, v                    ; CRTC register r = A (v blank) or #v
+        lda #r
+        sta CRTC_IDX
+.ifnblank v
+        lda #v
+.else
+        lda lfront
+.endif
+        sta CRTC_DAT
+.endmacro
+; irq (IRQ1V: the MOS ROM's entry has stored A in $FC): E0, E1 or E2 above.
+irq:    txa
+        pha
+        lda #$02                   ; the sync (CA1)?
+        bit SVIA_IFR
+        beq @t
+        sta SVIA_IFR               ; (its flag cleared)
+        inc vcount
+        lda #$FF
+        sta UVIA_T2H               ; the time since the sync
+        CRW 1, 16                  ; the panel: 16 wide, 5 rows, PANEL
+        CRW 6, 5
+        CRW 12, >(PANEL/8)
+        CRW 13, <(PANEL/8)
+        lda #<EV1US
+        sta UVIA_T1L
+        lda #>EV1US
+        sta UVIA_T1H               ; (timer 1 off for E1; its flag cleared)
+        lda #0
+        sta evn
+        beq @x                     ; (always)
+@t:     lda UVIA_IFR               ; timer 1 (E1, E2)?
+        and #$40
+        beq @x
+        lda UVIA_T1L               ; (its flag cleared)
+        lda evn
+        bne @e2
+        CRW 4, 7                   ; E1: the panel's end; the land's frame
+        CRW 7, 20
+        CRW 1, 64
+        CRW 6, 12
+        CRW 12
+        CRW 13, 0
+        lda #<EV2US
+        sta UVIA_T1L
+        lda #>EV2US
+        sta UVIA_T1H
+        inc evn
+        bne @x                     ; (always)
+@e2:    CRW 4, 30                  ; E2: the land's 31 rows
+@x:     pla
+        tax
+        lda $FC
+        rti
+evn:    .byte 0                    ; irq's: the next timer event (0 E1, 1 E2)
+lfront: .byte >(LAND0/8)           ; the land shown (flip's)
+        .assert <(LAND0/8) = 0 && <(LAND1/8) = 0, error, "the land buffers' R13 is 0"
 
 ; flip: when FMIN vertical syncs have passed since the last flip, show the
 ; screen just drawn (`back`) and make the other the one to draw.  Records the
@@ -470,14 +556,12 @@ flip:   lda vcount                 ; (FMIN = 4: 12.5 frames a second at most)
         sbc vlast
         cmp #FMIN
         bcc flip
-        lda #12                    ; CRTC R12: the screen start's high byte
-        sta CRTC_IDX               ; ($06 or $0B; R13 is 0 for both: LANDS's)
-        lda back
-        beq :+
+        lda back                   ; the land shown from the next panel event
+        beq :+                     ; on (irq's: R12; R13 is 0 for both)
         lda #>(LAND1/8) - >(LAND0/8)
 :       clc
         adc #>(LAND0/8)
-        sta CRTC_DAT
+        sta lfront
         lda vcount
         sta vflip
         sec
@@ -510,8 +594,47 @@ setback:
         lda back
         asl a
         sta sh_b+1                 ; (sethalf's ORA #: t = 2 * back + half)
-        rts
+; The two STABs (one a half) store to the screen `back`: when they hold the
+; other's addresses (stabs), each line's STA operand's high byte moves by the
+; screens' difference, in both.  Clobbers A, X, Y, ptr.
+        lda back
+        cmp stabs
+        beq @x
+        sta stabs
+        ldy #SCR1-SCR0             ; (the move: up to screen 1, down to 0)
+        cmp #0
+        bne :+
+        ldy #<(SCR0-SCR1)
+:       sty sdl
+        ldx #YSKY
+@l:     lda ENTL,x                 ; line X's STA in STAB 0: its operand's
+        sta ptr                    ; high byte 2 on
+        lda ENTH,x
+        ora #>STAB
+        sta ptr+1
+        ldy #2
+        lda (ptr),y
+        clc
+        adc sdl
+        sta (ptr),y
+        inc ptr+1                  ; and in STAB 1, two pages on
+        inc ptr+1
+        lda (ptr),y
+        clc
+        adc sdl
+        sta (ptr),y
+        inx
+        cpx #YGND+1
+        bne @l
+@x:     rts
+stabs:  .byte 0                    ; the screen the STABs store to (init's: 0)
+rk:     .res 2                     ; (init's: k, the divisor, the dividend and
+rd:     .res 2                     ; quotient, the remainder)
+rn:     .res 3
+rr:     .res 2
+sdl:    .byte 0
 
+        .include "boot32.s"
 ; ---------------------------------------------------------------- init
         .segment "BOOT"            ; (the loader's: run once, then overwritten)
 ; init: both screens black ($3000-$7FFF: LANDS with them); the four STABs and
@@ -520,7 +643,58 @@ setback:
 ; JMPs; EINL; pp to dummy; the camera at tile (40, 30), sixteenths 0; dvs.  No
 ; OS calls: the tests (test/landsoak.py, test/gametest.py) run it under py65.
 ; Needs bank 4 paged in and writable.  Clobbers A, X, Y, ptr, tmp.
-init:
+init:   jsr shtab                  ; the ship's walker's tables
+        lda #<DI0                  ; R7L, R7H: (2^21 + k) div 2k, k = DI0 + di
+        sta rk                     ; (rk, rk+1: k)
+        lda #>DI0
+        sta rk+1
+        ldx #0
+@r7:    lda rk                     ; the divisor 2k
+        asl a
+        sta rd
+        lda rk+1
+        rol a
+        sta rd+1
+        lda rk                     ; the dividend 2^21 + k, 24-bit (rn)
+        sta rn
+        lda rk+1
+        sta rn+1
+        lda #$20
+        sta rn+2
+        lda #0                     ; the remainder (rr, rr+1), the quotient
+        sta rr                     ; shifted into rn
+        sta rr+1
+        ldy #24
+@rd:    asl rn
+        rol rn+1
+        rol rn+2
+        rol rr
+        rol rr+1
+        lda rr
+        sec
+        sbc rd
+        pha
+        lda rr+1
+        sbc rd+1
+        bcc :+
+        sta rr+1
+        pla
+        sta rr
+        inc rn
+        bne :++                    ; (always: bit 0 was 0)
+:       pla
+:       dey
+        bne @rd
+        lda rn
+        sta R7L,x
+        lda rn+1
+        sta R7H,x
+        inc rk
+        bne :+
+        inc rk+1
+:       inx
+        cpx #NDI
+        bne @r7
         ; STAB t = 2 * screen + half, at page >STAB + 2t: for each line x of
         ; YSKY..YGND+1, STA addr,Y (RTS at YGND+1), then LDA vo (even x) or
         ; TXA (odd); ENTL, ENTH hold each line's entry
@@ -587,7 +761,7 @@ init:
         bne @line
         inc tmp
         lda tmp
-        cmp #4
+        cmp #2
         bne @tab
         ldx #0                     ; the line tables, for lines YSKY..YGND+1
 @ent:   cpx #YSKY                  ; (X runs 0..255; the rest skipped)
@@ -982,13 +1156,33 @@ su_bot:   jmp traceb               ; the bottom row's line (its RTS returns to
 ; t_end, t_inc, t_dq, t_dr, t_rr, tf_j, t1_j, tx_j, jv0, t_bq, tr_k and
 ; tr_inc.  Entered by setup's JMP; its RTS (t_fr's) returns to strips.
 traceb: lda bota+1                 ; the row's page: jvb's store, and the
-        sta jvb+2                  ; fills' entry table for it (TENH4 for
-        clc                        ; ROWA, TENH5 for ROWB: TENH4 - 4 + page)
-        adc #>TENH4-4
+        sta jvb+2                  ; fills' entry tables for it (TEN4L, TEN4H
+        and #1                     ; for ROWA, TEN5L, TEN5H for ROWB) into the
+        tay                        ; four sites' operands
+        lda tenl,y
+        sta tv_l+1
+        sta tx_l+1
+        lda tenl+2,y
+        sta tv_l+2
+        sta tx_l+2
+        lda tenl+4,y
+        sta tf_l+1
+        sta t1_l+1
+        lda tenl+6,y
+        sta tf_l+2
+        sta t1_l+2
+        lda tenh,y
+        sta tv_h0+1
+        sta tx_h+1
+        lda tenh+2,y
+        sta tv_h0+2
+        sta tx_h+2
+        lda tenh+4,y
+        sta tf_h+1
+        sta t1_h+1
+        lda tenh+6,y
         sta tf_h+2
         sta t1_h+2
-        sta tx_h+2
-        sta tv_h0+2
         ldx #NX+1                  ; the end: xr + 1 (t_end's operand), or the
         ldy BX,x                   ; next strip's xr + 1 if further right
         iny
@@ -1031,7 +1225,6 @@ traceb: lda bota+1                 ; the row's page: jvb's store, and the
 t_all:  lda #YGND+1
         sta tyv
         bne t_end                  ; (always)
-        .res 24                    ; (padding: keeps the code after it in place)
 t_end:  ldx #0                     ; (operand: the end + 1) the row's end: the
         jmp t_fl                   ; pending run to it, then t_fr's RTS returns
                                    ; to strips
@@ -1081,8 +1274,11 @@ t_seg:  lda BY+1,x                 ; segment X: (BX, BY) to (BX+1, BY+1); tyv
         jsr div8
         asl a
         sta t_rr+1                 ; r2: t_rr's operand
-        lda dvd                    ; q2; q = q2 >> 1 = dx div 2|dy| (C: q2
-        sta rq2                    ; odd)
+        lda dvd                    ; q2 (past TNB: beyond the fills, a pixel
+        cmp #TNB+1                 ; at a time)
+        bcc :+
+        jmp t_o
+:       sta rq2                    ; q = q2 >> 1 = dx div 2|dy| (C: q2 odd)
         lsr a
         sta rq
         lda t_rr+1                 ; rem = dx mod 2|dy| = r2 / 2, + |dy| if q2
@@ -1099,23 +1295,23 @@ t_seg:  lda BY+1,x                 ; segment X: (BX, BY) to (BX+1, BY+1); tyv
         adc BX,x                   ; (C clear: q + 1 does not carry)
         tax
         ldy rq2                    ; jv0: the fill q2 stores before its end,
-        lda TENL,y                 ; for the runs after the first
+tv_l:   lda TEN4L,y                ; for the runs after the first
         sta jv0+1
-tv_h0:  lda TENH4,y                ; (operand: the row's table)
+tv_h0:  lda TEN4H,y                ; (operand: the row's table)
         sta jv0+2
         txa                        ; the pending run's length - 1 (C clear: X
         sbc tcnt                   ; > tcnt)
         tay
-        bmi t_fl1                  ; (more than TNB: the loop)
-        lda TENL+1,y               ; tf_j: the fill, length Y + 1
+        cpy #TNB
+        bcs t_fl1                  ; (more than TNB: the loop)
+tf_l:   lda TEN4L+1,y              ; tf_j: the fill, length Y + 1
         sta tf_j+1
-tf_h:   lda TENH4+1,y              ; (operand: the row's table)
+tf_h:   lda TEN4H+1,y              ; (operand: the row's table)
         sta tf_j+2
         clc                        ; (t_back's ADC)
         ldy dva                    ; Y: the steps left, this one included
         lda tyv
 tf_j:   jmp t_back                 ; (operand: the fill, which jumps to t_back)
-        .res 1                     ; (padding: keeps the code after it in place)
 t_fl1:  ldy dva                    ; the first run longer than TNB: the loop,
         jmp t_flo                  ; then t_back
 t_one:  lda terr                   ; |dy| 1: the pending run to x0 + ceil(dx /
@@ -1124,15 +1320,15 @@ t_one:  lda terr                   ; |dy| 1: the pending run to x0 + ceil(dx /
         tax
         sbc tcnt                   ; length - 1 (C clear: X > tcnt)
         tay
-        bmi t_fl1                  ; (more than TNB: the loop)
-        lda TENL+1,y               ; t1_j: the fill, length Y + 1
+        cpy #TNB
+        bcs t_fl1                  ; (more than TNB: the loop)
+t1_l:   lda TEN4L+1,y              ; t1_j: the fill, length Y + 1
         sta t1_j+1
-t1_h:   lda TENH4+1,y              ; (operand: the row's table)
+t1_h:   lda TEN4H+1,y              ; (operand: the row's table)
         sta t1_j+2
         ldy #1                     ; one step: t_back steps y and ends at
         lda tyv                    ; t_last
 t1_j:   jmp t_back                 ; (operand: the fill)
-        .res 1                     ; (padding: keeps the code after it in place)
 t_fr:   lda #<(t_last-t_bq-2)      ; t_fl's end: t_bq back to BEQ t_last; the
         sta t_bq+1                 ; RTS is t_fl's (from t_end, traceb's)
         rts
@@ -1158,9 +1354,9 @@ t_fl:   lda #<(t_fr-t_bq-2)        ; the pending run to X (not included) as a
         tay
         cpy #TNB+1
         bcs t_flf                  ; (more than TNB: the loop)
-        lda TENL,y                 ; tx_j: the fill, length Y
+tx_l:   lda TEN4L,y                ; tx_j: the fill, length Y
         sta tx_j+1
-tx_h:   lda TENH4,y                ; (operand: the row's table)
+tx_h:   lda TEN4H,y                ; (operand: the row's table)
         sta tx_j+2
         ldy #1
         lda tyv
@@ -1176,7 +1372,6 @@ t_flo:  stx fe                     ; a run longer than TNB: tyv over tcnt ..
         bne :-
         ldy tdx2
         jmp t_fx
-        .res 10                    ; (padding: keeps the code after it in place)
 t_fx:   ldx fe
         clc                        ; (t_back's ADC)
 t_back:                            ; the fills' JMP target (init plants it): X
@@ -1467,7 +1662,6 @@ rg_rs:    tax                      ; X: the line.  E += r2 (C clear: the cpy):
         cpy dva
         bne rg_rs
         beq rg_nr
-        .res 3                     ; (padding: keeps the code after it in place)
 :       adc dvd                    ; a carry: E + r2 - 2a (C set in, clear
         sta rrem                   ; after), the next line q2 + 1 on
         txa
@@ -1649,9 +1843,12 @@ ph_hi:  cmp #0                     ; operand: xrp, cols'
         cpx xr                     ; most xr)
         bcc ph_n
         ldx xr
-ph_n:   ldy #<o_nr                 ; (>o_nr = >record: asserted below)
+ph_n:   ldy #<o_nr
         sty o_rec+1
         sty ob_rj+1
+        ldy #>o_nr
+        sty o_rec+2
+        sty ob_rj+2
         ldy #<c_srx
         sty c_rec+1
         ldy #>c_srx
@@ -1664,7 +1861,9 @@ ph_rec: cpx xr                     ; (at most xr)
 ph_r:   ldy #<record
         sty o_rec+1
         sty ob_rj+1
-        .assert >record = >o_nr, error, "record, o_nr: one page (phase patches the low byte only)"
+        ldy #>record
+        sty o_rec+2
+        sty ob_rj+2
         ldy #<recordc
         sty c_rec+1
         ldy #>recordc
@@ -1696,20 +1895,20 @@ c_nh:   lda #1
 ; LO).  Two rungs: s2v (bank 4) when the top is level (V clear, c_coly's), else
 ; split2.  Three or more (rung ri+2's LO <= x4 + 3 as well): slow, which reads
 ; mn and ys (made mx here when the top is level).  Back to c_next.
-c_dbl:  cmp LO+2,x
-        bcs c_d3
-        bvs :+
-        jmp s2v                    ; (ends at c_np)
-:       jsr split2
-        jmp c_next
-c_d3:   bvs :+
-        lda mx                     ; a level top: mn and each pixel's top are mx
+c_dbl:  bvs :+                     ; a level top: mn and each pixel's top
+        tay                        ; are mx (A, C kept)
+        lda mx
         sta mn
         sta ys
         sta ys+1
         sta ys+2
         sta ys+3
-:       jsr slow
+        tya
+:       cmp LO+2,x                 ; rung ri+2 in the column too: slow
+        bcs c_d3
+        jsr split2
+        jmp c_next
+c_d3:   jsr slow
         jmp c_next
 
 ; record: a one-box column the land covers for the first time this frame
@@ -2230,9 +2429,10 @@ sh_b:   ora #0                     ; operand: 2 * back (setback's)
         lda shs,y
         sta scrh
         clv
-        tya                        ; stabp = STAB's page for t: >STAB + 2t
+        tya                        ; stabp = STAB's page for the half: >STAB
+        and #1                     ; + 2 half (the STABs store to `back`)
         asl a
-        adc #>STAB                 ; (C clear: t < 4)
+        adc #>STAB                 ; (C clear)
         sta stabp
         rts
 zbt0:   .byte $85, $D0             ; ob_st, zb_st by kind (cols): STA flr1,
@@ -3281,11 +3481,8 @@ putg:   asl a
         asl a
         asl a
         asl a
-        sta ptr                    ; ptr = scrb * 256 + $400 + 16 tcol (row 2:
-                                   ; 512 bytes a row)
-        lda scrb
-        clc
-        adc #4
+        sta ptr                    ; ptr = the panel's row 4 + 16 tcol (128
+        lda #>(PANEL+4*128)        ; bytes a row)
         sta ptr+1
         ldy #0
 :       lda GLY,x
@@ -3302,162 +3499,49 @@ pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:
                                    ; none yet)
 SHF:    .byte 0                    ; zsh4's: HT to shift a row on (1) or back
                                    ; ($FF) with HTN; 0 none
+        .segment "HIB"
 fps10:  .res 2                     ; readout's: the rate in tenths
+        .code
 fpson:  .byte 1                    ; the readout on (game.s's F toggles it)
+        .segment "HIB"
 dvs:    .res 8                     ; flip's: the last eight frames' vertical
                                    ; syncs (init zeroes them)
 dvi:    .res 1                     ; the next entry
 vlast:  .res 1                     ; vcount at the last flip
 tcol:   .res 1                     ; putg's column (readout's); glyphs' counter
+        .code
 
         .include "b32tab.inc"     ; DCE, DCO
 
-; ---------------------------------------------------------------- s2v
-; s2v (bank 4, its free space at $B600, $B700, $B800: three pieces of up to
-; $6F bytes, the first R2OFF bytes of run2's store pages TPO0-2, before their
-; first entry): a column two rungs split, ri and ri+1, whose top is level
-; (c_dbl's V clear).  Boxes L, M, R are ri-1, ri, ri+1.  First fsplit draws
-; the whole column from mx to the floor as rung ri+1 splits it (M left of it,
-; R right: fs_c, or fs_new first when ri+1 is not the rung its tables are
-; for); c_np is made an RTS meanwhile so fsplit's exits (ff_d and the rest
-; jump to c_np) return here.  Then L is written over the pixels left of rung
-; ri, line by line from mx: rung ri's transitions in the column come from mktr
-; (TRL the lines, TRB the mask of pixels left of it below each, ended by $FF;
-; bpos2 the mask at the top), and each stretch between transitions is filled
-; read-modify-write with L's bytes (le even lines, lo2 odd) in the mask.  In:
-; X = ri, mx, flr1, lastri, CE, CO, scrh, coff, LAH, and fsplit's and mktr's.
-; Out: through c_np (JMP: cols' next column).  Clobbers A, X, Y, le, lo2,
-; bpos2, kb, tj, zp_, and fsplit's and mktr's.  Caller: c_dbl (JMP).
-        .code
-s2v:    lda CE-1,x                 ; L's bytes
-        sta le
-        lda CO-1,x
-        sta lo2
-        lda #0                     ; rung ri's transitions into TRL, TRB from 0;
-                                   ; A = its mask at the top
-        jsr mktr
-        sta bpos2
-        lda #0
-        sta kb                     ; (TRL's index)
-        lda c_np                   ; c_np an RTS while fsplit runs: its JMP c_np
-                                   ; returns to s2ov
-        pha
-        lda #OP_RTS
-        sta c_np
-        ldx ri
-        inx
-        cpx lastri                 ; rung ri+1: fsplit's tables already its
-                                   ; (fs_c), or made (fs_new)
-        bne :+
-        jsr fs_c
-        jmp s2ov
-:       jsr fs_new
-s2ov:   pla                        ; c_np's opcode back
-        sta c_np
-        lda #0
-        sta zp_                    ; ((zp_),y addresses the line: zp_+1 its
-                                   ; page, Y its offset)
-        ldx mx                     ; from the top, if above the floor
-        cpx flr1
-        bcs s2_d
-        ldy kb
-        jmp s2_c
-s2_d:   jmp c_np
-        .code
-s2_c:   txa                        ; (X: the line) the mask below the
-                                   ; transitions at or above it
-        cmp TRL,y
-        bcc s2_e
-:       lda TRB,y
-        sta bpos2
-        iny
-        txa
-        cmp TRL,y
-        bcs :-
-s2_e:   sty kb
-        lda TRL,y                  ; it ends at the next transition or the floor
-        cmp flr1
-        bcc :+
-        lda flr1
-:       sta tj
-        lda bpos2
-        beq s2_n                   ; (none left of the rung: nothing to write)
-        jmp s2_l
-s2_n:   ldx tj                     ; on from the stretch's end
-        cpx flr1
-        bcs s2_x
-        ldy kb
-        jmp s2_c
-s2_x:   jmp c_np
-        .code
-s2_l:   lda LAH,x                  ; lines X..tj-1: L into the mask's pixels
-        clc
-        adc scrh                   ; the line's page: LAH (2 * (y >> 3)) + the
-                                   ; screen's and half's
-        sta zp_+1
-        txa
-        and #7
-        ora coff                   ; Y: the line in its row | 8 * column
-        tay
-        txa
-        lsr a
-        bcs s2_o
-s2_v:   lda (zp_),y                ; an even line
-        eor le
-        and bpos2
-        eor (zp_),y
-        sta (zp_),y
-        iny
-        inx
-        cpx tj
-        beq s2_m
-s2_o:   lda (zp_),y                ; an odd line (a row's last line is odd: the
-                                   ; row test follows)
-        eor lo2
-        and bpos2
-        eor (zp_),y
-        sta (zp_),y
-        iny
-        inx
-        cpx tj
-        beq s2_m
-        txa
-        and #7
-        bne s2_v
-        inc zp_+1                  ; the next character row: two pages on, Y
-                                   ; back to the column
-        inc zp_+1
-        ldy coff
-        jmp s2_v
-s2_m:   jmp s2_n
 
 ; traceb's fills (TBLK4, TBLK5: ROWA's, ROWB's): STA ROWx-k,X for k = TNB .. 1
-; then JMP t_back; TENL, TENH4, TENH5 + n: the entry for n stores, TBLKx + 3
-; (TNB - n).  The two blocks share their low bytes (one TENL) and TENH5 is
-; TENH4 + $100 (traceb's operands patch TENH4's page by the row's).
+; then JMP t_back; TENxL, TENxH + n: the entry for n stores, TBLKx + 3 (TNB -
+; n); tenl, tenh: the tables' addresses by the row (traceb patches its sites:
+; the entries for n and for n + 1).
         .segment "FILLS"
 TBLK4:  .repeat TNB, i
         sta ROWA-TNB+i,x
         .endrepeat
         jmp t_back
-        .align 256
 TBLK5:  .repeat TNB, i
         sta ROWB-TNB+i,x
         .endrepeat
         jmp t_back
-        .align 256
-TENL:   .repeat TNB+1, n
+TEN4L:  .repeat TNB+1, n
         .byte <(TBLK4 + 3*(TNB-n))
         .endrepeat
-        .align 256
-TENH4:  .repeat TNB+1, n
+TEN4H:  .repeat TNB+1, n
         .byte >(TBLK4 + 3*(TNB-n))
         .endrepeat
-        .align 256
-TENH5:  .repeat TNB+1, n
+TEN5L:  .repeat TNB+1, n
+        .byte <(TBLK5 + 3*(TNB-n))
+        .endrepeat
+TEN5H:  .repeat TNB+1, n
         .byte >(TBLK5 + 3*(TNB-n))
         .endrepeat
-        .assert <TBLK4 = <TBLK5 && TENH5 = TENH4 + $100 && ROWB = ROWA + $100, error, "fills: one TENL; TENH5 a page past TENH4"
+tenl:   .byte <TEN4L, <TEN5L, >TEN4L, >TEN5L, <(TEN4L+1), <(TEN5L+1), >(TEN4L+1), >(TEN5L+1)
+tenh:   .byte <TEN4H, <TEN5H, >TEN4H, >TEN5H, <(TEN4H+1), <(TEN5H+1), >(TEN4H+1), >(TEN5H+1)
+        .assert ROWB = ROWA + $100 && <ROWA = 0, error, "fills: the row's page's bit 0 picks the tables"
 
         .code
         .include "proj32.s"
@@ -3465,12 +3549,15 @@ TENH5:  .repeat TNB+1, n
         .include "game.s"
         .segment "SHIP"
         .include "ship32.s"
-        .segment "DBUFS"
-DBUF:   .res 256                   ; the ship's lines (ship32.s), a page
 ; MAP32 + 32 z + x: corner (x, z)'s height (bits 0-3) and tile (x, z)'s colour
 ; index (bits 4-7: DCE, DCO), b32/tools/gen32.py's.
         .segment "MAPD"
 MAP32:  .incbin "MAP32"
+; R7L, R7H + di: r, the row's pixels a tile at depth index di (d = 16 (DI0 +
+; di)): land.recip(d) = (2^21 + k) div 2k, k = DI0 + di; init's.
+        .segment "MID"
+R7L:    .res NDI
+R7H:    .res NDI
 
 ; ---------------------------------------------------------------- the slow way
 ; Bank 4's free space again (zsh4 at $B900 and slow2 at $9200, the first R2OFF

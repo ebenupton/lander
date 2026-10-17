@@ -192,9 +192,6 @@ def inc(path):
     db = [LG.dither_bytes(SG.RAMPS[h][i]) for h in hues for i in range(16)]
     emit('RAMPE', [d[0] for d in db])
     emit('RAMPO', [d[1] for d in db])
-    emit('KTN', [(0, 0x88, 0xCC, 0xEE)[w & 3] for w in range(48)])
-    emit('BYN', [8 * (w >> 2) for w in range(48)])
-    emit('LIM', [4 * ((w >> 2) + 1) for w in range(48)])
     rows.append(f'SHIP_TQ = {TQ}')
     open(path, 'w').write('; b32/tools/ship32.py\n' + '\n'.join(rows) + '\n')
 

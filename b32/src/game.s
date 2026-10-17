@@ -90,35 +90,24 @@ SININ   = * - SINI
 
 ; spawn: the ship on the pad, still, landed, level, facing SPAWNK, the tank
 ; full, drawn, no thrust; HGV set to the pad's height for gout before hgnd
-; has run.  Clobbers A.  Called by ginit and by step when a crash ends.
-spawn:  lda #0
-        sta sx
-        sta sx+1
-        sta sz
-        sta sz+1
-        sta sy
-        sta gvx
-        sta gvx+1
-        sta gvy
-        sta gvy+1
-        sta gvz
-        sta gvz+1
-        sta ctim
+; has run.  Clobbers A, X.  Called by ginit and by step when a crash ends.
+spawn:  lda #0                     ; thr .. gvz+1 (P1's order: thr, landed, ctim,
+        ldx #gvz+1-thr             ; sx, sz, sy, gv*) all 0; thr 0: snd's next
+@z:     sta thr,x                  ; frame silence, not the crash's last step
+        dex                        ; (landed, sx+2, sz+2, sy+1 set below)
+        bpl @z
         lda #PADX                  ; the pad's middle tile in x and z
         sta sx+2
         sta sz+2
         lda #(PADH+UNDER)<<4 & 255 ; y = (PADH + UNDER) units: bytes 1 and 2 of
-        sta sy+1                   ; units * 4096
-        lda #(PADH+UNDER)>>4
-        sta sy+2
+        sta sy+1                   ; units * 4096 (byte 2 is 0: zeroed above)
+        .assert (PADH+UNDER)>>4 = 0, error, "spawn: sy+2 0, zeroed with thr .. gvz+1"
         lda #SPAWNK
         sta gk
         lda #SPAWNP
         sta gp
         lda #PADH                  ; the ground under it (hgnd's from then on)
         sta HGV
-        lda #0                     ; (snd's next frame: silence, not the crash's
-        sta thr                    ; last step)
         lda #1
         sta landed
         sta GSHV
@@ -190,17 +179,12 @@ gr_st:  sta gt0
         adc #CAMH                  ; ship, units
         sec
         sbc gt0
-gsy:    jsr shyt                   ; the ship's line: HORIZON + (d R + 2048) >>
-                                   ; 12 (d R / 16, R = 19.7 the land's pixels a tile at
-        cmp #YSKY+14-HORIZON       ; depth ZSHIP), held so 14 lines up, 16 down,
-        bcs :+                     ; stay within YSKY..YGND (d is 79..96 in
-        lda #YSKY+14-HORIZON       ; play: lines 81..102, so the holds never
-:       cmp #YGND-16-HORIZON       ; bite)
-        bcc :+
-        lda #YGND-16-HORIZON
-:       clc
-        adc #<HORIZON
-        sta GSHY
+gsy:                               ; the ship's line: HORIZON + (d R + 2048) >>
+:       tay                        ; 12 (d R / 16, R = 19.7 the land's pixels a
+:       lda GSHYT-KOFF,y           ; tile at depth ZSHIP), from GSHYT: d is
+:       sta GSHY                   ; KOFF..CAMH (79..96: lines 81..102, inside
+:                                  ; the old holds YSKY+14..YGND-16; the ':'s
+                                   ; keep the anonymous label count)
         lda #128
         sta GSHX
         lda gk
@@ -209,68 +193,45 @@ gsy:    jsr shyt                   ; the ship's line: HORIZON + (d R + 2048) >>
         sta GSHP
         rts
 
-; shyt: A = min(255, (A RSHIP + 2048) >> 12), the ship's line less HORIZON
-; for the camera A units above it (tools/gamegen.py's SHYT; RSHIP the land's
-; r at depth ZSHIP).  Clobbers A, Y, gt1..gt4.
-shyt:   sta gt4                    ; A RSHIP, 8 x 16: the multiplier's bits
-        lda #0                     ; from the top, the sum shifted up
-        sta gt1
-        sta gt2
-        sta gt3
-        ldy #8
-@m:     asl gt1
-        rol gt2
-        rol gt3
-        asl gt4
-        bcc :+
-        lda gt1
-        clc
-        adc #<RSHIP
-        sta gt1
-        lda gt2
-        adc #>RSHIP
-        sta gt2
-        bcc :+
-        inc gt3
-:       dey
-        bne @m
-        lda gt2                    ; + 2048, bits 12..19
-        clc
-        adc #8
-        sta gt2
-        bcc :+
-        inc gt3
-:       lda gt3
-        cmp #16
-        bcs @x                     ; (past 255: 255)
-        asl a
-        asl a
-        asl a
-        asl a
-        sta gt1
-        lda gt2
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora gt1
-        rts
-@x:     lda #255
-        rts
+; GSHYT: the ship's line, HORIZON + (d RSHIP + 2048) >> 12, for the camera d
+; units above it, d = KOFF..CAMH (gout's d: never outside them; tools/
+; gamegen.py's SHYT plus HORIZON; RSHIP the land's r at depth ZSHIP).  Its
+; ends inside the holds YSKY+14 .. YGND-16, so those never bite.
+GSHYT:
+        .repeat CAMH-KOFF+1, I
+        .byte (((KOFF+I)*RSHIP+2048)>>12)+HORIZON
+        .endrepeat
+        .assert ((KOFF*RSHIP+2048)>>12) >= YSKY+14-HORIZON, error, "GSHYT: d = KOFF within the hold"
+        .assert ((CAMH*RSHIP+2048)>>12) <= YGND-16-HORIZON, error, "GSHYT: d = CAMH within the hold"
 
 ; units: su = sy >> 4, the ship's height in units as 8.8 (su+1 whole units,
 ; valid below 16 tiles).  Clobbers A, Y; X kept.
-units:  lda sy
-        sta su
-        lda sy+1
+units:  lda sy+1                   ; su+1 = sy+2 << 4 | sy+1 >> 4
+        lsr a
+        lsr a
+        lsr a
+        lsr a
         sta su+1
         lda sy+2
-        ldy #4
-:       lsr a
-        ror su+1
-        ror su
-        dey
-        bne :-
+        asl a
+        asl a
+        asl a
+        asl a
+        ora su+1
+        sta su+1
+:       lda sy                     ; su = sy+1 << 4 | sy >> 4 (this : keeps the
+        lsr a                      ; anonymous labels' count)
+        lsr a
+        lsr a
+        lsr a
+        sta su
+        lda sy+1
+        asl a
+        asl a
+        asl a
+        asl a
+        ora su
+        sta su
         rts
 
 ; ---------------------------------------------------------------- keys
@@ -333,21 +294,19 @@ keys:   lda #0
 ; Crashed (ctim): the step's crack-to-rumble, tone 2's period from EXNL, EXNH
 ; (written every step) and its attenuation from EXA, with SNCR (noise clocked
 ; by tone 2).  Flying: SNTH at SATF while thr is set, else attenuation 15.
-; Reads ctim, thr.  Clobbers A, X, Y, sstp.  Called by gstep.
+; Reads ctim, thr.  Clobbers A, X, Y.  Called by gstep.
 snd:    lda ctim
         beq @t
-        lda #CRASHT                ; sstp = the crash's step, 0..CRASHT-1
-        sec
+        lda #CRASHT                ; X = the crash's step, 0..CRASHT-1 (psg
+        sec                        ; keeps X)
         sbc ctim
-        sta sstp
-        tay
-        lda EXNL,y                 ; tone 2's period: latch byte, then data byte
+        tax
+        lda EXNL,x                 ; tone 2's period: latch byte, then data byte
         jsr psg
-        ldy sstp
-        lda EXNH,y
+        lda EXNH,x
         jsr psg
-        ldy sstp
-        ldx EXA,y
+        lda EXA,x
+        tax
         lda #SNCR
         bne @c
 @t:     ldx #15                    ; silent unless thrusting
@@ -374,8 +333,8 @@ psg:    sei
         ldy #$FF
         sty SVIA_DDRA
         sta SVIA_ORA_NH
-        lda #0                     ; latch bit 0 low: write enable
-        sta SVIA_ORB
+        iny                        ; Y $FF -> 0: latch bit 0 low: write enable
+        sty SVIA_ORB
         ldy #3
 :       dey
         bne :-
@@ -404,14 +363,15 @@ psg:    sei
 ; Called by gstep.
 step:   lda landed                 ; on the pad: the attitude held
         bne @att
-        lda gkb
+        ldy gkb                    ; (Y: gkb, for the four tests)
+        tya
         lsr a
         bcc :+
         lda gk
         sbc #1                     ; (C set: a plain decrement)
         and #NDIR-1
         sta gk
-:       lda gkb
+:       tya
         and #2
         beq :+
         lda gk
@@ -419,14 +379,14 @@ step:   lda landed                 ; on the pad: the attitude held
         adc #1
         and #NDIR-1
         sta gk
-:       lda gkb
+:       tya
         and #4
         beq :+
         lda gp
         cmp #NPITCH-1
         bcs :+
         inc gp
-:       lda gkb
+:       tya
         and #8
         beq :+
         lda gp
@@ -441,11 +401,7 @@ step:   lda landed                 ; on the pad: the attitude held
 :       jmp parts
 @fly:
         lda gkb                    ; Y = 1 if SPACE or SHIFT (both full thrust)
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        and #3
+        and #$30                   ; (bits 4, 5)
         beq :+
         lda #1
 :       tay
@@ -467,46 +423,40 @@ step:   lda landed                 ; on the pad: the attitude held
         sta landed
 :       ldx #0                     ; drag, each of gvx, gvy, gvz (X 0, 2, 4):
 @dg:                               ; v -= (v >> 6) + (v >> 8), 1.25 of Lander's
-        ldy #6                     ; v >> 6; gt1:gt0 = v >> 6, arithmetic
+        lda gvx,x                  ; (one 16-bit subtract of the sum: the same
+        sta gt0                    ; mod 65536).  Y = v's sign: v >> 8's high
+        ldy #0                     ; byte, and the 24-bit extension of v << 2
         lda gvx+1,x
-        sta gt1
-        lda gvx,x
-        sta gt0
-:       lda gt1
-        cmp #$80
-        ror gt1
-        ror gt0
+        bpl :+
         dey
-        bne :-
-        jsr @ds
-        lda gt1                    ; then >> 2 more: v >> 8
-        cmp #$80
-        ror gt1
-        ror gt0
-        lda gt1
-        cmp #$80
-        ror gt1
-        ror gt0
-        jsr @ds
-        inx
-        inx
-        cpx #6
-        bne @dg
-        beq @th
-@ds:    lda gvx,x                  ; v (X) -= gt1:gt0
+:       sty gt1                    ; gt1:A:gt0 = (Y:hi:lo) << 2, so gt1:A =
+        asl gt0                    ; v >> 6, arithmetic
+        rol a
+        rol gt1
+        asl gt0
+        rol a
+        rol gt1
+        clc                        ; + v >> 8 (Y:hi)
+        adc gvx+1,x
+        sta gt0
+        tya
+        adc gt1
+        sta gt1
+        lda gvx,x                  ; v (X) -= gt1:gt0
         sec
         sbc gt0
         sta gvx,x
         lda gvx+1,x
         sbc gt1
         sta gvx+1,x
-        rts
+        inx
+        inx
+        cpx #6
+        bne @dg
 @th:
-        lda thr                    ; thrust: gt5 the shift (THRS)
+        lda thr                    ; thrust
         beq @nt
-        lda #THRS
-        sta gt5
-        jsr throw                  ; gvx += 1.25 (THX[gp][gk] << gt5), gvz from
+        jsr throw                  ; gvx += 1.25 (THX[gp][gk] << THRS), gvz from
         lda tx                     ; THZ, gvy from THY[gp]
         ldx #gvx-gvx
         jsr tadd
@@ -521,7 +471,7 @@ step:   lda landed                 ; on the pad: the attitude held
 @nt:    lda landed                 ; landed: still
         beq @mv
         lda #0
-        ldx #5
+@still: ldx #5                     ; (the landing joins here, A = 0)
 :       sta gvx,x
         dex
         bpl :-
@@ -545,8 +495,7 @@ step:   lda landed                 ; on the pad: the attitude held
         lda sy+2                   ; y below 0: the ground
         bmi @gnd
         cmp #16                    ; 16 tiles up or more: nowhere near it
-        bcc :+
-        jmp parts
+        bcs @up                    ; (@up: jmp parts)
 :       jsr units                  ; the centre less than UNDER units above HGV
         lda su+1                   ; (or below it): the ground
         sec
@@ -554,14 +503,16 @@ step:   lda landed                 ; on the pad: the attitude held
         bcc @gnd
         cmp #UNDER
         bcs @up
-@gnd:   lda sx+2                   ; over the pad: tiles 0..PADN-1 in x and z
+@gnd:   ldx #sz-sx                 ; over the pad: tiles 0..PADN-1 in z and x
+@pd:    lda sx+2,x
         and #MAPN-1
         cmp #PADN
         bcs @crash
-        lda sz+2
-        and #MAPN-1
-        cmp #PADN
-        bcs @crash
+        dex
+        dex
+        dex
+        bpl @pd
+        .assert sz-sx = 3, error, "step's pad test: sz 3 bytes after sx"
         lda gp                     ; within a pitch of level: PFLAT-1..PFLAT+1
         sec
         sbc #PFLAT-1
@@ -574,13 +525,13 @@ step:   lda landed                 ; on the pad: the attitude held
         lda HGV
         clc
         adc #UNDER
-        sta gt0
+        tax                        ; (X free: ldx #5 below)
         asl a                      ; (units * 4096: bytes 1 and 2)
         asl a
         asl a
         asl a
         sta sy+1
-        lda gt0
+        txa
         lsr a
         lsr a
         lsr a
@@ -588,18 +539,13 @@ step:   lda landed                 ; on the pad: the attitude held
         sta sy+2
         lda #0
         sta sy
-        ldx #5
-:       sta gvx,x
-        dex
-        bpl :-
-        jmp parts
+:       jmp @still                 ; gv* 0 as when landed (A = 0), then parts
 @crash: lda #CRASHT                ; crashed: CRASHT steps, the ship not drawn,
         sta ctim                   ; every dot from the ship
         lda #0
         sta GSHV
         jsr burst
-        jmp parts
-@up:    jmp parts                  ; in the air: no ceiling
+@up:    jmp parts                  ; (@up: in the air, no ceiling)
 
 
 ; landoff: C set if the last frame's projection has the land wholly below the
@@ -610,21 +556,21 @@ landoff:
         tya
         pha
         ldx #0
-        ldy nr
+        lda nr                     ; gt1 the rows left, Y the row's points
+        sta gt1                    ; left (Y saved on the stack)
 @r:     stx gt0
-        lda np
-        sta gt1
+        ldy np
 @p:     lda PY,x
         cmp #YGND+1
         bcc @v
         inx
-        dec gt1
+        dey
         bne @p
         lda gt0
         clc
         adc #16
         tax
-        dey
+        dec gt1
         bne @r
         pla
         tay
@@ -647,13 +593,10 @@ throw:  stx thxs
         lda gk
         jsr thc
         sta tx
-        lda gk
-        sec
-        sbc #8
+        lda gk                     ; THZ(k) = -THX(k - 8) = THX(k + 8): thc(m + 16)
+        clc                        ; = -thc(m) (same j, opposite sign; TQ's j 8
+        adc #8                     ; entries, both signs positive, are all 0)
         jsr thc
-        eor #$FF
-        clc
-        adc #1
         sta tz
         ldx thxs
         rts
@@ -663,12 +606,12 @@ thc:    and #31
         bcc @a
         eor #$FF                   ; (C set: ~k + 32 + 1)
         adc #32
-@a:     ldx #0                     ; X: the sign, bit 7
+@a:     ldx #0                     ; X: the negations, 0..2 (1: negative)
         cmp #9                     ; 9..16: 16 - k, negated
         bcc @b
         eor #$FF                   ; (C set: ~k + 16 + 1)
         adc #16
-        ldx #$80
+        inx
 @b:     sta gt0                    ; j, 0..8
         lda gp                     ; |gp - PFLAT|, negated below level
         sec
@@ -676,11 +619,7 @@ thc:    and #31
         bcs @c
         eor #$FF                   ; (C clear: + 1)
         adc #1
-        tay
-        txa
-        eor #$80
-        tax
-        tya
+        inx
 @c:     sta gt1                    ; TQ + 9 |gp - PFLAT| + j
         asl a
         asl a
@@ -689,8 +628,8 @@ thc:    and #31
         adc gt0
         tay
         lda TQ,y
-        cpx #$80                   ; (negative: C set, so ~v + 0 + 1)
-        bcc @d
+        cpx #1                     ; (negative: equal, C set, so ~v + 0 + 1)
+        bne @d
         eor #$FF
         adc #0
 @d:     rts
@@ -700,47 +639,29 @@ tx:     .res 1                     ; throw's thrust, x and z
 tz:     .res 1
         .segment "GAME"
 
-; tadd: v (X: gvx, gvy or gvz's offset) += 1.25 (A << gt5), as A << gt5 then
-; A << (gt5 - 2); for gt5 below 2 the second term is A asr 1 (right for gt5
-; 1).  Clobbers A, gt0, gt1, gt2, tt0, tt1; X, Y and gt5 kept.  Called by
+; tadd: v (X: gvx, gvy or gvz's offset) += 1.25 (A << THRS), as A << THRS
+; then A << (THRS - 2).  Clobbers A, Y (0), gt0, gt1; X kept.  Called by
 ; step.
-tadd:   sta tt0
+        .assert THRS >= 3, error, "tadd: both of vadd's shifts at least 1"
+tadd:   pha
+        ldy #THRS
         jsr vadd
-        lda gt5
-        sta tt1
-        sec
-        sbc #2
-        bcs :+
-        lda tt0                    ; A asr 1
-        cmp #$80
-        ror a
-        sta tt0
-        lda #0
-:       sta gt5
-        lda tt0
-        jsr vadd
-        lda tt1
-        sta gt5
-        rts
-
-; vadd: v (X: gvx, gvy or gvz's offset) += A (signed) << gt5, 16-bit.
-; Clobbers A, gt0, gt1, gt2; Y kept (through gt2).  Called by tadd.
+        pla
+:       ldy #THRS-2                ; (falls into vadd; the label keeps the
+                                   ; anonymous labels' count)
+; vadd: v (X: gvx, gvy or gvz's offset) += A (signed) << Y (1..255), 16-bit.
+; Clobbers A, Y (0), gt0, gt1; X kept.  Called by tadd.
 vadd:   sta gt0
         lda #0
         bit gt0                    ; gt1: A's sign extension
         bpl :+
         lda #$FF
 :       sta gt1
-        lda gt5
-        sty gt2
-        tay
-        beq :++
 :       asl gt0
         rol gt1
         dey
         bne :-
-:       ldy gt2
-        lda gvx,x
+:       lda gvx,x
         clc
         adc gt0
         sta gvx,x
@@ -752,24 +673,22 @@ vadd:   sta gt0
 ; pmove: position (Y: sx, sy or sz's offset) += 5 v (X: its velocity's
 ; offset), 24-bit: 4 v is Lander's step, 5 v is 1.25 of it.  Clobbers A,
 ; gt0..gt3; X, Y kept.  Called by step.
-pmove:  lda gvx,x
-        sta gt0
-        lda gvx+1,x
+pmove:  lda gvx+1,x
         sta gt1
-        lda #0                     ; gt2 (and gt3): v's sign extension
-        bit gt1
-        bpl :+
+        bpl :+                     ; gt2 (and gt3): v's sign extension
         lda #$FF
-:       sta gt2
+        bne @sgn                   ; (always)
+:       lda #0
+@sgn:   sta gt2
         sta gt3
-        asl gt0                    ; gt2:gt1:gt0 = 4 v
+        lda gvx,x                  ; gt2:gt1:A = 4 v
+        asl a
         rol gt1
         rol gt2
-        asl gt0
+        asl a
         rol gt1
         rol gt2
-        lda gt0                    ; + v
-        clc
+        clc                        ; + v
         adc gvx,x
         sta gt0
         lda gt1
@@ -856,48 +775,18 @@ emit:   ldx pnext
         lda #PLIFE
         sta plife,x
         jsr throw
-        lda tx
-        jsr exh
-        sta gt0                    ; (-THX / 2)
-        lda tz
-        jsr exh
-        sta gt1                    ; (-THZ / 2)
-        jsr rand                   ; x: + jitter, sign-extended into pvxh:pvx
-        and #31
-        sec
-        sbc #16
-        clc
-        adc gt0
-        jsr sxadd
+        lda tx                     ; x: -THX / 2 + jitter, sign-extended, +
+        ldy #gvx-gvx               ; gvx >> 6 (16384ths of a tile to 256ths)
+        jsr ejit
         sta pvx,x
         tya
-        sta pvxh,x
-        ldy #gvx-gvx               ; + gvx >> 6 (16384ths of a tile to 256ths)
-        jsr vsh6
-        lda pvx,x
-        clc
-        adc gt2
-        sta pvx,x
-        lda pvxh,x
         adc gt3
         sta pvxh,x
-        jsr rand                   ; z likewise
-        and #31
-        sec
-        sbc #16
-        clc
-        adc gt1
-        jsr sxadd
+        lda tz                     ; z likewise
+        ldy #gvz-gvx
+        jsr ejit
         sta pvz,x
         tya
-        sta pvzh,x
-        ldy #gvz-gvx
-        jsr vsh6
-        lda pvz,x
-        clc
-        adc gt2
-        sta pvz,x
-        lda pvzh,x
         adc gt3
         sta pvzh,x
         ldy gp                     ; y: gt1:gt0 = -(THY + 1) << 3
@@ -945,12 +834,27 @@ vsh6:   lda gvx,y
         dey
         bne :-
         rts
-; exh: A = -A / 2, signed (negate, then asr).
-exh:    eor #$FF
+; ejit: emit's x or z velocity: -A / 2 (A the thrust, signed: negate, then
+; asr) + a jitter of -16..15 (rand), sign-extended, + v >> 6 (Y: gvx or
+; gvz's offset).  Out: A the low byte, C its carry, Y the jitter's sign
+; extension (the high byte is Y + gt3 + C).  Clobbers gt0, gt2, gt3; X kept.
+; Called by emit.
+ejit:   eor #$FF
         clc
         adc #1
         cmp #$80
         ror a
+        sta gt0
+        jsr vsh6                   ; gt3:gt2 = v >> 6
+        jsr rand
+        and #31
+        sec
+        sbc #16
+        clc
+        adc gt0
+        jsr sxadd
+        clc
+        adc gt2
         rts
 ; sxadd: Y = A's sign extension ($00 or $FF); A kept.
 sxadd:  ldy #0
@@ -1071,25 +975,21 @@ parts:  ldx #NPART-1
         bpl @p
         rts
 
-; q5: gt1:gt0 = 1.25 (Y:A), signed: Y:A + (Y:A asr 2).  Clobbers A, Y,
-; gt2, gt3; X kept.  Called by parts.
-q5:     sta gt2
-        sty gt3
-        sta gt0
-        sty gt1
-        ldy #2
-:       lda gt1
-        cmp #$80
+; q5: gt1:gt0 = 1.25 (Y:A), signed: Y:A + (Y:A asr 2).  Clobbers A, gt2;
+; X, Y kept.  Called by parts.
+q5:     sta gt2                    ; Y:A kept: gt2 the low byte, Y the high
+        sty gt1                    ; gt1:A = Y:A asr 2 (cpy #$80: C = the sign)
+        cpy #$80
         ror gt1
-        ror gt0
-        dey
-        bne :-
-        lda gt0
-        clc
+        ror a
+:       cpy #$80
+        ror gt1
+        ror a
+        clc                        ; + Y:A
         adc gt2
         sta gt0
-        lda gt1
-        adc gt3
+        tya
+        adc gt1
         sta gt1
         rts
 
@@ -1166,15 +1066,17 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         cmp #16
         bcc :+
 @o1:    jmp @o
-:       ldy #4                     ; dx >> 4: 16 pixels a tile
-:       lda gt1
-        cmp #$80
-        ror gt1
-        ror gt0
-        dey
-        bne :-
-        lda gt0
-        eor #$80                   ; + 128
+:       asl a                      ; screen x = 128 + 16 dx: A = dx + 8 (0..15,
+        asl a                      ; dx's whole byte -8..7), so A << 4 is the
+        asl a                      ; whole byte's << 4 with bit 7 flipped (the
+        asl a                      ; + 128), then or dx's fraction >> 4
+        sta gt2
+:       lda gt0                    ; (this : keeps the anonymous labels' count)
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora gt2
         sta gt2                    ; (screen x)
         lda su                     ; dy = the ship's height less the dot's,
         sec                        ; whole units (the fraction only borrows)
@@ -1208,38 +1110,36 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         bcs @o
         sta gt3                    ; (screen y)
         ; the byte: scrg + $200 (y >> 3) + 8 (x >> 2) + (y & 7)
+        lsr a
+        lsr a
+        and #$FE                   ; 2 (y >> 3), held in Y
+        tay
+        lda gt3
         and #7
         sta g0
         lda gt2
         and #$FC
-        asl a                      ; (8 (x >> 2): its carry is the $100 bit)
-        php
-        ora g0
+        asl a                      ; (8 (x >> 2): its carry is the $100 bit,
+        ora g0                     ; kept by ora, sta and tya into the adc)
         sta g0
-        lda gt3
-        lsr a
-        lsr a
-        and #$FE                   ; 2 (y >> 3)
-        plp
+        tya
         adc scrg
         sta g0+1
         lda gt2                    ; the pixel's bits (PIXG by x & 3) masked
         and #3                     ; out of the byte, then set: both for yellow,
         tay                        ; the high one only for magenta (life < 6)
         lda PIXG,y
-        sta gt4
-        eor #$FF
-        ldy #0
-        and (g0),y
-        sta gt5
-        lda gt4
-        ldy plife,x
+        sta gt4                    ; the byte with gt4's bits set to V ($FF
+        ldy plife,x                ; yellow, $F0 magenta): b ^ ((b ^ V) & gt4)
         cpy #6
+        lda #$FF
         bcs :+
-        and #$F0
+        lda #$F0
 :
-        ora gt5
         ldy #0
+        eor (g0),y
+        and gt4
+        eor (g0),y
         sta (g0),y
         lda gt2                    ; the column (x >> 2): TOPS no lower than y,
         lsr a                      ; BOTS no higher

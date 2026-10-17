@@ -2,9 +2,9 @@
 ; shipb.s -- SHIPB, LAND's bank 6: sideways RAM at $8000.  build.sh assembles
 ; it (ca65; it includes landsyms.inc, shipspan.s and shipspan.inc) and links
 ; it with shipb.cfg (CODE at $8000, then SPANS, then TAIL and DTAB each on a
-; page boundary); LANDS loads the file into bank 6.  Two entry points, the jmps at
-; the bank's start, each reached through LAND's call6 (A = the low byte; bank
-; 6 paged in for the call, bank 4 back after):
+; page boundary); LANDS loads the file into bank 6.  Two entry points, the
+; jmps at the bank's start, each reached through LAND's call6 (A = the low
+; byte; bank 6 paged in for the call, bank 4 back after):
 ;   B6_KEYS ($8000): each frame after the game's step (bank 5, game.s) and
 ;     before LAND projects.  Copies the ship's direction, pitch and screen
 ;     centre from the game's low-RAM bytes GSHK, GSHP, GSHX, GSHY ($07DB-
@@ -17,7 +17,7 @@
 ;
 ; Memory: CODE $8000-$869E (keys and ship here, then shipspan.s's walker, its
 ; tables and FCE, FCX); SPANS $869F-$B3AE (the orientations' streams); TAIL
-; $B400-$B58A (spdec); DTAB $B600-$BF7E (DTH, DL4, shipspan.inc's tables).
+; $B400-$B57B (spdec); DTAB $B600-$BF8E (DTH, DL4, shipspan.inc's tables).
 ; Main RAM: DBUF ($2F00, under 256 bytes), the current orientation's lines,
 ; kept across frames (dlast, dmir, dal).  Zero page, shipdraw's only: LAND's
 ; $8E-$9F (project's HPZ, bank 7's and the strips' scratch, all finished when
@@ -44,7 +44,8 @@
 scrb    = L_scrb                   ; the high byte of the screen being drawn
 c0      = $8D                      ; c0+j, j 1..6 ($8E-$93): slot j's dither for
 x0      = $93                      ; the pass; x0+j ($94-$99): its even ^ odd
-ptr     = $9A                      ; the line's screen byte; ship's TOPS pointer
+ptr     = $9A                      ; the line's screen byte; spdec's stream;
+                                   ; ship's TOPS pointer
 dp      = $9C                      ; the line's bytes in DBUF
 lim     = $9E                      ; LIM's for the last boundary (is the next in
 bl      = $9F                      ; its byte?); lines left in the pass
@@ -56,7 +57,7 @@ ee      = L_TRL+5                  ; the orientation's entry, 17 shp + kk
 tmp     = L_TRL+6                  ; ship's last column
 dq      = L_TRL+7                  ; BOTS (ship)
 pm      = L_TRL+9                  ; $FF if pass A's lines are odd
-mk      = L_TRL+10                 ; lk's mask on n: 0, or $FF mirrored
+mk      = L_TRL+10                 ; lk's mask on n: $FF, or 0 mirrored
 nb      = L_TRL+12                 ; pass B's lines ($80: none, a one-line band)
 ptb     = L_TRL+14                 ; pass B's first line's screen byte
 dpb     = L_TRL+4                  ; its bytes in DBUF
@@ -89,7 +90,7 @@ keys:   ldx #3
 ; names.  In: shk, shp, shx, shy, scrb, back.  Clobbers A, X, Y, shipdraw's
 ; zero page, and ptr, dq, tmp.
 ship:   jsr shipdraw               ; the ship; bxl, bxr, byt, byb its box
-@w:     ldx L_back                 ; ptr = this screen's TOPS, dq its BOTS
+        ldx L_back                 ; ptr = this screen's TOPS, dq its BOTS
         ldy L_sidx,x
         lda L_setTl,y
         sta ptr

@@ -1,6 +1,6 @@
 #!/bin/sh
-# The test suite, run from anywhere after `sh build.sh` (it changes to the
-# repository root): the renderer soak with the ship and with the camera raised,
+# The test suite, run from anywhere after `sh build.sh` (or `sh build.sh cpc|nula`
+# with CPC=1 / NULA=1 set; it changes to the repository root): the renderer soak with the ship and with the camera raised,
 # every ship orientation, the game loop.  Each test's output is shown but the game
 # loop's; exit status 1 if any test fails.
 cd "$(dirname "$0")/.."

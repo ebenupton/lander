@@ -35,7 +35,8 @@ ship, bank 6 paged in, shk, shp, shx, shy written and B6_SHIP ($8003) called
 the projection checked (np, nr, and each row's PX and PY at $0700 and $0800,
 16 a row, against proto/land.py's project), and the screen being drawn
 ($3000 or $5800 by `back`) against proto/frame.py's frame with
-tools/shipgen.py's ship over it, as MODE 1 bytes; then `flip`.  Both screens
+tools/shipgen.py's ship over it, as the build's bytes (MODE 1, or MODE 2's
+through proto/nula.py); then `flip`.  Both screens
 are drawn in turn, so what a frame leaves for the frame after next (land gone,
 the ship) is checked too.  A failing frame prints its first three projection
 errors and first eight wrong bytes; the run stops at the third failure.
@@ -58,7 +59,6 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import land as L      # noqa: E402
 import frame as F     # noqa: E402
 import landgen as G   # noqa: E402
-import landgen as LG  # noqa: E402
 import shipgen as SG  # noqa: E402
 import points as P    # noqa: E402
 
@@ -68,10 +68,8 @@ ROMSEL = 0xFE30
 CAME = 0x07D6                                    # LAND's: the camera raise
 B6_SHIP = 0x8003
 DBG = bool(os.environ.get('SOAKDBG'))
-PIXM = [0x88, 0x44, 0x22, 0x11]                  # a MODE 1 byte's pixel p
-if LG.NU.enabled():                              # the NULA build: MODE 2's (even
-    PIXM = [LG.NU.mask(m) for m in PIXM]         # pixels show, proto/nula.py)
-LG.NU.check_build(B)
+PIXM = G.NU.PIXM                                 # each pixel's mask (proto/nula.py)
+G.NU.check_build(B)
 DB = [G.dither_bytes(e) for e in range(35)]      # each dither: even, odd line bytes
 
 

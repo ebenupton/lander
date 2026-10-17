@@ -1,8 +1,8 @@
 ; ============================================================================
 ; land.s -- LAND: a Lander-style landscape on a narrow, double-buffered MODE 1
-; screen, with game.s's ship flying over it.  The BBC Micro port of
-; proto/land.py (the projection) as proto/frame.py draws it (the strips),
-; pixel for pixel.
+; (or MODE 2: below) screen, with game.s's ship flying over it.  The BBC Micro
+; port of proto/land.py (the projection) as proto/frame.py draws it (the
+; strips), pixel for pixel.
 ;
 ; Building (build.sh).  tools/landgen.py writes the three table images TABLES
 ; (bank 4), TABLES2 (bank 5) and TABLES7 (bank 7) and tables.inc (their
@@ -10,18 +10,20 @@
 ; writes gametab.inc (the game's).  ca65 assembles this file (game.s is
 ; .included near the end) under src/land.cfg: segment CODE is LAND, loaded at
 ; $1900; BOOT is LANDS, at $7000; the other segments are code for the banks,
-; which build.sh splices into the table images at their addresses.  landsyms.inc
-; (the symbols shipb.s needs, L_ before each) is cut from labels.txt; then
-; tools/shipgen.py and shipb.s make SHIPB (bank 6).  tools/mkdfs.py writes
-; lander.ssd: the chooser (!BOOT, GO), $.TABLES7 (the same in every version)
-; and each version's LAND, LANDS, TABLES, TABLES2 and SHIPB in its directory
-; (M: MODE 1, C: CPC, N: NULA).
+; which build.sh splices into the table images at their addresses.
+; landsyms.inc (the symbols shipb.s needs, L_ before each) is cut from
+; labels.txt; then tools/shipgen.py and shipb.s make SHIPB (bank 6).
+; tools/mkdfs.py writes lander.ssd: !BOOT (the chooser, typed in), GO (the
+; loader), $.TABLES7 (the same in every version) and each version's LAND,
+; LANDS, TABLES, TABLES2 and SHIPB in its directory (M: MODE 1, C: CPC, N:
+; NULA).
 ;
 ; Starting.  The chooser selects the version's mode with every colour black
-; and the cursor off and its directory, *LOADs LAND and *RUNs LANDS.  LANDS
-; (segment BOOT, the end of this file) finds four sideways RAM banks
-; (find_ram), patches each bank switch's write select for the board (wpatch),
-; loads each image through $3000 into its bank, closes GO (the filing system is then idle: its workspace from $0E00 is LAND's), makes
+; and the cursor off, selects its directory and EXECs GO, which *LOADs LAND
+; and *RUNs LANDS.  LANDS (segment BOOT, the end of this file) finds four
+; sideways RAM banks (find_ram), patches each bank switch's write select for
+; the board (wpatch), loads each image through $3000 into its bank, closes GO
+; (the filing system is then idle: its workspace from $0E00 is LAND's), makes
 ; the glyphs, narrows the screen, clears screen 0, sets the palette and jumps
 ; to `go`.  go runs init, hooks the vertical sync event, turns the VIAs' other
 ; interrupts off, runs G_INIT (bank 5: the game's start) and enters the main
@@ -42,7 +44,7 @@
 ; The MODE 2 builds (-D MODE2; proto/nula.py): NULA (build.sh nula, -D NULA),
 ; the VideoNULA's sixteen colours, flat; CPC (build.sh cpc, -D CPC), the 27
 ; colours of 1 x 2 dithers of MODE 2's eight, as checkerboards.  Everything
-; here still works in MODE 1's pixels, 256 across and four a byte; a MODE 2
+; here works in MODE 1's pixels, 256 across and four a byte; a MODE 2
 ; byte is two pixels, each showing the even one of the pair it covers, so only
 ; the masks (PM) and the colour bytes (bank 5's, landgen's) differ, with the
 ; letters (nfont, gbyte) and the palette (palette).  game.s's dots and map
@@ -133,17 +135,17 @@
 ;   $0E00, $1000, $1200, $1400  STAB for t = 0..3 (437 bytes each)
 ;   $1600-$16C1   ENTL, ENTH: each line's entry in its STAB (lines
 ;                 YSKY..YGND+1: 97 each)
-; Page $0D is never touched: the MOS's NMI routine (live on a Master: its
-; 1770 disc controller's) and the extended vectors (a ROM's OSBYTE hook) are
-; there, and interrupts are still on while init builds the tables.
 ;   $16C2-$1722   LAH: each line's 2 * (y >> 3)
 ;   $1740-$17A3   EINL,y for y = YSKY-1..YGND+3 (EINL = $1701): run2's table
 ;                 offsets by line
 ;   $1800-$18EF   GLY: the readout's 15 characters, 16 bytes each
 ;   $1900-$2E56   the code (this file's CODE segment)
 ;   $2F00         DBUF: shipspan.s's (bank 6), so the code must end below it
-;   $3000-$57FF   screen 0; $5800-$7FFF screen 1, LANDS at $7000-$7408 until
-;                 init clears it
+;   $3000-$57FF   screen 0; $5800-$7FFF screen 1, LANDS at $7000-$740A
+;                 ($7534 at most: the NULA build's) until init clears it
+; Page $0D is never touched: the MOS's NMI routine (live on a Master: its
+; 1770 disc controller's) and the extended vectors (a ROM's OSBYTE hook) are
+; there, and interrupts are still on while init builds the tables.
 ; The four sideways banks (logical 4..7: BANKMAP holds each one's socket):
 ;   bank 4, TABLES (paged in except while another bank is called): MAP $8000
 ;     (64 x 64 corners: height in bits 0-3), run2's store tables (pages
@@ -161,17 +163,20 @@
 ;   bank 6, SHIPB (shipb.s): B6_KEYS $8000, B6_SHIP $8003 and the ship's spans
 ;   bank 7, TABLES7: R7L, R7H, SYT7 $8200, B1T $9800, CLP7, PINL7, PINR7,
 ;     LERPQ7 $B100, SYL7, SYH7, LQLO, LQHI, prow7 and its helpers ($B480-
-;     $BDB1), PXF7 $BEA0, PXN7 $BF50; su_l7's and satrow's pieces in the
+;     $BDA5), PXF7 $BEA0, PXN7 $BF50; su_l7's and satrow's pieces in the
 ;     tables' spare entries ($80B0, $81B0, $AEB0, $AFB0, $B0B0)
 ; ============================================================================
         .setcpu "6502"
         .include "tables.inc"
-; PM m: MODE 1 pixel mask m as drawn.  The MODE 2 builds (-D MODE2: a byte
-; two pixels, each showing the even one of the two of LAND's it covers) makes
-; it the left pixel's bits ($AA) if m has pixel 0, the right's ($55) if pixel 2
-; (proto/nula.py's mask); else it is m.
 .ifdef MODE2
-        .include "mode2.inc"
+        .include "mode2.inc"       ; YELB, MAGB, NULAPAL, NFONTCH, NFONT
+        .assert .defined(CPC) .xor .defined(NULA), error, "MODE2: CPC or NULA"
+.endif
+; PM m: MODE 1 pixel mask m as drawn.  The MODE 2 builds (-D MODE2: a byte
+; two pixels, each showing the even one of the two of LAND's it covers) make
+; it the left pixel's bits ($AA) if m has pixel 0, the right's ($55) if pixel 2
+; (proto/nula.py's mask); MODE 1: m itself.
+.ifdef MODE2
 .define PM(m) ((((m) >> 3) & 1) * $AA | (((m) >> 1) & 1) * $55)
 .else
 .define PM(m) (m)
@@ -231,7 +236,7 @@ HTN     = $07E0                    ; zsh4's: the new row's heights, for hsh
 HT      = $0880                    ; the rows' raw heights, 16 a row (project)
 CLE     = $0900                    ; pcol5's window of box bytes: 16 a row, even
 CLO     = $09A0                    ; and odd lines
-TX      = $0A40                    ; the strip's top row's points (0 and np+1:
+TX      = $0A40                    ; the strip's top row's points (0 and NX+1:
 TY      = $0A50                    ; the margins)
 BX      = $0A60                    ; and its bottom row's
 BY      = $0A70
@@ -939,14 +944,14 @@ project:
 ; between rows ns-1 and ns: strip 0 only has its bottom row (row 0) traced;
 ; strips 1 .. nr-1 are the land's, and the last of them (ns = nr-1, the near
 ; strip) also paints the ground below the near row from its columns
-; (nearpost).  A strip's points: 0 its left margin, 1 .. np the rows', np+1
+; (nearpost).  A strip's points: 0 its left margin, 1 .. NX the rows', NX+1
 ; its right margin.
 ; Each column's highest and lowest land line is kept in three sets of 64
 ; bytes (setTl .. setBh: TOPS, BOTS; TOPS+64, BOTS+64; CURT, CURB): one a
 ; screen (sidx: the land as last drawn there, two frames back) and one this
 ; frame's (cidx).  The operand of every site that reads the screen's set or
 ; writes this frame's is patched here, and the sets are rotated at the end.
-; In: back, np, nr, PX, PY (project's), CLE, CLO, ldCLE (pcol5's), vcount,
+; In: back, nr, PX, PY (project's), CLE, CLO, ldCLE (pcol5's), vcount,
 ; vflip.  Out: the screen drawn; the sets; sidx, cidx; xlp, xrp, topa, bota.
 ; Clobbers A, X, Y and the strips', trace's, rungs' and columns' zero page.
 ; Called by loop.
@@ -1060,18 +1065,17 @@ bclip:  lda BCL
 
 ; setup: the strip's points, boxes and margins, and its bottom row's line.
 ; Points 1 .. NX: strip 0 takes row 0 as its bottom row only (it is only
-; traced: its TX, TY, CE and CO are never read); a land strip (ns 1 ..
-; nr-1) takes rows ns-1 (TX, TY) and ns (BX, BY) and its boxes 1 .. NX-1
-; from pcol5's window (su_l7, in bank 7); BCL counts the bottom points past YGND.  Points 0 and np+1 are the
-; margins: x at the byte boundary at or left of the bottom row's first point
-; (xl) and at or right of its last (xr), y the end points'; boxes 0 and np
-; black.  Then the bottom row is traced into (bota) (traceb, whose RTS is
-; this routine's).  In: ns, nr, PX, PY, CLE, CLO, ldCLE, bota.  Out:
-; BX, BY (0 .. NX+1), and for a land strip TX, TY (0 .. NX+1) and CE, CO
-; (0 .. NX); xl, xr, BCL, last ($FF for the near
-; strip, ns = nr-1), (bota).  Clobbers A, X, Y and traceb's
-; (bank 7 paged for su_l7 and bank 4 back: pw7s, pw4s are wpatch's).  Called
-; by strips.
+; traced: its TX, TY, CE and CO are never read); a land strip (ns 1 .. nr-1)
+; takes rows ns-1 (TX, TY) and ns (BX, BY) and its boxes 1 .. NX-1 from
+; pcol5's window (su_l7, in bank 7); BCL counts the bottom points past YGND.
+; Points 0 and NX+1 are the margins: x at the byte boundary at or left of the
+; bottom row's first point (xl) and at or right of its last (xr), y the end
+; points'; boxes 0 and NX black.  Then the bottom row is traced into (bota)
+; (traceb, whose RTS is this routine's).  In: ns, nr, PX, PY, CLE, CLO, ldCLE,
+; bota.  Out: BX, BY (0 .. NX+1), and for a land strip TX, TY (0 .. NX+1) and
+; CE, CO (0 .. NX); xl, xr, BCL, last ($FF for the near strip, ns = nr-1),
+; (bota).  Clobbers A, X, Y and traceb's (bank 7 paged for su_l7 and bank 4
+; back: pw7s, pw4s are wpatch's).  Called by strips.
 setup:  lda #0
         sta BCL
         tax
@@ -1101,10 +1105,11 @@ ldCLE:  .byte 0                    ; pcol5's: 16 * its window offset, added to
 su_qc:    inc BCL                  ; a bottom point past YGND
         bcs su_qb                  ; (always: C from the cmp)
         ; strip 0: row 0 as its bottom row (it is traced only: its TX, TY,
-        ; CE and CO are never read, so they are left as they are)
+        ; CE and CO are never read: 1 .. NX and 1 .. NX-1 are left as they
+        ; are; su_m still sets the margins')
 su_r:     tay                      ; Y: the row's offset in PX, PY
         ldx #1
-su_q:     lda PX,y                 ; points 1 .. np: the row's
+su_q:     lda PX,y                 ; points 1 .. NX: the row's
         sta BX,x
         lda PY,y
         sta BY,x
@@ -1147,7 +1152,7 @@ su_m:
         sta TY
         lda BY+1
         sta BY
-        ; boxes 0 and np (the margins') black; 1 .. np-1 the strip's
+        ; boxes 0 and NX (the margins') black; 1 .. NX-1 the strip's
         lda #0
         sta CE
         sta CO
@@ -1156,7 +1161,7 @@ su_m:
 su_bot:   jmp traceb               ; the bottom row's line (its RTS returns to
                                    ; strips)
 
-; traceb: the bottom row (BX, BY 0 .. np+1) into (bota), one line a pixel,
+; traceb: the bottom row (BX, BY 0 .. NX+1) into (bota), one line a pixel,
 ; segment by segment as points.py's bresenham_ys (trace: a segment's first
 ; pixel overwrites the one before's last).  Preconditions: x non-decreasing
 ; along the row; a segment of no width (dx = 0) leaves its second point's y.
@@ -1569,7 +1574,7 @@ tr_inc: inc tyv                    ; (INC or DEC: t_old's, t_steep's opcode)
 ; high byte is RTBUF's), then $FF, the sentinel that ends a walk up the
 ; pixels (leaning right) and, as the byte before the next rung's, one down
 ; them (leaning left; RTBUF+4 serves the first rung).  The margins (rungs 0
-; and np+1): LO = HI = xl, xr, no bytes.  All the rungs' bytes must fit the
+; and NX+1): LO = HI = xl, xr, no bytes.  All the rungs' bytes must fit the
 ; page (alloc is stepped as a byte); a reader of RTP + x + 1 for a rung in a
 ; column goes no lower than alloc - 3, so from RTBUF+5 the low byte never
 ; wraps below.  A rung with a <= RFA and D < 16 is filled from tables
@@ -1577,8 +1582,8 @@ tr_inc: inc tyv                    ; (INC or DEC: t_old's, t_steep's opcode)
 ; 2 (D mod a) (RDIV: DQT, DRT for a < 32, D < 64; divs otherwise), the first
 ; line yt + q + (rem > 0), each next q2 on, or q2 + 1 when E += r2 carries (E
 ; = 255 - e, e how far the next step is short of a line, in 2a'ths).
-; In: TX, TY, BX, BY (0 .. np+1), xl, xr.  Out: LO, HI (0 .. np+1),
-; RTPL (1 .. np), RTBUF, alloc, rtp+1 = RTBUF's page.  Clobbers A, X, Y, tj,
+; In: TX, TY, BX, BY (0 .. NX+1), xl, xr.  Out: LO, HI (0 .. NX+1),
+; RTPL (1 .. NX), RTBUF, alloc, rtp+1 = RTBUF's page.  Clobbers A, X, Y, tj,
 ; dva, dvd, ra2, rq, rq2, rrem, rr2.  Called by strips (strips 1 .. nr-1).
 ; RDIV slow: D = BY,x - TY,x into dvd; to `slow` if a >= 32 or D >= 64, else
 ; q2, q, r2 by DQT, DRT (the two LDAs' operands patched for a's rows),
@@ -1726,7 +1731,7 @@ rg_nr:    lda #$FF                 ; the sentinel at Y = a; alloc += a + 1 (the
         sec
         adc alloc
         sta alloc
-rg_nx:    ldx tj                   ; the next rung, to np
+rg_nx:    ldx tj                   ; the next rung, to NX
         inx
         cpx #NX+1
         bcs :+
@@ -1808,9 +1813,9 @@ LAYPAD  = 102
 ; the run's end, is the floor, or the floor + 1 in the near strip when the floor
 ; is not level there, flr then the floor: nearpost blacks the floor line's
 ; ground), and is drawn as one of:
-;   - one box (no rung in it: c_lo's test fails, at c_lo or in c_rix): the top zone when the top is not
-;     level (zone1: lines mn .. mx-1, the pixels at or below their top-row
-;     line), then run2 from mx (c_r1);
+;   - one box (no rung in it: c_lo's test fails, at c_lo or in c_rix): the
+;     top zone when the top is not level (zone1: lines mn .. mx-1, the pixels
+;     at or below their top-row line), then run2 from mx (c_r1);
 ;   - one rung in it (c_sp): fsplit (top level) or split (not), or c_ld's one
 ;     box when the rung's two boxes have the same bytes;
 ;   - two rungs (c_dbl): s2v (bank 4; top level) or split2; three: slow.
@@ -1858,11 +1863,11 @@ cols:   lda #$FF                   ; fsplit's tables are no rung's yet
         sta zb3+7
         ldx #0                     ; the strip's kind, X: 0 a strip above the
         bit last                   ; near one; 1 the near strip (last $FF)
-        bpl @lvk
+        bpl @kind
         inx
-@lvk:   cpx #$FF                   ; operand: the kind patched last ($FF: none
-        beq @lvd                   ; yet); patched only when it changes
-        stx @lvk+1
+@kind:   cpx #$FF                   ; operand: the kind patched last ($FF: none
+        beq @kd                   ; yet); patched only when it changes
+        stx @kind+1
         lda zbt0,x                 ; ob_st, zb_st (a floor not level; 2 bytes):
         sta ob_st                  ; 0 STA flr1 (the run ends at the floor); 1
         sta zb_st                  ; BNE ob_n, zb_n (flr + 1: nearpost draws
@@ -1877,7 +1882,7 @@ cols:   lda #$FF                   ; fsplit's tables are no rung's yet
         sta c_np+2
         lda #0                     ; flr: 0 until a near-strip floor is not
         sta flr                    ; level (o_zb, c_zb; nearpost puts it back)
-@lvd:
+@kd:
         lda xlp                    ; phase's bounds: record below xlp (strip 1:
         ldx ns                     ; below xr, so everywhere), not from there to
         dex                        ; xrp, record from xrp on
@@ -1903,10 +1908,10 @@ cols:   lda #$FF                   ; fsplit's tables are no rung's yet
 ; phase: the columns from x4 (A, kept) up to the next of xlp, xrp and xr form
 ; a phase: ph_e is its end and c_xe's operand the end, or 128 when the phase
 ; would cross from the left half into the right (the half switches at 128,
-; c_lim's and c_nh's), and the record choice is patched for it: c_rec JMP recordc or
-; c_srx, o_rec and ob_rj JMP record or o_nr (low bytes only: record and o_nr
-; share a page).  In: A = x4; ph_lo and ph_hi's operands (cols').  Clobbers
-; X, Y.  Called by cols and c_lim.
+; c_lim's and c_nh's), and the record choice is patched for it: c_rec JMP
+; recordc or c_srx, o_rec and ob_rj JMP record or o_nr (low bytes only: record
+; and o_nr share a page).  In: A = x4; ph_lo and ph_hi's operands (cols').
+; Clobbers X, Y.  Called by cols, c_lim and c_nh.
 phase:
 ph_lo:  cmp #0                     ; operand: xlp (strip 1: xr), cols'
         bcs ph_h
@@ -2024,7 +2029,7 @@ c_ld:   lda CE-1,x
         lda CO-1,x
         sta RVO
         bvc c_r1
-c_z1:    jmp zone1                  ; (c_on's too)
+c_z1:    jmp zone1                 ; (c_on's too)
 
 ; c_srx: c_rec's target in a phase without recording, and recordc's way on:
 ; to c_split.  In: Y = x4, ri.
@@ -2078,7 +2083,7 @@ c_rd:
         bcs c_ri                   ; HI <= x4
 c_rr:   ora #3
         cmp LO,x
-        bcs c_split                 ; LO <= x4 + 3
+        bcs c_split                ; LO <= x4 + 3
 ; o_nr (c_one, c_on): the column is one box, ri-1: the top zone if the top is
 ; not level (V set: zone1, back to c_r1x with X = mx), then lines mx .. flr1-1
 ; by run2 with RVE, RVO = box ri-1's bytes (set by c_rix when it finds the
@@ -2166,7 +2171,7 @@ o_ft:
 ob0:    lda ROWB,y                 ; the bottom row's (page: cols')
 ob3:    cmp ROWB+3,y
         bne o_zb
-o_lv:   sta flr1                   ; a level floor, A: the run ends at it (as
+        sta flr1                   ; a level floor, A: the run ends at it (as
                                    ; c_lv; flr stays 0: level, nearpost's)
 o_rec:  jmp record                 ; (phase's: record or o_nr)
 c_lim:  cmp xr                     ; the phase's end: the strip's too?
@@ -2219,7 +2224,7 @@ ob_n:   stx flr                    ; the near strip: flr1 = flr + 1, at most
 c_hi:   cpy #0                     ; operand: rung ri's HI (rpatch's)
         bcc c_sp                   ; in the column
 ; c_rix: cols' next rung.  Rung ri is wholly left of the column (x4 >= HI):
-; ri advances to the first rung with HI > x4 (rung np+1, the right margin,
+; ri advances to the first rung with HI > x4 (rung NX+1, the right margin,
 ; stops it: HI = xr) and c_lo and c_hi are patched for it (as rpatch); then
 ; c_lo's test again: rung ri in the column (LO & $FC <= x4), c_sp; else one
 ; box, the box to its left (ri - 1) becoming run2's bytes (RVE, RVO: a one-box
@@ -3254,7 +3259,8 @@ bytes2: lda me
         sta vo
         rts
 
-LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF) ; LM,n: the n leftmost pixels
+                                   ; LM,n: the n leftmost pixels
+LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF)
 
 ; run: lines X .. Y-1 (X < Y) of the column, ve on even lines and vo on odd,
 ; through the STAB for the screen and half (init's: for each line STA line,Y,
@@ -3491,14 +3497,14 @@ fps10:  .res 2                     ; readout's: the rate in tenths
 fpson:  .byte 1                    ; the readout on (game.s's F toggles it)
 BANKMAP: .byte 4, 5, 6, 7          ; the socket of each bank 4..7 (find_ram's;
                                    ; these are the defaults)
-wrt:    .byte 0                    ; (pg4..pg7's BIT operand on a plain machine)
-; pg4..pg7 (PAGE 4..7): bank 4+k's socket (BANKMAP) paged in for reads, ROMCOPY
-; kept in step, and selected for writes: pwN is BIT wrt, three bytes that
-; wpatch makes STA WRSEL_WATFORD + the socket or STA WRSEL_SOLIDISK when
+wrt:    .byte 0                    ; (pg4..pg7's and pw7s, pw4s's BIT operand
+                                   ; on a plain machine)
+; pg4..pg7 (PAGE 4..7): bank 4+k's socket (BANKMAP) paged in for reads,
+; ROMCOPY kept in step, and selected for writes: pwN is BIT wrt, three bytes
+; that wpatch makes STA WRSEL_WATFORD + the socket or STA WRSEL_SOLIDISK when
 ; find_ram found such a board (setup's inline pagings pw7s, pw4s likewise).
-; Out: A = the socket; X, Y kept; the flags the
-; BIT's (wrt is 0: Z set, N and V clear) or, on a patched board, the LDA's (N
-; and Z as the socket).
+; Out: A = the socket; X, Y kept; the flags the BIT's (wrt is 0: Z set, N and
+; V clear) or, on a patched board, the LDA's (N and Z as the socket).
 .repeat 4, k
         .ident(.sprintf("pg%d", k+4)):
         lda BANKMAP+k
@@ -3638,15 +3644,16 @@ s2_m:   jmp s2_n
 ; ---------------------------------------------------------------- LANDS
 ; LANDS: the start-up, a separate file *RUN at $7000 by GO (the chooser has
 ; set the mode, the palette all black, the cursor off and the version's
-; directory, and GO has *LOADed LAND at $1900).
-; It runs one time: the sideways banks are found (find_ram) and pg4..pg7's
-; and setup's write selects patched for the board (wpatch); the four bank files are
-; *LOADed at $3000 in turn and copied up (ldbank: TABLES7 to bank 7, SHIPB to
-; 6, TABLES2 to 5, TABLES to 4, which is left paged in); the EXEC file is
-; closed; the readout's and the game's glyphs are made (glyphs, glyphs5); the
-; CRTC narrows the screen to 64 bytes by 20 rows; the shown screen is cleared
-; and the palette set; then LAND's `go`.  LANDS sits at $7000..$75FF, inside
-; screen 1 ($5800..$7FFF), which init clears: nothing returns here.
+; directory, and GO has *LOADed LAND at $1900).  It runs one time: the
+; sideways banks are found (find_ram) and pg4..pg7's and setup's write selects
+; patched for the board (wpatch); the four bank files are *LOADed at $3000 in
+; turn and copied up (ldbank: TABLES7 to bank 7, SHIPB to 6, TABLES2 to 5,
+; TABLES to 4, which is left paged in); the EXEC file is closed; the readout's
+; and the game's glyphs are made (glyphs, glyphs5); the CRTC narrows the
+; screen to 64 bytes by 20 rows; the shown screen is cleared and the palette
+; set; then LAND's `go`.  LANDS sits at $7000..$740A ($7534 at most: the NULA
+; build's), inside screen 1 ($5800..$7FFF), which init clears: nothing returns
+; here.
         .segment "BOOT"
 start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
         sta old_bank
@@ -3753,8 +3760,8 @@ ldbank: pha
 ; colours 8-15 their own, not flashing), its 16 colours (NULAPAL, mode2.inc:
 ; (colour << 4 | red), (green << 4 | blue)); then the ULA's control byte
 ; rewritten from the MOS's copy and its palette made the identity, which on a
-; machine without NULA undo what the writes to its control and palette
-; mirrors ($FE22, $FE23) did, leaving MODE 2's own colours.  Clobbers A, X, Y,
+; machine without NULA undoes what the writes to its control and palette
+; mirrors ($FE22, $FE23) did, leaving MODE 2's own colours.  Clobbers A, X,
 ; tmp.  Caller: start.
 .ifdef MODE2
 palette:
@@ -3794,12 +3801,14 @@ nulapal: NULAPAL
 .endif
 .endif
 
+.ifndef MODE2
 vdu_init:                          ; VDU 19,l,p,0,0,0: logical 1 cyan (6), 2
                                    ; magenta (5), 3 yellow (3)
         .byte 19, 1, 6, 0, 0, 0
         .byte 19, 2, 5, 0, 0, 0
         .byte 19, 3, 3, 0, 0, 0
 vdu_end:
+.endif
 
 crtc_regs:                         ; (register, value) pairs
         .byte 1, 64                ; R1: 64 characters displayed
@@ -3815,7 +3824,8 @@ crtc_end:
 ; character, at GLY + 16 * its index), its definition read by OSWORD 10 (8 rows
 ; of 8 pixels at oswblk+1..8) and turned into MODE 1 bytes in colour 3 (both
 ; colour bits of each pixel set): the left 4 pixels of each row to bytes 0..7,
-; the right 4 to bytes 8..15.  Clobbers A, X, Y, tcol (the character count),
+; the right 4 to bytes 8..15 (MODE 2: nfont's rows, as gbyte's yellow MODE 2
+; bytes).  Clobbers A, X, Y, tcol (the character count),
 ; tmp, oswblk.  Caller: start.
 glyphs: ldx #0
 @c:     stx tcol
@@ -3997,14 +4007,14 @@ oswblk: .res 9                     ; OSWORD 10's block: the character, 8 rows
 ; the rung's LO: pixel xt + k leaning right, xb + k left); each is stored at
 ; RTBUF + alloc + k (rungs' RTP + x + 1 for pixel x) and the rung's sentinel
 ; $FF after them, alloc advanced by a + 1 (as rungs' rg_nr), then the next
-; rung (rg_r) or return (rungs' end).  The unrolled body FR0 / FL0
-; stores pixels RFA-1 down to 0; it is entered at pixel a-1 (DUFR, DUFL: the
-; entry's low byte, into @j's operand; the bodies are page-aligned so the high
-; byte is fixed).  Other rungs (a > RFA, or D >= 16, which includes a wrapped
-; D with yb < yt) go back to rungs' division (rg_rdr, rg_rdl) with ra2 = 2a.
-; In: X the rung, Y = dva = a, TY, BY, alloc (in RTBUF's
-; page), tj = X.  Clobbers A, X, Y, rrem (= yt).  Callers: rungs (JMP
-; from rg_r's leaning-right and leaning-left cases).
+; rung (rg_r) or return (rungs' end).  The unrolled body FR0 / FL0 stores
+; pixels RFA-1 down to 0; it is entered at pixel a-1 (DUFR, DUFL: the entry's
+; low byte, into @j's operand; the bodies are page-aligned so the high byte is
+; fixed).  Other rungs (a > RFA, or D >= 16, which includes a wrapped D with
+; yb < yt) go back to rungs' division (rg_rdr, rg_rdl) with ra2 = 2a.  In: X
+; the rung, Y = dva = a, TY, BY, alloc (in RTBUF's page), tj = X.  Clobbers A,
+; X, Y, rrem (= yt).  Callers: rungs (JMP from rg_r's leaning-right and
+; leaning-left cases).
         .segment "B4C"
 rfastr: cpy #RFA+1                 ; a > RFA: the division
         bcs @sl
@@ -4550,7 +4560,7 @@ hgnd:   lda ZB                     ; X = 16 (ZB - ZSHIP) + 4 + (cxs >= 8)
         adc #HMAX
         sta HOFF
         rts
-; su_l7 (bank 7): setup's land strip, unrolled for np = NX.  In: Y = 16 (ns-1).
+; su_l7 (bank 7): setup's land strip, unrolled for NX.  In: Y = 16 (ns-1).
 ; Rows ns-1 and ns (PX, PY + Y and + Y + 16) become the strip's top and bottom
 ; points TX, TY, BX, BY + 1..NX, BCL counted up for each bottom point at or past
 ; YGND+1 (bclip's); then Y += ldCLE (pcol5's 16 o: the window row of row ns)
@@ -4833,7 +4843,8 @@ slow2:  ldx mn
         cpx flr1
         bcc @l
         rts
-PIXM:   .byte PM($88), PM($44), PM($22), PM($11) ; pixel p's two bits in a MODE 1 byte
+                                   ; pixel p's bits as drawn (PM)
+PIXM:   .byte PM($88), PM($44), PM($22), PM($11)
 
 ; ---------------------------------------------------------------- bank 5
         .segment "B5CODE"

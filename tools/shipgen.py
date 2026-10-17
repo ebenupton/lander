@@ -93,7 +93,8 @@ The tables, in shipspan.inc's order (e an entry, P a pattern):
   SPANS              the streams (segment SPANS)
   KTN, BYN + w       (segment DTAB again, after SPANS) for a boundary at pixel w:
                      KT the mask of the pixels before w in its byte ($00, $88, $CC,
-                     $EE for w & 3 = 0..3), BY the byte's offset from the column 5
+                     $EE for w & 3 = 0..3; a MODE 2 build: their proto/nula.py
+                     mask()s), BY the byte's offset from the column 5
                      left of shx's, 8 * (w >> 2)
 """
 import argparse
@@ -402,7 +403,7 @@ def write(out):
     tab('SPANS', data)
     L.append('        .segment "DTAB"')
     LM = [0, 0x88, 0xCC, 0xEE]
-    if LG.NU.enabled():            # the NULA build: MODE 2's masks (proto/nula.py)
+    if LG.NU.enabled():            # a MODE 2 build: MODE 2's masks (proto/nula.py)
         LM = [LG.NU.mask(m) for m in LM]
     tab('KTN', [LM[i & 3] for i in range(42)])
     tab('BYN', [(i >> 2) * 8 for i in range(42)])

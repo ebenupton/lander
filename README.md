@@ -34,8 +34,8 @@ a NULA takes the write as its own (a reset) and the frames keep their length.
 
 Built with `DP11_MOUSE=1 sh build.sh` (it is off by default), a mouse at
 &FCAC-&FCAF (found at start; the movement since the last read, as some Master
-upgrades provide) also flies the ship: it flies the ship as in Lander, and the
-keys above no longer steer.  The pointer's offset from where it was when the
+upgrades provide) steers the ship as in Lander, in place of the steering keys
+above.  The pointer's offset from where it was when the
 ship last spawned sets the target heading (its direction) and how far the nose
 tips that way (its distance: level near the centre, the full 60 degrees about
 160 mouse units out).  The ship moves halfway to each target every step.  Left
@@ -51,8 +51,8 @@ the bottom of the screen; the ship then coasts up and falls back.
 
 ## The MODE 2 versions
 
-Both are the same game in MODE 2.  The renderer is unchanged: it still works in MODE
-1's pixels, 256 across, and each MODE 2 pixel shows the even one of the two it
+Both are the same game in MODE 2.  The renderer is MODE 1's: it works in MODE 1's
+pixels, 256 across, and each MODE 2 pixel shows the even one of the two it
 covers, which only its masks and colour bytes have to know about.  The palettes, the
 colours' assignments and the 3 x 7 letters are in `proto/nula.py`.
 
@@ -109,11 +109,11 @@ for byte with the Python reference model:
 | `tools/landgen.py` | the renderer's tables for banks 4, 5 and 7 |
 | `tools/shipgen.py` | the ship: pre-rotated, pre-rasterised, compressed orientations |
 | `tools/gamegen.py` | the game's tables: thrust, the ship's screen line, the map, the crash's sound |
-| `proto/nula.py` | the MODE 2 versions' palettes, colours, masks and letters |
 | `tools/mergebank.py`, `tools/mkdfs.py` | code segments into the bank images; the DFS disc |
 | `src/menu.bas` | the chooser (typed in by `!BOOT`) |
 | `build.sh`, `lander.ssd` | the build, and the disc image it makes |
 | `proto/` | the Python reference model the 6502 matches pixel for pixel |
+| `proto/nula.py` | the MODE 2 versions' palettes, colours, masks and letters |
 | `test/` | the test suite (`test/run.sh` runs it) |
 | `ref/lander/` | what was taken from Lander: the ship blueprint, the flight model, notes |
 
@@ -141,7 +141,8 @@ little else.  The screen is double buffered; for each screen and column, the hig
 and lowest lines the landscape reached the last time that screen was drawn are kept,
 so the next frame on it blacks exactly what has gone.  Tiles are coloured from the 35
 2 x 2 dithers of MODE 1's four colours: ten for land, picked by height and by slope
-(lit from the left) with a per-tile scatter, four for sea and a grey for the pad.
+(lit from the left) with a per-tile scatter, four for sea and a grey for the pad
+(the NULA version: seven and three, flat).
 
 **The ship.** Lander's ship is pre-rotated and pre-projected for 13 pitches (60
 degrees nose up to 60 nose down, 10 apart) by 32 directions, 17 of them stored and

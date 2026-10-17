@@ -1,12 +1,12 @@
 ; ============================================================================
 ; shipspan.s -- the ship's drawing for LAND's bank 6.  Included by shipb.s:
 ; the span walker and its tables go into the bank's CODE segment after keys
-; and ship ($8105-$869E), the decoder spdec into TAIL ($B400-$B58A, the page
+; and ship ($8100-$869E), the decoder spdec into TAIL ($B400-$B57B, the page
 ; after the SPANS streams) and the nibble tables DTH, DL4 open DTAB ($B600),
-; where shipspan.inc's tables follow.  tools/shipgen.py writes shipspan.inc: every
-; stored orientation's lines, rasterised by its reference tri() and
-; compressed; test/shipbtest.py runs shipdraw under py65 for every
-; orientation and checks each screen byte against that reference.
+; where shipspan.inc's tables follow.  tools/shipgen.py writes shipspan.inc:
+; every stored orientation's lines, rasterised by its reference tri() and
+; compressed; test/shipbtest.py runs shipdraw under py65 for every orientation
+; and checks each screen byte against that reference.
 ; Addresses quoted here are build/shipb_labels.txt's.
 ;
 ; Entry: shipdraw (jsr from shipb.s's ship; the test calls it directly).
@@ -58,7 +58,8 @@
 ; byte, acc is stored, the whole bytes between are filled with the dither
 ; and acc restarts as a byte of it.  The last boundary leaves the pixels from
 ; it on as the screen's.  The screen is MODE 1 cut to 64 bytes a line: 4
-; pixels a byte (masks $88, $44, $22, $11), 8 bytes a column cell, 512 a
+; pixels a byte (masks $88, $44, $22, $11; a MODE 2 build: KTN holds
+; proto/nula.py's mask() of these), 8 bytes a column cell, 512 a
 ; character row; line y's byte of column c is at base + 512 (y >> 3) + (y &
 ; 7) + 8 c.
 ;
@@ -201,7 +202,7 @@ shipdraw:
         sta al                     ; al = shx & 3, the centre's pixel in byte
         sta wb                     ; wb = al (normal) or 41 + al (mirrored):
         lda EXB,x                  ; spdec's base for w
-        and #$0F                   ; low nibble: the leftmost pixel's offset + 1
+        and #$0F                   ; low nibble: the leftmost pixel's offset + 17
         sta t
         lda EXB,x                  ; high nibble: the rightmost's offset - 4
         lsr a
@@ -308,8 +309,8 @@ shipdraw:
 ; bytes and DBUF slots: the band's first two lines, swapped when L is even),
 ; bl and nb (the passes' lines), pm (pass A's parity), then enters the
 ; dithers' chain, which runs on to lnx2.
-; Reached by falling in from shipdraw and by jmp from pstb, psrb after a
-; band.
+; Reached by falling in from shipdraw and by pstb's jmp after a band (psrb
+; falls into it).
 band:   ldy #1
         lda (dp),y                 ; L, the band's lines
         sta bl
@@ -386,8 +387,6 @@ bccl:   lda CNL,x                  ; (operand patched: CNL or CML) bcj's target,
 bso:    lda SPATO,y                ; (operand patched: SPATON; SPATO mirrored)
         tay                        ; Y for CS: the pattern's end, or its start
 bcj:    jmp cn1                    ; (low byte patched: cn_(7-n) or cm_(7-n))
-
-
 
 ; page: A, the lines' page (DBUF's), into dp+1 and the boundary reads' high
 ; bytes (rd_j+2, in+2).  One call a drawing, from shipdraw.
@@ -596,7 +595,7 @@ FCX:    .res 9                     ; even-line dither byte, and even ^ odd
 ; from DTH (the high one: the whole byte as the operand's low byte) or DL4
 ; (the low one, masked, with the high one's sign bit).  $FF, copied, ends
 ; the entry.
-; In: X the entry; mir, wb.  Out: DBUF.  Clobbers A, X, Y, ptr (the stream
+; In: X the entry; mir, wb, dsg.  Out: DBUF.  Clobbers A, X, Y, ptr (the stream
 ; pointer, Y indexing it: an entry is under 256 bytes), $8E (dl: a walker
 ; slot byte, which it sets after this runs), sd_y, the patched opcodes and
 ; operands.  Called by shipdraw when dlast, dmir or dal changes.  TAIL
@@ -731,7 +730,6 @@ dmir:   .byte 0                    ; drawn mirrored or not,
 dal:    .byte 0                    ; at al
 dsg:    .byte 0                    ; the mir the adds' opcodes are for
 
-        .code
         .segment "DTAB"
 ; DTH, DL4: a nibble's signed value, -8 .. 7, as a byte, laid out so spdec's
 ; adc operands take the stream byte as their low byte.  DTH, a page, by the

@@ -42,9 +42,10 @@
 ; full thrust; thrust goes the way the ship is tilted, so nose down flies
 ; forward); F toggles LAND's frame-rate readout.  Fuel burns while thrusting.
 ; Built with DP11_MOUSE (off by default: `DP11_MOUSE=1 sh build.sh`), a
-; mouse at $FCAC..$FCAF (ginit's test: mdet) steers instead, as Lander's: its movement moves a pointer (gmx, gmy) whose polar form sets the
-; targets (attit), the left button full thrust, the middle hover (a quarter;
-; Lander's), the spawn puts the pointer back at its centre.
+; mouse at $FCAC..$FCAF (ginit's test: mdet) steers instead, as Lander's:
+; its movement moves a pointer (gmx, gmy) whose polar form sets the targets
+; (attit), the left button full thrust, the middle hover (a quarter;
+; Lander's); spawn puts the pointer a count off its centre, towards SPAWNK.
 ; Touching the ground over the pad (tiles 0..PADN-1 in x and z) slowly and
 ; within a pitch step of level lands: the ship sits still and refuels.
 ; Touching it anywhere else, or too fast or too tilted, crashes: CRASHT steps
@@ -475,7 +476,8 @@ no:
 ; keys: gkb from the keyboard: 1 Z or left, 2 X or right, 4 K or up, 8 M or
 ; down, 16 SPACE, 32 SHIFT, 64 F; F toggles fpson as it goes down (fkey:
 ; its state last time).  Interrupts off while the VIA is ours.  Clobbers A,
-; X.  Called by gstep.
+; X.  DP11_MOUSE: with mdet set, also the mouse: 16 the left button, 128 the
+; middle; writes mous, gmx, gmy; clobbers Y, gt0..gt3 too.  Called by gstep.
 keys:   lda #0
         sta gkb
         sei
@@ -662,19 +664,22 @@ psg:    sei
 ; thrust, fuel and an exhaust dot; landed: velocities zeroed and REFUEL a
 ; step up to FUELMX; else gravity, the move, and the ground test: the ship's
 ; centre less than UNDER units above HGV (or below it, or y below 0) is a
-; touch, a landing
-; if over the pad, within a pitch of level and slower than LANDV, else a
-; crash (burst, GSHV 0, ctim CRASHT).  Finally parts.  Reads gkb, fuel, sy,
-; CAME, HGV; writes gk, gp, ctim, thr, landed, gv*, s*, fuel, GSHV.  Clobbers A, X, Y, g0, g1, gt0..gt5, tt0, tt1.  Called by gstep.
+; touch, a landing if over the pad, within a pitch of level and slower than
+; LANDV, else a crash (burst, GSHV 0, ctim CRASHT).  Finally parts.
+; DP11_MOUSE: with mous set, attit sets the attitude in place of the keys;
+; thr 2 is hover (the middle button: HOVS, 3 fuel, a dot every fourth step:
+; hcnt).  Reads gkb, fuel, sy, CAME, HGV (mous); writes gk, gp, ctim, thr,
+; landed, gv*, s*, fuel, GSHV (hcnt).  Clobbers A, X, Y, g0, g1, gt0..gt5,
+; tt0, tt1.  Called by gstep.
+step:
 .ifdef DP11_MOUSE
-step:   lda mous                   ; the mouse: Lander's attitude from it
+        lda mous                   ; the mouse: Lander's attitude from it
         beq :+
         jsr attit
         jmp @att
-:       lda gkb
-.else
-step:   lda gkb
+:
 .endif
+        lda gkb
         lsr a
         bcc :+
         lda gk
@@ -703,7 +708,10 @@ step:   lda gkb
         beq :+
         dec gp
 :
-@att:   lda ctim                   ; crashed: the dots only, then the pad
+.ifdef DP11_MOUSE
+@att:
+.endif
+        lda ctim                   ; crashed: the dots only, then the pad
         beq @fly
         dec ctim
         bne :+
@@ -1081,9 +1089,11 @@ octj:   cmp gt4
         rts
 ATT:    .byte 26, 78, 137, 211     ; 256 tan 5.625, 16.875, 28.125, 39.375
                                    ; degrees, rounded up
-R2L:    .byte <64, <128, <320, <640, <1024, <1536   ; r*r at Lander's 11.25
-R2H:    .byte >64, >128, >320, >640, >1024, >1536   ; sqrt 1, 2, 5, 10, 16, 24
-                                   ; degrees: 10, 20 .. 60 rounded
+; R2L, R2H + i: the r*r at which the pitch reaches PFLAT + i + 1: r*r/64 =
+; 1, 2, 5, 10, 16, 24, where Lander's 11.25 sqrt(r*r/64) degrees is nearest
+; 10, 20 .. 60
+R2L:    .byte <64, <128, <320, <640, <1024, <1536
+R2H:    .byte >64, >128, >320, >640, >1024, >1536
 SQL:                               ; n * n, n 0..39
         .repeat 40, I
         .byte <(I*I)
@@ -1886,8 +1896,10 @@ status: ldx back
         bcc @b
 @c:     rts
 .ifdef MODE2
-BARB:   .byte 0, YELB & $AA, YELB & $AA, YELB, YELB ; (MODE 2: the even pixels
-PIXG:   .byte $AA, $AA, $55, $55   ; decide; a dot's pixel the MODE 2 one it is in)
+                                   ; 0..4 pixels lit, yellow: the even ones
+BARB:   .byte 0, YELB & $AA, YELB & $AA, YELB, YELB   ; decide
+PIXG:   .byte $AA, $AA, $55, $55   ; pixel 0..3's MODE 2 pixel (LAND's PIXM is
+                                   ; in bank 4)
 .else
 BARB:   .byte $00, $88, $CC, $EE, $FF   ; 0..4 pixels lit from the left, yellow
 PIXG:   .byte $88, $44, $22, $11   ; pixel 0..3's two bits in a byte (LAND's
@@ -1898,15 +1910,14 @@ PIXG:   .byte $88, $44, $22, $11   ; pixel 0..3's two bits in a byte (LAND's
 gkb:    .byte 0                    ; the keys down (keys' bits)
 gk:     .byte 0                    ; the ship's direction (0..NDIR-1) and pitch
 gp:     .byte 0                    ; (0..NPITCH-1, PFLAT level)
+thr:    .byte 0                    ; this step's thrust: 0 none, 1 full (2
+                                   ; hover: DP11_MOUSE)
 .ifdef DP11_MOUSE
-thr:    .byte 0                    ; this step's thrust: 0 none, 1 full, 2 hover
 mdet:   .byte 0                    ; 1: a mouse found at the start
 mous:   .byte 0                    ; 1: the mouse present this frame (attit)
 gmx:    .byte 0                    ; the pointer, signed, 4 mouse units a count
 gmy:    .byte 0                    ; (x right, y towards the player: Lander's)
 hcnt:   .byte 0                    ; hover's steps (a dot every fourth)
-.else
-thr:    .byte 0                    ; this step's thrust: 0 none, 1 full
 .endif
 landed: .byte 0                    ; 1: sitting on the pad
 ctim:   .byte 0                    ; crashed: steps left (0: flying)

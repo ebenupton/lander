@@ -13,16 +13,16 @@ MODE 1's 2 x 2 dithers of black, cyan, magenta and yellow:
         pixel of the two.
 
 variant() names the build the environment asks for (mode1 without either) and
-enabled() is true for both MODE 2 builds; every tool and test asks and, when it
-is, draws through this module.  The renderer itself is unchanged: it still works
-in the MODE 1 build's pixels, 256 across, four to a byte, at that resolution;
+enabled() is true for both MODE 2 builds; the generators (landgen, gamegen,
+shipgen), proto/land.py and the soak and ship tests ask and, when it is, draw
+through this module.  The renderer is the MODE 1 build's: it works in its pixels, 256 across, four to a byte, at that resolution;
 only its masks and colour bytes differ.  A MODE 2 byte holds two pixels, the
 left in bits 7, 5, 3, 1 and the right in bits 6, 4, 2, 0 (colour bit 3 first),
 so each MODE 2 pixel is two of the renderer's: it shows the even one of the
 pair, which is what mask() makes of a MODE 1 mask (MODE 1 pixel 0 decides the
 left pixel, pixel 2 the right).  A mask and its complement stay complements, so
-boxes meeting in a byte still tile it.  Overlays placed by single pixels (the
-dots, the map's marker) take the MODE 2 pixel their pixel falls in instead.
+boxes meeting in a byte still tile it.  Overlays placed by single pixels (game.s's
+dots and map marker) take the MODE 2 pixel their pixel falls in instead (pixel()).
 
 dither_bytes(e) is the build's even and odd line bytes for swatch35 entry e.
 NULA: colour(e) is e's logical colour, the entries the game uses given their
@@ -30,16 +30,19 @@ own (SLOTS' order), any other the nearest of them; both bytes solid(colour(e)).
 The land and sea use fewer entries than the MODE 1 build (proto/land.py's LAND,
 SEAC read nula()) so that black, three seas, the pad's grey, seven lands and the
 ship's four colours fill the sixteen.  CPC: every entry the game uses (USED) is
-given a different one of the 27 (CPCMAP: the assignment nearest overall in
+given a different one of the 27 (cpcmap(): the assignment nearest overall in
 average colour), any other its nearest; its bytes are the two colours' (pair) in
 a checkerboard (pair's first colour in the even line's left pixel).
-YELB, MAGB (yellow and magenta: the letters, the fuel bar, the dots, the map's
-marker) are solid bytes; the map's colours are entries (MAPSEA, MAPLAND, MAPPAD).
+yelb(), magb() (mode2.inc's YELB, MAGB: yellow and magenta, the letters, the
+fuel bar, the dots, the map's marker) are solid bytes; the map's colours are
+entries (MAPSEA, MAPLAND, MAPPAD).  PIXM is the build's mask of each MODE 1 pixel.
 
-    python3 proto/nula.py   writes proto/nula.png and proto/cpc.png: each build's
-                            colours with their numbers and the entries they
-                            stand for
+    python3 proto/nula.py   writes proto/nula.png (the sixteen NULA colours, each
+                            labelled logical colour: entry) and proto/cpc.png
+                            (each entry the game uses as its CPC checkerboard,
+                            labelled entry: levels)
 """
+import functools
 import os
 
 import swatch35 as SW
@@ -86,8 +89,13 @@ SLOTS = [(34, 'black: the sky, the margins'),
          (11, 'land'), (16, 'land'), (22, 'land'), (26, 'land'), (28, 'land'),
          (30, 'the ship'), (20, 'the ship'), (9, 'the ship; the map\'s marker, old dots'),
          (8, 'the ship')]
-LAND = [3, 10, 11, 16, 22, 26, 28]       # proto/land.py's LAND and SEAC under NULA
-SEAC = [0, 15, 17]
+ENTS = [e for e, _ in SLOTS]
+LAND = [e for e, u in SLOTS if u.startswith('land')]   # proto/land.py's LAND and SEAC
+SEAC = [e for e, u in SLOTS if u == 'sea']             # under NULA
+
+
+def dist2(a, b):
+    return sum((x - y) ** 2 for x, y in zip(a, b))
 
 
 def avg(e):
@@ -102,18 +110,15 @@ def nib(v):
 
 
 PAL = [tuple(nib(c) for c in avg(e)) for e, _ in SLOTS]    # 4-bit r, g, b
-YELLOW = [e for e, _ in SLOTS].index(10)                     # the HUD's and dots'
-MAGENTA = [e for e, _ in SLOTS].index(9)                     # the marker's, old dots'
-SEA, LANDC, PADC = 1, YELLOW, 4                              # the map's
+YELLOW = ENTS.index(10)                                      # the HUD's and dots'
+MAGENTA = ENTS.index(9)                                      # the marker's, old dots'
 
 
 def colour(e):
     """Swatch35 entry e's logical colour."""
-    ents = [s for s, _ in SLOTS]
-    if e in ents:
-        return ents.index(e)
-    a = avg(e)
-    return min(range(16), key=lambda c: sum((x - y) ** 2 for x, y in zip(avg(ents[c]), a)))
+    if e in ENTS:
+        return ENTS.index(e)
+    return min(range(16), key=lambda c: dist2(avg(ENTS[c]), avg(e)))
 
 
 def solid(c):
@@ -138,31 +143,23 @@ def rgb(lv):
     return tuple(127.5 * v for v in lv)
 
 
-def _cpcmap():
+@functools.cache
+def cpcmap():
     """{entry: levels} for USED, each a different colour, the total squared distance
     from the entries' average colours least (scipy's assignment)."""
     from scipy.optimize import linear_sum_assignment
-    cost = [[sum((a - b) ** 2 for a, b in zip(avg(e), rgb(lv))) for lv in CPC27] for e in USED]
+    cost = [[dist2(avg(e), rgb(lv)) for lv in CPC27] for e in USED]
     rows, cols = linear_sum_assignment(cost)
     return {USED[r]: CPC27[c] for r, c in zip(rows, cols)}
 
 
-_CM = {}
-
-
-def cpcmap():
-    if not _CM:
-        _CM.update(_cpcmap())
-    return _CM
-
-
 def cpc_levels(e):
-    """Entry e's CPC colour: CPCMAP's, or for an entry the game does not use the
+    """Entry e's CPC colour: cpcmap()'s, or for an entry the game does not use the
     nearest of the 27."""
     m = cpcmap()
     if e in m:
         return m[e]
-    return min(CPC27, key=lambda lv: sum((a - b) ** 2 for a, b in zip(avg(e), rgb(lv))))
+    return min(CPC27, key=lambda lv: dist2(avg(e), rgb(lv)))
 
 
 def pair(lv):
@@ -185,7 +182,8 @@ def pair(lv):
 def dither_bytes(e):
     """The MODE 2 build's (even, odd) bytes for entry e."""
     if cpc():
-        a, b = pair(cpc_levels(e))           # a checkerboard: the right pixel's
+        a, b = pair(cpc_levels(e))           # a checkerboard: even line a left, b
+                                             # right; odd line b left, a right
         return [solid(a) & 0xAA | solid(b) & 0x55, solid(b) & 0xAA | solid(a) & 0x55]
     b = solid(colour(e))
     return [b, b]
@@ -207,28 +205,16 @@ def mask(m):
     return (0xAA if m & 0x88 else 0) | (0x55 if m & 0x22 else 0)
 
 
-def near(m):
-    """A MODE 1 pixel mask as the MODE 2 pixels its pixels fall in."""
-    return (0xAA if m & 0xCC else 0) | (0x55 if m & 0x33 else 0)
-
-
 def pixel(x):
-    """The MODE 2 mask of the pixel virtual pixel x shows in (x & 3: 0, 1 left)."""
+    """The MODE 2 mask (left 0xAA, right 0x55) of the pixel renderer pixel x falls
+    in: x & 3 0, 1 left; 2, 3 right."""
     return 0xAA if x & 2 == 0 else 0x55
 
 
-def byte_of(img_row, c, enc):
-    """Byte column c of a line: img_row (palette entry + 1 by virtual pixel, 0
-    black), enc(entry) its colour byte."""
-    v = 0
-    for p, m in ((0, 0xAA), (2, 0x55)):
-        e = img_row[4 * c + p]
-        if e:
-            v |= enc(e - 1) & m
-    return v
+PIXM = [mask(m) if enabled() else m for m in (0x88, 0x44, 0x22, 0x11)]
 
 
-# The NULA build's letters: 3 x 7 pixels in a 4 x 8 cell (a MODE 2 character is two
+# The MODE 2 builds' letters: 3 x 7 pixels in a 4 x 8 cell (a MODE 2 character is two
 # bytes, four pixels), for the characters the game shows (land.s's gchars, lchars).
 FONT = {
     '0': ['###', '#.#', '#.#', '#.#', '#.#', '#.#', '###'],
@@ -276,8 +262,8 @@ def main():
     from PIL import Image, ImageDraw
     im = Image.new('RGB', (16 * 60, 90), 'white')
     d = ImageDraw.Draw(im)
-    for c, (rgb, (e, use)) in enumerate(zip(PAL, SLOTS)):
-        d.rectangle([c * 60, 0, c * 60 + 59, 59], fill=tuple(17 * v for v in rgb))
+    for c, (lv, (e, _)) in enumerate(zip(PAL, SLOTS)):
+        d.rectangle([c * 60, 0, c * 60 + 59, 59], fill=tuple(17 * v for v in lv))
         d.text((c * 60 + 2, 62), f'{c}: {e}', fill='black')
     im.save(os.path.join(os.path.dirname(__file__), 'nula.png'))
     phys = [(255 * (c & 1), 255 * (c >> 1 & 1), 255 * (c >> 2 & 1)) for c in range(8)]

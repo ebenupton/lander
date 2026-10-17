@@ -4,7 +4,8 @@ frame.  For debugging src/game.s; exit status 0 unless a frame fails to run.
 
     python3 test/gametest.py [script]      default "10:,20:T,30:"
 
-    script  frames:keys, comma separated: that many frames with those keys
+    script  frames:keys, comma separated (semicolon separated when a part has
+            @dx,dy): that many frames with those keys
             held.  Keys (the game's, src/game.s `keys`): L Z (yaw left),
             R X (yaw right), F K (nose down), B M (nose up), T SPACE (thrust),
             H SHIFT (full thrust too), P F (LAND's frame-rate readout on or
@@ -16,7 +17,7 @@ frame.  For debugging src/game.s; exit status 0 unless a frame fails to run.
 
     --mouse  the mouse fitted ($FCAC..$FCAF; else they read 0, no mouse).
              Only a build with DP11_MOUSE reads it (state() then shows the
-             pointer, ptr)
+             pointer, ptr).
 
 Each line: the frame number, the keys, the frame's cycles (frame()'s: see
 there), then state(): x, z (tiles), y (height units, 16 a tile), v (gvx,
@@ -24,8 +25,8 @@ gvy, gvz, 16-bit), k, p (direction, pitch), fuel, landed, ctim (crash steps
 left), hg (HGV: the ground under the ship), came (CAME), shy (GSHY: the
 ship's line).
 
-Importable: Game() builds the machine and runs G_INIT; frame(keys) runs a
-frame; state() describes the ship; rd(name, n) reads n bytes at a label.
+Importable: Game(mouse=False) builds the machine and runs G_INIT;
+frame(keys, vs, mdx, mdy, mbut) runs a frame; state() describes the ship; rd(name, n) reads n bytes at a label.
 
 The machine: build/LAND at $1900; TABLES, TABLES2, SHIPB and TABLES7 as
 sideways banks 4..7, a write to ROMSEL ($FE30) paging one in at $8000 (the

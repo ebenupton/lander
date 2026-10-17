@@ -5,6 +5,8 @@
                                          OUTDIR/TABLES2     bank 5: the tiles' colours
                                          OUTDIR/TABLES7     bank 7: the projection
                                          OUTDIR/tables.inc  the addresses and constants
+                                         OUTDIR/mode2.inc   (MODE 2 builds) YELB, MAGB,
+                                                            NULAPAL, NFONTCH, NFONT
 
 Every table is a 16K image's bytes at its bank address; build.sh then merges land.s's
 bank code segments into the space the tables leave.  Also imported by tools/shipgen.py
@@ -133,7 +135,7 @@ assert YSKY % 2 == 0 and YGND % 2 == 1 and R2OFF > 0 and NDI <= 176
 def dither_bytes(entry):
     """The MODE 1 bytes (even line, odd line) of swatch35 dither `entry`: pixel p (0..3)
     takes the cell's ink at (p & 1, line & 1); its colour's high bit is bit 7 - p of the
-    byte, its low bit 3 - p.  The NULA build's: proto/nula.py's."""
+    byte, its low bit 3 - p.  A MODE 2 build's: proto/nula.py's dither_bytes."""
     if NU.enabled():
         return NU.dither_bytes(entry)
     cl = SW.cell(*SW.ALL[entry])
@@ -278,7 +280,8 @@ def build7():
 
 
 def main():
-    """Write the three images and tables.inc to the directory named on the command line."""
+    """Write the three images, tables.inc and, in a MODE 2 build, mode2.inc to the
+    directory named on the command line."""
     out = sys.argv[1]
     open(os.path.join(out, 'TABLES'), 'wb').write(build())
     open(os.path.join(out, 'TABLES2'), 'wb').write(build2())

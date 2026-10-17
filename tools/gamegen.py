@@ -29,6 +29,8 @@ Labels and constants, in the file's order:
                         (column 32, line 31) and z runs up the screen.  Sea (all four
                         corners at sea level, as land.colour) logical colour 1 (cyan), land
                         3 (yellow), the pad (x, z < PADN) its dither (land.PADC: a grey).
+                        A MODE 2 build: MODE 2 bytes, the even pixel of each pair in
+                        proto/nula.py's MAPSEA, MAPLAND, MAPPAD dithers.
   MAPX, MAPZ            the offsets above: 32 - PADN/2, 31 + PADN/2.
 """
 import math
@@ -63,7 +65,8 @@ def thrust():
 
 
 def mapimg():
-    """MAPI's 1024 bytes: the map's tiles as MODE 1 pixels, 16 bytes a line."""
+    """MAPI's 1024 bytes: the map's tiles as the build's pixels (MODE 1, or MODE 2
+    through proto/nula.py), 16 bytes a line."""
     hm = L.heightmap()[0]
     out = bytearray(1024)
     grey = SW.cell(*SW.ALL[L.PADC])
@@ -71,7 +74,8 @@ def mapimg():
         z = (MAPZ - line) % 64
         for px in range(64):
             x = (px - MAPX) % 64
-            if x < L.PADN and z < L.PADN:
+            pad = x < L.PADN and z < L.PADN
+            if pad:
                 c = grey[(px & 1, line & 1)]
             elif all(hm[(z + dz) % L.MAP, (x + dx) % L.MAP] == L.SEA for dz in (0, 1) for dx in (0, 1)):
                 c = 1
@@ -79,7 +83,7 @@ def mapimg():
                 c = 3
             if NU.enabled():           # MODE 2: the even pixel of each pair, the build's
                 if px & 1 == 0:        # colours (proto/nula.py)
-                    e = NU.MAPPAD if x < L.PADN and z < L.PADN else NU.MAPSEA if c == 1 else NU.MAPLAND
+                    e = NU.MAPPAD if pad else NU.MAPSEA if c == 1 else NU.MAPLAND
                     out[line * 16 + (px >> 2)] |= NU.dither_bytes(e)[line & 1] & NU.pixel(px)
                 continue
             p = px & 3

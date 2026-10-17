@@ -10,14 +10,15 @@
 #
 #   sh build.sh              the disc: each version built in turn (MODE 1 last, so it is
 #                            what build/ holds after), its files kept in build/disc/
-#   sh build.sh VERSION      one version (mode1, cpc or nula) into build/ and no disc: for
+#   sh build.sh VERSION      one version (mode1, cpc or nula) into build/, no disc: for
 #                            the tests, which need NULA=1 or CPC=1 in the environment to
 #                            match (build/variant says which was built)
 #   DP11_MOUSE=1 sh build.sh with the mouse (src/game.s; off without)
 #
 # Steps for a version (everything into build/):
 #   1. tools/landgen.py: the renderer's tables, TABLES (bank 4), TABLES2 (bank 5) and
-#      TABLES7 (bank 7), and tables.inc (their addresses and the constants) for land.s.
+#      TABLES7 (bank 7), tables.inc (their addresses and the constants) for land.s
+#      and, for MODE 2, mode2.inc (its colour bytes, NULA palette and letters).
 #   2. tools/gamegen.py: gametab.inc, the game's tables (game.s, .included by land.s).
 #   3. ca65/ld65 on src/land.s (src/land.cfg): LAND (the code, at $1900), LANDS (the
 #      start, at $7000), and a file per bank code segment (B4*, B5*, B7*).
@@ -82,8 +83,10 @@ ld65 -C src/shipb.cfg -o $B/SHIPB $B/shipb.o -m $B/shipb_map.txt -Ln $B/shipb_la
 echo "$1: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, LANDS $(wc -c < $B/LANDS | tr -d ' '), SHIPB $(wc -c < $B/SHIPB | tr -d ' ')"
 }
 
+[ $# -le 1 ] || { echo "build.sh: one VERSION at most" >&2; exit 1; }
 if [ -n "$1" ]; then
-    one $1
+    rm -rf $B/disc $B/lander.ssd $B/BOOT $B/GO                                  # (no disc from one version)
+    one "$1"
     exit 0
 fi
 rm -rf $B/disc

@@ -7,8 +7,9 @@ harness for the flat machine: LAND at $1900, DEV at $8000, no banks.
 SCRIPT as test/gametest.py's: comma-separated N:KEYS parts, N frames with KEYS held
 (L left, R right, F nose down, B nose up, T thrust, H shift, P F's key).  Each line:
 the frame, the keys, the frame's cycles (gstep, project, strips, gpre, ship, gpost,
-readout), then the ship's state.  Each frame is 4 vertical syncs (FMIN), or with
-GT_VS=real as many as its cycles would take.  Importable: Game().frame(keys, vs) and state().
+readout), then the ship's state.  vcount moves on 4 syncs a frame (FMIN), or with
+GT_VS=real as many as its cycles would take; the game takes one step a frame either
+way, so the state is the same.  Importable: Game().frame(keys, vs) and state().
 """
 import os
 import random
@@ -79,10 +80,12 @@ class Game:
         self.held = {KEYS[k] for k in keys}
         m = self.mpu.memory
         c = 0
-        if vs is None and os.environ.get('GT_VS') == 'real':   # the last frame's syncs:
-            vs = max(4, -(-getattr(self, 'last', 0) // 40000))   # its cycles, 40000 a
-        elif vs is None:                                         # sync, FMIN at least
-            vs = 4                      # (else 4: the flight then depends on no timing)
+        if vs is None and os.environ.get('GT_VS') == 'real':   # the syncs vcount moves
+            vs = max(4, -(-getattr(self, 'last', 0) // 40000))   # on (no interrupts
+        elif vs is None:                                         # here): FMIN, or with
+            vs = 4                      # GT_VS=real what the last frame's cycles would
+                                        # take; only flip, strips' wait and the readout
+                                        # read vcount: one step a frame whatever it is
         m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255
         for r in ('gstep', 'project', 'strips', 'gpre', 'ship', 'gpost', 'readout'):
             if r == 'ship' and not m[GSHV]:

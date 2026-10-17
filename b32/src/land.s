@@ -513,9 +513,16 @@ loop:   jsr gstep
 ;     the land's R1, R6 and start (lfront); timer 1 for E2;
 ;   E2, EV2US on, the land's row 0: R4 28.
 PROWS   = 10                       ; the panel frame's rows (9 shown)
-EV1US   = 11*512 + 9*512 + 250     ; the sync to E1: the panel's row 9 (it
-                                   ; starts 11 rows after the sync)
-EV2US   = 1*512 + 300              ; E1 to E2: the land's row 0 (+ 300us)
+EV1US   = 11*512 + 9*512           ; the sync to E1: the panel's row 9 (it
+                                   ; starts 11 rows after the sync).  Its writes
+                                   ; land ~120us into the row (E0 arms timer 1
+                                   ; ~75us after the sync, E1 writes R4 ~45us
+                                   ; after it fires: never before the row, its
+                                   ; readout row's display done), leaving ~360us
+                                   ; before the row's end, R4's deadline, for
+                                   ; interrupt latency (main code never masks
+                                   ; interrupts: keys, psg)
+EV2US   = 1*512 + 300              ; E1 to E2: the land's row 0 (+ ~420us)
 ULA_CTL = $FE20                    ; the video ULA's control register
 SVIA_IFR = $FE4D
 SVIA_IER = $FE4E

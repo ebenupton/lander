@@ -251,12 +251,12 @@ no:
 .endmacro
 ; keys: gkb from the keyboard: 1 Z or left, 2 X or right, 4 K or up, 8 M or
 ; down, 16 SPACE, 32 SHIFT, 64 F; F toggles fpson as it goes down (fkey:
-; its state last time).  Interrupts off while the VIA is ours.  Clobbers A,
+; its state last time).  Interrupts stay on (irq never touches port A, port
+; B or DDRA, and a late E1 would cost the land a field).  Clobbers A,
 ; X.  DP11_MOUSE: with mdet set, also the mouse: 16 the left button, 128 the
 ; middle; writes mous, gmx, gmy; clobbers Y, gt0..gt3 too.  Called by gstep.
 keys:   lda #0
         sta gkb
-        sei
         lda #$7F                   ; port A: bits 0-6 out (the key's number),
         sta SVIA_DDRA              ; bit 7 in (pressed)
         lda #3                     ; latch bit 3 low: keyboard auto-scan off
@@ -274,7 +274,6 @@ keys:   lda #0
         KEYB $43, 64               ; F
         lda #$0B                   ; auto-scan back on
         sta SVIA_ORB
-        cli
         lda gkb
         and #64
         cmp fkey
@@ -327,9 +326,10 @@ snd:    lda ctim
 :       rts
 ; psg: byte A to the sound chip: port A all outputs with the byte on it, the
 ; chip's write-enable (latch bit 0, active low) pulsed low for 22 cycles,
-; about 11us.
+; about 11us (longer if an interrupt comes: harmless; interrupts stay on, irq
+; never touches port A, port B or DDRA).
 ; Leaves DDRA $FF (keys resets it).  Clobbers A, Y; X kept.
-psg:    sei
+psg:
         ldy #$FF
         sty SVIA_DDRA
         sta SVIA_ORA_NH
@@ -340,7 +340,6 @@ psg:    sei
         bne :-
         lda #8                     ; and high again
         sta SVIA_ORB
-        cli
         rts
 
 ; ---------------------------------------------------------------- a step

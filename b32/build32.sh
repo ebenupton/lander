@@ -15,7 +15,7 @@ B=build32
 mkdir -p $B
 python3 b32/tools/gen32.py $B
 python3 b32/tools/ship32.py $B
-ca65 -g --cpu 6502 -I b32/src -I $B --bin-include-dir $B -o $B/land.o b32/src/land.s -l $B/land.lst
+ca65 -g --cpu 6502 ${CODEPAD:+-D CODEPAD=$CODEPAD} -I b32/src -I $B --bin-include-dir $B -o $B/land.o b32/src/land.s -l $B/land.lst
 ld65 -C b32/src/b32.cfg -o $B/x.bin $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/game.dbg
 printf 'MODE1\rVDU19,1,0;0;19,2,0;0;19,3,0;0;23,1,0;0;0;0;\r*RUN L32\r' > $B/BOOT
 python3 tools/mkdfs.py build $B/lander32.ssd LANDER32 "!BOOT:$B/BOOT:0000:FFFF" \

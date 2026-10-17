@@ -470,6 +470,10 @@ xrh:    .res 1
 pxh:    .res 1
 xrl:    .res 1
         .code
+.ifndef CODEPAD
+CODEPAD = 1                        ; (b32: the best of 0..15, by the flight)
+.endif
+        .res CODEPAD               ; (the page phase of the code after: tuned)
 ; ---------------------------------------------------------------- start
 ; loop: the main loop, entered from the loader (boot32.s: its start-up done,
 ; the land buffers black, screen 0 the one drawn) with the stack empty.  Each

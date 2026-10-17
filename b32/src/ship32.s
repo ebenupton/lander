@@ -401,8 +401,24 @@ rast:   ldy GSHP                   ; the angles
         lda #0
         sta NVIS
         sta NNEG
+        ldy #0                     ; the pitched points (px8, py) kept from the
+        lda GSHP                   ; last time unless the pitch differs (cpi:
+        cmp cpi                    ; theirs, $FF none): turning alone reuses
+        beq :+                     ; them (cmiss bit 7: make them afresh)
+        dey
+:       sty cmiss
+        sta cpi
         ldx #16                    ; the 17 points, 16 down to 0
-@pt:    lda VQY,x                  ; px = ca X - sa Y (sa Y first, into
+@pt:    bit cmiss
+        bmi @mk
+        lda CPX8,x                 ; (kept)
+        sta px8
+        lda CPYL,x
+        sta pyl
+        lda CPYH,x
+        sta pyh
+        jmp @yw
+@mk:    lda VQY,x                  ; px = ca X - sa Y (sa Y first, into
         ldy sa                     ; pxl, pxh), py = sa X + ca Y (X: the
         jsr smul                   ; point throughout; smul, tq8 keep X)
         sta pxl
@@ -422,10 +438,7 @@ rast:   ldy GSHP                   ; the angles
         asl pxl
         adc #0
         sta px8
-        ldy cb                     ; Xr = cb px8 + sb Z (sb Z after py)
-        jsr smul
-        sta xrl
-        sty xrh
+        sta CPX8,x
         lda VQX,x
         ldy sa
         jsr smul
@@ -437,9 +450,16 @@ rast:   ldy GSHP                   ; the angles
         clc
         adc pyl
         sta pyl
+        sta CPYL,x
         tya
         adc pyh
         sta pyh
+        sta CPYH,x
+@yw:    lda px8                    ; Xr = cb px8 + sb Z
+        ldy cb
+        jsr smul
+        sta xrl
+        sty xrh
         lda VQZ,x
         ldy sb
         jsr smul
@@ -1077,12 +1097,20 @@ PATON:  .res 16
         .segment "G1B"
 PATF:   .res 96
         .segment "P2L"
-LB:     .res 48                    ; the line's pixels' faces, by offset + 20
+LB:     .res 48
+        .segment "P2T"             ; (rast's pitched points, by the pitch cpi)
+CPX8:   .res 17
+CPYL:   .res 17
+CPYH:   .res 17
+cpi:    .res 1
+cmiss:  .res 1                    ; the line's pixels' faces, by offset + 20
 
 ; shtab: KTN, BYN, LIM + w for w 0..47 ($00, $88, $CC, $EE by w & 3; 8 (w
 ; >> 2); 4 ((w >> 2) + 1)).  Run once (init).  Clobbers A, X.
         .segment "BOOT"
-shtab:  ldx #47
+shtab:  lda #$FF                   ; (rast's kept points: none)
+        sta cpi
+        ldx #47
 :       txa
         and #3
         tay

@@ -22,5 +22,5 @@ cmp -s $B/gate_state.txt $B/gate_base.txt || fail "flight differs (diff $B/gate_
 python3 b32/test/soak32.py 16 2 2 2>&1 | tee $B/gate_soak1.txt | grep -q ' 0 failed' || fail "soak plain"
 python3 b32/test/soak32.py 16 5 3 cam 2>&1 | tee $B/gate_soak2.txt | grep -q ' 0 failed' || fail "soak cam"
 python3 b32/test/shiptest32.py ${1:-5} 2>&1 | tee $B/gate_ship.txt | grep -q ' 0 failed' || fail ship
-awk '{s += $3; n++} END {printf "GATE PASS %d cycles a frame (flight), ", s/n}' $B/gate_flight.txt
+cut -c11-17 $B/gate_flight.txt | awk '{s += $1; n++} END {printf "GATE PASS %d cycles a frame (flight), ", s/n}'
 grep -E '^strips|^project' $B/gate_soak2.txt | awk '{printf "%s %s ", $1, $3}'; echo

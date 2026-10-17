@@ -106,8 +106,14 @@
 ;
 ; Double buffering and the column records.  flip waits until FMIN vertical
 ; syncs have passed since the last flip, shows the screen just drawn (CRTC
-; register 12) and swaps `back`; strips waits for the sync after the flip
-; before its first store.  TOPS and BOTS (64 columns a screen) record, for
+; register 12) and swaps `back`; strips waits, before its first store, until
+; the screen it draws is no longer shown.  The CRTC takes R12 at the start of
+; its frame (display row 0), 11 rows (5632us) after the vertical sync, and
+; displays 20 rows (to 15872us); the user VIA's timer 2, restarted at each
+; sync, gives the time since it.  A flip before row 0 (less 2 rows' margin)
+; is shown from row 0, so strips need not wait (flip: vflip one less); one
+; after the display ends needs no wait either; one during it waits for the
+; display's end (or the sync).  TOPS and BOTS (64 columns a screen) record, for
 ; each screen, the land's highest and lowest line at its latest drawing;
 ; CURT, CURB are this frame's (record, recordc, nearpost; the sky and the
 ; ground are not land).  The three sets rotate at the end of strips (sidx,
@@ -141,7 +147,7 @@
 ;   $1740-$17A3   EINL,y for y = YSKY-1..YGND+3 (EINL = $1701): run2's table
 ;                 offsets by line
 ;   $1800-$18EF   GLY: the readout's 15 characters, 16 bytes each
-;   $1900-$2E56   the code (this file's CODE segment)
+;   $1900-$2EC0   the code (this file's CODE segment)
 ;   $2F00         DBUF: shipspan.s's (bank 6), so the code must end below it
 ;   $3000-$57FF   screen 0; $5800-$7FFF screen 1, LANDS at $7000-$740A
 ;                 ($7534 at most: the NULA build's) until init clears it
@@ -212,6 +218,14 @@ MOS_ROMTAB = $02A1                 ; the MOS's ROM type table, by socket
 ROMHDR_TYPE = $8006                ; a ROM header's type byte
 ROMHDR_COPY = $8007                ; and its copyright offset
 UVIA_DDRB = $FE62                  ; the user VIA's port B direction register
+UVIA_T2L = $FE68                   ; its timer 2: the time since the vertical
+UVIA_T2H = $FE69                   ; sync, counting down from $FF00 (vsync's)
+                                   ; at 1 MHz: high byte $FF - ceil(us/256)
+UVIA_ACR = $FE6B                   ; (0: timer 2 counts the clock)
+T2ROW0  = $FF - 9*512/256 + 1      ; T2H at least: at most 4352us, row 0 at
+                                   ; 5632 (2 rows' margin)
+T2DEND  = $FF - 31*512/256         ; T2H at least: the display (ending at
+                                   ; 15872us) not known to be over
 WRSEL_WATFORD = $FF30              ; a Watford board's write select: a store to
 WRSEL_SOLIDISK = $FE60             ; here + the socket; a Solidisk's: port B
 BOARD_STD = 0                      ; find_ram's board kinds (writes through
@@ -451,6 +465,8 @@ go:     jsr init
         lda #$7F                   ; scan, clock or ADC (game.s scans the keys
         sta $FE6E                  ; itself); the user VIA's all off
         lda #0
+        sta UVIA_ACR               ; timer 2 counts the clock, from $FF00
+        sta UVIA_T2L               ; (its low latch; vsync writes the high)
         sta back
         jsr setback
         lda vcount
@@ -477,12 +493,6 @@ loop:   lda #<G_STEP               ; the game: keys, flight, the camera
         jsr flip
         jmp loop
 
-; The vertical sync event handler (EVNTV): vcount += 1.  Flags kept.
-vsync:  php
-        inc vcount
-        plp
-        rts
-
 ; call6: bank 6's routine at $8000 + A (A = <B6_KEYS or <B6_SHIP), then bank 4
 ; paged back.  Patches the JSR's low byte.  Clobbers what the routine does; A
 ; is bank 4's socket after.
@@ -503,7 +513,9 @@ call5:  sta @j+1
 ; flip: when FMIN vertical syncs have passed since the last flip, show the
 ; screen just drawn (`back`) and make the other the one to draw.  Records the
 ; frame's syncs in dvs (the last 8, dvi the next slot) for the readout; vflip,
-; vlast = vcount at the flip.  Falls into setback.  Clobbers A, X.
+; vlast = vcount at the flip, vflip one less if the CRTC is still to take R12
+; this frame (the timer: strips need not wait).  Falls into setback.
+; Clobbers A, X.
 flip:   lda vcount                 ; (FMIN = 4: 12.5 frames a second at most)
         sec
         sbc vlast
@@ -530,7 +542,11 @@ flip:   lda vcount                 ; (FMIN = 4: 12.5 frames a second at most)
         sta dvi
         lda vflip
         sta vlast
-        lda back
+        lda UVIA_T2H               ; before row 0: shown from row 0, so the
+        cmp #T2ROW0                ; screen to draw is no longer
+        bcc :+
+        dec vflip
+:       lda back
         eor #1
         sta back
 ; setback: scrb ($30 or $58) and sethalf's screen bits (sh_b's operand: 2 *
@@ -1018,11 +1034,14 @@ strips: ldx back                   ; the screen's set (sidx): tsp, bsp (gone's)
         beq @swap                  ; (strip 0: traced only)
         jsr rungs
         lda ns                     ; strip 1, before the frame's first store:
-        cmp #1                     ; wait for the vertical sync after the
-        bne @draw                  ; flip, when the screen drawn is no longer
-@wait:  lda vcount                 ; the one shown
-        cmp vflip
-        beq @wait
+        cmp #1                     ; wait until the screen drawn is no longer
+        bne @draw                  ; shown: a sync since the flip (vflip one
+@wait:  lda vcount                 ; less: none needed), or the display over
+        cmp vflip                  ; (timer 2)
+        bne @draw
+        lda UVIA_T2H
+        cmp #T2DEND
+        bcs @wait
 @draw:  jsr cols
 @swap:  lda topa+1                 ; the bottom row is the next strip's top
         ldx bota+1
@@ -1050,24 +1069,6 @@ setTl:  .byte <TOPS, <(TOPS+64), <CURT
 setTh:  .byte >TOPS, >(TOPS+64), >CURT
 setBl:  .byte <BOTS, <(BOTS+64), <CURB
 setBh:  .byte >BOTS, >(BOTS+64), >CURB
-
-; bclip: the bottom row's line held on the screen.  If setup saw a bottom
-; point past YGND (BCL), every entry of (bota) greater than YGND+1 (below the
-; screen) is set to YGND+1, so each column's floor is at most YGND+1 (o_zb,
-; c_zb) and the lines drawn stay on the screen.  The whole page is
-; clamped, not only xl .. xr-1.
-; In: BCL, bota.  Clobbers A, Y.  Called by strips.
-bclip:  lda BCL
-        bne :+
-        rts
-:       ldy #0
-        lda #YGND+1
-:       cmp (bota),y
-        bcs :+                     ; (at most YGND+1 already: kept)
-        sta (bota),y
-:       iny
-        bne :--
-        rts
 
 ; setup: the strip's points, boxes and margins, and its bottom row's line.
 ; Points 1 .. NX: strip 0 takes row 0 as its bottom row only (it is only
@@ -1232,11 +1233,17 @@ traceb: lda bota+1                 ; the row's page: jvb's store, and the
         bcc @t0
         adc #0                     ; (C set: + 1)
         sta t_end+1
-@t0:    lda BY                     ; the pending run: from tcnt at point 0's y
+@t0:    lda BCL                    ; every point past YGND: the row one run
+        cmp #NX                    ; at YGND+1 (as traced and clamped; bclip
+        beq t_all                  ; then leaves it)
+        lda BY                     ; the pending run: from tcnt at point 0's y
         sta tyv
         ldx #0
         beq t_seg
-        .res 34                    ; (padding: keeps the code after it in place)
+t_all:  lda #YGND+1
+        sta tyv
+        bne t_end                  ; (always)
+        .res 24                    ; (padding: keeps the code after it in place)
 t_end:  ldx #0                     ; (operand: the end + 1) the row's end: the
         jmp t_fl                   ; pending run to it, then t_fr's RTS returns
                                    ; to strips
@@ -3021,9 +3028,9 @@ sp_lc:  cpy #0                     ; bpos down past each (pixel x4 + Y - 1's)
 sp_lb:  jsr sp_ln
         inx
         bne sp_lz
-sp_zd:  tya                        ; X = bpos: the walker from mx
-        tax
-        jmp fs_w
+sp_zd:  tya                        ; X = bpos: the walker from mx (sp_zg:
+        tax                        ; unless the zone took bpos out of the
+        jmp sp_zg                  ; column)
 ; sp_ln: line X of the zone at bpos Y: BE or BO + Y (by the line's parity) into
 ; the pixels at or below their top (pmask inline, from ys).  X and Y kept;
 ; clobbers A, bpos, msk, zp_, zv.
@@ -3382,6 +3389,80 @@ gn_d:   stx tj
         jsr run
         ldx tj
         rts
+
+; The vertical sync event handler (EVNTV): vcount += 1, and the user VIA's
+; timer 2 restarted (the time since the sync, for flip and strips).  A and
+; the flags kept.
+vsync:  php
+        pha
+        lda #$FF
+        sta UVIA_T2H
+        pla
+        inc vcount
+        plp
+        rts
+
+; bclip: the bottom row's line held on the screen.  If setup saw a bottom
+; point past YGND (BCL) but not all NX (traceb drew the row at YGND+1 then),
+; every entry of (bota) greater than YGND+1 (below the screen) is set to
+; YGND+1, so each column's floor is at most YGND+1 (o_zb, c_zb) and the lines
+; drawn stay on the screen.  A pixel is past YGND+1 only within a segment one
+; of whose points is past, so the clamp runs from the point before the first
+; past one to the point after the last (the page's end when that is a row
+; end: the row is widened level with its ends); the page's other entries are
+; at most YGND+1 already (every row is).
+; In: BCL, BX, BY, bota.  Clobbers A, X, Y.  Called by strips.
+bclip:  lda BCL
+        beq bc_x
+        cmp #NX
+        beq bc_x                   ; (all past: the row at YGND+1, traceb's)
+        ldx #0                     ; the first past point, from the left: Y the
+        ldy #0                     ; clamp's start, x of the point before it
+:       inx                        ; (0 for point 1: the widening left of it)
+        lda BY,x
+        cmp #YGND+1
+        bcs :+
+        ldy BX,x
+        bcc :-                     ; (always)
+:       ldx #NX+1                  ; the last, from the right: its end bc_e,
+        lda #0                     ; x of the point after it (0: the page's
+:       sta bc_e+1                 ; end, for point NX)
+        dex
+        lda BY,x
+        cmp #YGND+1
+        bcs :+
+        lda BX,x
+        bcc :-                     ; (always)
+:       lda #YGND+1
+:       cmp (bota),y
+        bcs :+                     ; (at most YGND+1 already: kept)
+        sta (bota),y
+:       iny
+bc_e:   cpy #0                     ; (operand: the end, exclusive; 0 the page's)
+        bne :--
+bc_x:   rts
+
+; sp_zg: split's way into the walker (fs_w) from mx at bpos X, unless the
+; zone has already moved bpos to the column's edge (fen_e's operand: 4
+; leaning right, 0 left).  The walker would then read the transition of a
+; pixel outside the column and step bpos past the edge, so instead lines mx
+; .. flr1-1 are box ri's bytes at bpos X (the rung has crossed the column),
+; by run2 (on into c_next), or nothing when the zone reached the floor.  In:
+; X = bpos, mx, flr1, coff, the tables.  Called by split (JMP).
+sp_zg:  cpx fen_e+1
+        beq :+
+        jmp fs_w
+:       lda mx
+        cmp flr1
+        bcc :+
+        jmp c_np                   ; (nothing below the zone)
+:       lda BE,x
+        sta RVE
+        lda BO,x
+        sta RVO
+        ldy flr1
+        ldx mx
+        jmp run2
 
 ; ---------------------------------------------------------------- readout
 ; readout: the frame rate at the top left of the screen being drawn, character

@@ -513,7 +513,8 @@ loop:   jsr gstep
 ;     the land's R1, R6 and start (lfront); timer 1 for E2;
 ;   E2, EV2US on, the land's row 0: R4 28.
 PROWS   = 10                       ; the panel frame's rows (9 shown)
-EV1US   = 11*512 + 9*512           ; the sync to E1: the panel's row 9 (it
+E0WAIT  = 2                        ; E0's wait to the next line (dex loops)
+EV1US   = 11*512 + 9*512 + 59      ; the sync to E1: the panel's row 9 (it
                                    ; starts 11 rows after the sync).  Its writes
                                    ; land ~120us into the row (E0 arms timer 1
                                    ; ~75us after the sync, E1 writes R4 ~45us
@@ -550,19 +551,22 @@ irq:    txa
         inc vcount
         lda #$FF
         sta UVIA_T2H               ; the time since the sync
-        lda #$C4                   ; MODE 5: the ULA, then the CRTC's line (64us
-        sta ULA_CTL                ; at 1MHz)
-        CRW 0, 63
-        CRW 2, 45
-        CRW 3, $24
+        lda #<EV1US                ; timer 1 for E1, first: a fixed time after
+        sta UVIA_T1L               ; the sync (EV1US sets E1's place in its line)
+        lda #>EV1US
+        sta UVIA_T1H               ; (timer 1 off for E1; its flag cleared)
         CRW 1, 8                   ; the panel: 8 wide, 9 rows, PANEL
         CRW 6, 9
         CRW 12, >(PANEL/8)
         CRW 13, <(PANEL/8)
-        lda #<EV1US
-        sta UVIA_T1L
-        lda #>EV1US
-        sta UVIA_T1H               ; (timer 1 off for E1; its flag cleared)
+        ldx #E0WAIT                ; MODE 5, early in the next line (this one is
+@w:     dex                        ; near its end): the CRTC's line first, still
+        bne @w                     ; at 2MHz, the sync to 45 and the end to 63
+        CRW 2, 45                  ; while the count is short of both (or the
+        CRW 0, 63                  ; line gets two syncs, or runs on to 255);
+        CRW 3, $24                 ; then the clock (1MHz).  Measured in jsbeeb
+        lda #$C4                   ; (timer 2 at the writes, the sync ~27us
+        sta ULA_CTL                ; before its restart): R2 ~12us, R0 ~20us in
         lda #0
         sta evn
 @x:     pla
@@ -575,11 +579,13 @@ irq:    txa
         lda UVIA_T1L               ; (its flag cleared)
         lda evn
         bne @e2
-        lda #$D8                   ; E1: MODE 1 (the ULA, then the CRTC's line:
-        sta ULA_CTL                ; 64us at 2MHz)
-        CRW 0, 127
-        CRW 2, 90
-        CRW 3, $28
+        CRW 0, 127                 ; E1: MODE 1.  The CRTC's line first, still at
+        CRW 2, 90                  ; 1MHz (this blank line runs on to 127), its
+        CRW 3, $28                 ; sync moved to 90 while the count is short of
+        lda #$D8                   ; 45 (else the line gets a second sync and the
+        sta ULA_CTL                ; picture a line's jump): these writes come
+                                   ; ~7-20us into the line (measured: R2 ~13us,
+                                   ; EV1US's +59us); then the clock (2MHz)
         CRW 4, PROWS-1             ; the panel's end; the land's frame
         CRW 7, CR_VSYNC-PROWS
         CRW 1, 64

@@ -39,12 +39,12 @@
 ;
 ; The MODE 2 builds (-D MODE2; proto/nula.py): NULA (build.sh nula, -D NULA),
 ; the VideoNULA's sixteen colours, flat; CPC (build.sh cpc, -D CPC), the 27
-; colours of 1 x 2 dithers of MODE 2's eight.  Everything here still works in
-; MODE 1's pixels, 256 across and four a byte; a MODE 2 byte is two pixels,
-; each showing the even one of the pair it covers, so only the masks (PM) and
-; the colour bytes (bank 5's, landgen's) differ, with the letters (nfont,
-; gbyte) and the palette (palette).  game.s's dots and map follow (.ifdef
-; MODE2).
+; colours of 1 x 2 dithers of MODE 2's eight, as checkerboards.  Everything
+; here still works in MODE 1's pixels, 256 across and four a byte; a MODE 2
+; byte is two pixels, each showing the even one of the pair it covers, so only
+; the masks (PM) and the colour bytes (bank 5's, landgen's) differ, with the
+; letters (nfont, gbyte) and the palette (palette).  game.s's dots and map
+; follow (.ifdef MODE2).
 ;
 ; Projection (project).  The camera is at tile (cxt, czt) plus sixteenths
 ; (cxs, czs), CAMH height units above the ground under the ship (hgnd) and

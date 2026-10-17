@@ -37,7 +37,7 @@ cd "$(dirname "$0")"
 B=build
 mkdir -p $B
 # `sh build.sh nula`: the VideoNULA build (MODE 2, sixteen flat colours); `sh build.sh
-# cpc`: the CPC-palette build (MODE 2, 27 colours as 1 x 2 dithers) (proto/nula.py).  Into
+# cpc`: the CPC-palette build (MODE 2, 27 colours as checkerboard dithers) (proto/nula.py).  Into
 # build/ likewise as build/lander.ssd, with build/variant saying which (the tests read it
 # and need NULA=1 or CPC=1 in the environment to match).
 if [ "$1" = nula ] || [ "$1" = cpc ]; then

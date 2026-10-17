@@ -6,9 +6,11 @@ MODE 1's 2 x 2 dithers of black, cyan, magenta and yellow:
         own 12-bit colour through the VideoNULA palette (PAL), flat.
   cpc   (CPC=1, build.sh cpc): the "Amstrad CPC palette": every colour whose
         red, green and blue are each off, half or full, 27 of them, made on a
-        plain BBC Micro as a 1 x 2 dither of MODE 2's eight colours (one on even
-        lines, one on odd; two MODE 2 pixels one above the other are about
-        square).  A half channel is on in one line of the two.
+        plain BBC Micro as a 1 x 2 dither of MODE 2's eight colours (two MODE 2
+        pixels one above the other are about square), its phase toggled on
+        alternate columns: a checkerboard, one colour on even lines' left pixels
+        and odd lines' right, the other on the rest.  A half channel is on in one
+        pixel of the two.
 
 variant() names the build the environment asks for (mode1 without either) and
 enabled() is true for both MODE 2 builds; every tool and test asks and, when it
@@ -29,7 +31,8 @@ The land and sea use fewer entries than the MODE 1 build (proto/land.py's LAND,
 SEAC read nula()) so that black, three seas, the pad's grey, seven lands and the
 ship's four colours fill the sixteen.  CPC: every entry the game uses (USED) is
 given a different one of the 27 (CPCMAP: the assignment nearest overall in
-average colour), any other its nearest; its bytes are the two colours' (pair).
+average colour), any other its nearest; its bytes are the two colours' (pair) in
+a checkerboard (pair's first colour in the even line's left pixel).
 YELB, MAGB (yellow and magenta: the letters, the fuel bar, the dots, the map's
 marker) are solid bytes; the map's colours are entries (MAPSEA, MAPLAND, MAPPAD).
 
@@ -182,8 +185,8 @@ def pair(lv):
 def dither_bytes(e):
     """The MODE 2 build's (even, odd) bytes for entry e."""
     if cpc():
-        a, b = pair(cpc_levels(e))
-        return [solid(a), solid(b)]
+        a, b = pair(cpc_levels(e))           # a checkerboard: the right pixel's
+        return [solid(a) & 0xAA | solid(b) & 0x55, solid(b) & 0xAA | solid(a) & 0x55]
     b = solid(colour(e))
     return [b, b]
 
@@ -283,9 +286,9 @@ def main():
     d = ImageDraw.Draw(im)
     for i, e in enumerate(USED):
         a, b = pair(m[e])
-        for y in range(0, 60, 2):
-            d.rectangle([i * 50, y, i * 50 + 49, y], fill=phys[a])
-            d.rectangle([i * 50, y + 1, i * 50 + 49, y + 1], fill=phys[b])
+        for y in range(60):
+            for x in range(0, 50, 2):
+                d.rectangle([i * 50 + x, y, i * 50 + x + 1, y], fill=phys[(a, b)[(x >> 1 ^ y) & 1]])
         d.text((i * 50 + 2, 62), f'{e}: {m[e]}', fill='black')
     im.save(os.path.join(os.path.dirname(__file__), 'cpc.png'))
 

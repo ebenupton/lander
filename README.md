@@ -55,9 +55,9 @@ NULA=1 sh test/run.sh          # its tests (the same reference, MODE 2's bytes)
 
 `lander-cpc.ssd` is MODE 2 on any BBC Micro or Master, no NULA needed: the "Amstrad
 CPC palette", the 27 colours whose red, green and blue are each off, half or full,
-made as 1 x 2 dithers of MODE 2's eight colours (one on even lines, one on odd: two
-MODE 2 pixels one above the other are about square), a half channel lit on one line
-of the two.  Every colour the game uses gets a different one of the 27, the nearest
+made as 1 x 2 dithers of MODE 2's eight colours (two MODE 2 pixels one above the
+other are about square), the phase toggled on alternate columns so each is a
+checkerboard, a half channel lit on one pixel of the two.  Every colour the game uses gets a different one of the 27, the nearest
 assignment overall (`proto/nula.py`); the renderer is the NULA version's.
 
 ```sh

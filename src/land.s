@@ -26,11 +26,12 @@
 ; system is then idle: its workspace from $0E00 is LAND's), makes
 ; the glyphs, narrows the screen, clears screen 0, sets the palette and jumps
 ; to `go`.  go runs init, hooks the vertical sync event, turns the VIAs' other
-; interrupts off, runs G_INIT (bank 5: the game's start) and enters the main
-; loop: G_STEP (bank 5: the keys, the flight, the camera), B6_KEYS (bank 6:
-; the ship's attitude and place), project, strips, G_PRE (the dots beyond the
-; ship), B6_SHIP (the ship, unless crashed: GSHV 0), G_POST (the other dots,
-; the map, the status), readout (the frame rate), flip.
+; interrupts off, sets the user VIA's timer 2 counting (vsync restarts it),
+; runs G_INIT (bank 5: the game's start) and enters the main loop: G_STEP
+; (bank 5: the keys, the flight, the camera), B6_KEYS (bank 6: the ship's
+; attitude and place), project, strips, G_PRE (the dots beyond the ship),
+; B6_SHIP (the ship, unless crashed: GSHV 0), G_POST (the other dots, the map,
+; the status), readout (the frame rate), flip.
 ;
 ; The display.  MODE 1 cut by the CRTC to 64 bytes a line and 20 character
 ; rows: 256 x 160 pixels, 10K a screen, at $3000 (screen 0) and $5800 (screen
@@ -108,12 +109,15 @@
 ; syncs have passed since the last flip, shows the screen just drawn (CRTC
 ; register 12) and swaps `back`; strips waits, before its first store, until
 ; the screen it draws is no longer shown.  The CRTC takes R12 at the start of
-; its frame (display row 0), 11 rows (5632us) after the vertical sync, and
-; displays 20 rows (to 15872us); the user VIA's timer 2, restarted at each
-; sync, gives the time since it.  A flip before row 0 (less 2 rows' margin)
-; is shown from row 0, so strips need not wait (flip: vflip one less); one
-; after the display ends needs no wait either; one during it waits for the
-; display's end (or the sync).  TOPS and BOTS (64 columns a screen) record, for
+; its frame (display row 0), 11 rows of 512us (5632us) after the vertical
+; sync (R7 = 28 of 39 rows), and displays 20 rows, to 15872us; the user VIA's
+; timer 2, restarted by vsync, gives the time since the sync.  A flip before
+; row 0 (with a margin) is shown from row 0, so strips need not wait (flip
+; makes vflip one less); after a flip during the display, strips waits for its
+; end (or the sync); one after it needs no wait.  The timer starts a little
+; after the sync (the interrupt's latency), so it reads a little early: late
+; for the display's end, and within the margin for row 0.  TOPS and BOTS (64
+; columns a screen) record, for
 ; each screen, the land's highest and lowest line at its latest drawing;
 ; CURT, CURB are this frame's (record, recordc, nearpost; the sky and the
 ; ground are not land).  The three sets rotate at the end of strips (sidx,
@@ -222,10 +226,14 @@ UVIA_T2L = $FE68                   ; its timer 2: the time since the vertical
 UVIA_T2H = $FE69                   ; sync, counting down from $FF00 (vsync's)
                                    ; at 1 MHz: high byte $FF - ceil(us/256)
 UVIA_ACR = $FE6B                   ; (0: timer 2 counts the clock)
-T2ROW0  = $FF - 9*512/256 + 1      ; T2H at least: at most 4352us, row 0 at
-                                   ; 5632 (2 rows' margin)
-T2DEND  = $FF - 31*512/256         ; T2H at least: the display (ending at
-                                   ; 15872us) not known to be over
+CR_ROWS = 20                       ; the CRTC's character rows displayed (R6),
+CR_VSYNC = 28                      ; the row of its vertical sync (R7) and its
+CR_TOTAL = 39                      ; rows a frame (R4 + 1, the MODE's), of 512us
+T2ROW0  = $FF - ((CR_TOTAL-CR_VSYNC)*512 - 1280)/256  ; T2H at least: at most
+                                   ; 4352us since the sync, 1280us (2.5 rows)
+                                   ; before row 0 (flip's)
+T2DEND  = $FF - (CR_TOTAL-CR_VSYNC+CR_ROWS)*512/256  ; T2H at least: at most
+                                   ; 15872us, the display's end (strips')
 WRSEL_WATFORD = $FF30              ; a Watford board's write select: a store to
 WRSEL_SOLIDISK = $FE60             ; here + the socket; a Solidisk's: port B
 BOARD_STD = 0                      ; find_ram's board kinds (writes through
@@ -513,9 +521,9 @@ call5:  sta @j+1
 ; flip: when FMIN vertical syncs have passed since the last flip, show the
 ; screen just drawn (`back`) and make the other the one to draw.  Records the
 ; frame's syncs in dvs (the last 8, dvi the next slot) for the readout; vflip,
-; vlast = vcount at the flip, vflip one less if the CRTC is still to take R12
-; this frame (the timer: strips need not wait).  Falls into setback.
-; Clobbers A, X.
+; vlast = vcount at the flip, then vflip one less if the CRTC has yet to reach
+; display row 0 (timer 2: the new screen is shown from there, so strips need
+; not wait).  Falls into setback.  Clobbers A, X.
 flip:   lda vcount                 ; (FMIN = 4: 12.5 frames a second at most)
         sec
         sbc vlast
@@ -974,7 +982,8 @@ project:
 ; frame's (cidx).  The operand of every site that reads the screen's set or
 ; writes this frame's is patched here, and the sets are rotated at the end.
 ; In: back, nr, PX, PY (project's), CLE, CLO, ldCLE (pcol5's), vcount,
-; vflip.  Out: the screen drawn; the sets; sidx, cidx; xlp, xrp, topa, bota.
+; vflip, timer 2.  Out: the screen drawn; the sets; sidx, cidx; xlp, xrp,
+; topa, bota.
 ; Clobbers A, X, Y and the strips', trace's, rungs' and columns' zero page.
 ; Called by loop.
 strips: ldx back                   ; the screen's set (sidx): tsp, bsp (gone's)
@@ -3446,9 +3455,10 @@ bc_x:   rts
 ; zone has already moved bpos to the column's edge (fen_e's operand: 4
 ; leaning right, 0 left).  The walker would then read the transition of a
 ; pixel outside the column and step bpos past the edge, so instead lines mx
-; .. flr1-1 are box ri's bytes at bpos X (the rung has crossed the column),
-; by run2 (on into c_next), or nothing when the zone reached the floor.  In:
-; X = bpos, mx, flr1, coff, the tables.  Called by split (JMP).
+; .. flr1-1 take the rung's bytes at bpos X, BE and BO + X (the rung has
+; crossed the column: box ri-1's leaning right, ri's leaning left), by run2
+; (on into c_next), or nothing when the zone reached the floor.  In: X =
+; bpos, mx, flr1, coff, the rung's tables.  Called by split (JMP).
 sp_zg:  cpx fen_e+1
         beq :+
         jmp fs_w
@@ -3910,8 +3920,8 @@ vdu_end:
 crtc_regs:                         ; (register, value) pairs
         .byte 1, 64                ; R1: 64 characters displayed
         .byte 2, 90                ; R2: horizontal sync, centring the 64
-        .byte 6, 20                ; R6: 20 rows displayed
-        .byte 7, 28                ; R7: vertical sync position, centring the 20
+        .byte 6, CR_ROWS           ; R6: 20 rows displayed
+        .byte 7, CR_VSYNC          ; R7: vertical sync position, centring the 20
         .byte 12, >($3000/8)       ; R12, R13: the start, $3000 (screen 0)
         .byte 13, <($3000/8)
         .byte 10, $20              ; R10: cursor off

@@ -42,11 +42,12 @@ blank.  `init` run, `back` set to 0 and `setback` run, as LAND's start does,
 then G_INIT.
 
 A frame, as LAND's main loop without the readout: vcount advanced by vs (the
-vertical syncs the event handler would have counted: `strips` waits for one
-since the flip and `flip` for FMIN, 4); G_STEP (the keys, a step of flight,
-the camera); B6_KEYS (the ship's attitude and place into bank 6); `project`;
-`strips`; G_PRE (the dots beyond the ship); B6_SHIP if GSHV (not while
-crashed); G_POST (the other dots, the map, the status); `flip`.
+vertical syncs the event handler would have counted: `flip` waits for FMIN, 4;
+`strips` needs none, as the user VIA's timer 2, plain memory reading 0, says
+the display is over); G_STEP (the keys, a step of flight, the camera); B6_KEYS
+(the ship's attitude and place into bank 6); `project`; `strips`; G_PRE (the
+dots beyond the ship); B6_SHIP if GSHV (not while crashed); G_POST (the other
+dots, the map, the status); `flip`.
 """
 import os
 import sys

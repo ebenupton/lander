@@ -169,7 +169,9 @@ drawn at the same depth, so one view angle serves.
 
 **The game.** Lander's flight model (gravity, thrust along the roof, drag, fuel) runs
 one step per frame, with the constants scaled for ten frames a second; the frame rate
-is held to 12.5 at most.  The camera rises with the ship once the ship comes within
+is held to 12.5 at most.  A frame starts drawing as soon as the screen it draws has
+stopped being shown, timed from each vertical sync by the user VIA's timer 2, rather
+than waiting for the next sync.  The camera rises with the ship once the ship comes within
 79 height units of it, up to a limit past which the landscape is drawn below the
 screen and the ship holds its line.  The exhaust dots are single pixels moved by the
 same rule in coarser units.  Sound is the SN76489's noise channel: a quiet roar while

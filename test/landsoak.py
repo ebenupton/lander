@@ -28,18 +28,19 @@ the CRTC and VIA addresses are plain memory.  `init` is run once, then `back`
 set to 0 and `setback` run, as LAND's start does.
 
 A frame: the camera (cxt, cxs, czt, czs) and CAME set; vcount set to vflip + 4
-(the vertical syncs the event handler would have counted: `strips` waits for
-one since the flip and `flip` for FMIN); `project` and `strips` called; with
-ship, bank 6 paged in, shk, shp, shx, shy written and B6_SHIP ($8003) called
-(shipdraw, then the screen's TOPS and BOTS widened over the ship's box); then
-the projection checked (np, nr, and each row's PX and PY at $0700 and $0800,
-16 a row, against proto/land.py's project), and the screen being drawn
-($3000 or $5800 by `back`) against proto/frame.py's frame with
-tools/shipgen.py's ship over it, as the build's bytes (MODE 1, or MODE 2's
-through proto/nula.py); then `flip`.  Both screens
-are drawn in turn, so what a frame leaves for the frame after next (land gone,
-the ship) is checked too.  A failing frame prints its first three projection
-errors and first eight wrong bytes; the run stops at the third failure.
+(the vertical syncs the event handler would have counted: `flip` waits for
+FMIN, and `strips` for one since the flip unless the user VIA's timer 2 says
+the display is over, which here, plain memory reading 0, it always does);
+`project` and `strips` called; with ship, bank 6 paged in, shk, shp, shx, shy
+written and B6_SHIP ($8003) called (shipdraw, then the screen's TOPS and BOTS
+widened over the ship's box); then the projection checked (np, nr, and each
+row's PX and PY at $0700 and $0800, 16 a row, against proto/land.py's project),
+and the screen being drawn ($3000 or $5800 by `back`) against proto/frame.py's
+frame with tools/shipgen.py's ship over it, as the build's bytes (MODE 1, or
+MODE 2's through proto/nula.py); then `flip`.  Both screens are drawn in turn,
+so what a frame leaves for the frame after next (land gone, the ship) is
+checked too.  A failing frame prints its first three projection errors and
+first eight wrong bytes; the run stops at the third failure.
 
 Prints "<frames> frames, <failed> failed" and the cycles of project, strips
 and (with ship) B6_SHIP, shipdraw and the records' widening together (mean,

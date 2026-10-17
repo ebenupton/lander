@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 sys.path.insert(0, os.path.join(ROOT, 'proto'))
 import landgen as G   # noqa: E402
 import land as L      # noqa: E402
+import gamegen as GG  # noqa: E402
 
 LAND0, LAND1, PANEL = 0x5000, 0x6800, 0x4800
 SCR = (LAND0 - 0x1000, LAND1 - 0x1000)      # the buffers' virtual screen starts
@@ -74,9 +75,24 @@ def map32():
     return out
 
 
+def gametab(out):
+    """gametab.inc: tools/gamegen.py's tables less MAPI (the panel's map is drawn at
+    the start from MAP32), MAPX, MAPZ for the 32-tile map."""
+    GG.main.__globals__['MAPX'] = 16 - L.PADN // 2
+    GG.main.__globals__['MAPZ'] = 15 + L.PADN // 2
+    sys.argv = [sys.argv[0], out]
+    GG.mapimg = lambda: bytes(1024)
+    GG.main()
+    path = os.path.join(out, 'gametab.inc')
+    lines = open(path).read().split('\n')
+    i = lines.index('MAPI:')
+    j = next(k for k in range(i + 1, len(lines)) if not lines[k].startswith('        .byte'))
+    open(path, 'w').write('\n'.join(lines[:i] + lines[j:]))
+
+
 def main():
     out = sys.argv[1]
-    open(os.path.join(out, 'TABLES'), 'wb').write(bank4())
+    gametab(out)
     open(os.path.join(out, 'MAP32'), 'wb').write(map32())
     with open(os.path.join(out, 'b32tab.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py: a colour index\'s dither bytes, even and odd lines\n')
@@ -93,8 +109,8 @@ def main():
                                   // (L.HSCALE * 256)) for di in range(G.NDI))
     with open(os.path.join(out, 'tables.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py\n')
-        addr = {k: G.ADDR[k] for k in ('FPSL', 'FPSH')}       # (still bank 4's, dev)
-        addr.update(MAP32=MAP32, LAND0=LAND0, LAND1=LAND1, PANEL=PANEL)
+        addr = {}
+        addr.update(LAND0=LAND0, LAND1=LAND1, PANEL=PANEL)
         for k, v in addr.items():
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=G.TNB, HMAX=L.HMAX, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, NZ=L.NZ,

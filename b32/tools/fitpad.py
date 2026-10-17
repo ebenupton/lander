@@ -16,7 +16,7 @@ pat = re.compile(r'^LAYPAD  = \d+', re.M)
 assert pat.search(text)
 for v in range(256):
     open(SRC, 'w').write(pat.sub(f'LAYPAD  = {v}', text))
-    ok = subprocess.run(f'ca65 -g --cpu 6502 -I b32/src -I {B} -o {B}/fit.o {SRC} && '
+    ok = subprocess.run(f'ca65 -g --cpu 6502 -I b32/src -I {B} --bin-include-dir {B} -o {B}/fit.o {SRC} && '
                         f'ld65 -C {CFG} -o {B}/fit.bin {B}/fit.o', shell=True,
                         capture_output=True).returncode == 0
     if ok:

@@ -134,10 +134,11 @@ def machine():
     k = consts()
     mpu = MPU(memory=ObservableMemory())
     m = mpu.memory
-    for addr, name in ((0x1900, 'LAND'), (0x8000, 'TABLES'), (0xC000, 'FILLS'), (k['MAP32'], 'MAP32')):
+    for addr, name in ((0x1900, 'LAND'), (0x7000, 'BOOT'), (0x8000, 'DEV')):
         data = open(os.path.join(B, name), 'rb').read()
         m[addr:addr + len(data)] = data
     call(mpu, lab['init'])
+    m[0x5000:0x8000] = bytes(0x3000)              # (go's: the loader ran from them)
     m[lab['back']] = 0
     call(mpu, lab['setback'])
     return mpu, lab

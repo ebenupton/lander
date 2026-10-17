@@ -302,28 +302,6 @@ EYV     = $07D8                    ; prow7's: a row's extra y for CAME (eyrow),
 MT0     = $07D9                    ; and eyrow's, satrow's and cliprow7's
 MT1     = $07DA                    ; scratch
 
-SWT     = $3C00                    ; init's line tables (7 pages of RAM): two
-                                   ; a page, by line (YSKY..YGND+1,
-                                   ; 97 lines): one at the page's start (its
-                                   ; base in the page before: a read crosses,
-                                   ; a cycle more), one 97 on
-EXLB    = SWT+97-YSKY              ; run's entry for each line (low; the high
-                                   ; by table)
-LAHSB0  = SWT+$100+97-YSKY         ; each line's address high byte, by t
-LAHSB1  = SWT+$200+97-YSKY
-LAHSB2  = SWT+$300+97-YSKY
-LAHSB3  = SWT+$400+97-YSKY
-EXHB0   = SWT+$400-YSKY            ; run's entry, high byte, by t
-EXHB1   = SWT+$500-YSKY
-EXHB2   = SWT+$500+97-YSKY
-EXHB3   = SWT+$600-YSKY
-RSMT    = SWT+$600+97-YSKY         ; the line before y's character row
-                                   ; (fsplit's), y YSKY..YGND+2 (init's)
-ENTB0   = SWT-YSKY                 ; each line's entry page (ENTH + the
-                                   ; table's page) by t
-ENTB1   = SWT+$100-YSKY
-ENTB2   = SWT+$200-YSKY
-ENTB3   = SWT+$300-YSKY
         .assert YGND+2-YSKY <= 97 && 97+YGND+1-YSKY < $100, error, "SWT: a line table crosses its page"
 OP_STAY = $99                      ; STA abs,Y
 OP_LDAZ = $A5                      ; LDA zp
@@ -436,7 +414,7 @@ zp_:    .res 2                     ; a line's address, for (zp_),y
 dvx:    .res 1                     ; div8's divisor
 RVE:    .res 1                     ; run2's bytes: even and odd lines
 RVO:    .res 1
-rp:     .res 2                     ; (unused)
+stabp:  .res 1                     ; STAB's page for t (sethalf's)
 TRL:    .res 12                    ; mktr's transitions: line, and bpos after
 TRB:    .res 12                    ; as an LM mask (a second rung's from 6;
                                    ; also bank 6's scratch)
@@ -456,6 +434,28 @@ mo:     .res 1
 ; go: LAND's first byte, at its load address.  LANDS jumps here with the four
 ; banks loaded, bank 4 paged in and write selected, the screen narrowed and
 ; screen 0 cleared.  Never returns.
+; go: the main loop (the display and the ship to come): the game's start,
+; then each frame the game's step, the projection, the strips, the dots
+; beyond the ship, (the ship,) the nearer dots and the map's marker, flip.
+go:     lda #0                     ; the land buffers black (the loader ran
+        tay                        ; from them)
+        sta ptr
+        ldx #>LAND0
+        stx ptr+1
+:       sta (ptr),y
+        iny
+        bne :-
+        inc ptr+1
+        bpl :-                     ; (to $7FFF)
+        jsr ginit
+loop:   jsr gstep
+        jsr project
+        jsr strips
+        jsr gpre
+        jsr gpost
+        jsr flip
+        jmp loop
+
 ; flip: when FMIN vertical syncs have passed since the last flip, show the
 ; screen just drawn (`back`) and make the other the one to draw.  Records the
 ; frame's syncs in dvs (the last 8, dvi the next slot) for the readout; vflip,
@@ -510,22 +510,14 @@ setback:
         rts
 
 ; ---------------------------------------------------------------- init
+        .segment "BOOT"            ; (the loader's: run once, then overwritten)
 ; init: both screens black ($3000-$7FFF: LANDS with them); the four STABs and
 ; the line tables (ENTL, ENTH; LAH; in bank 4: LAHSB0-3,
 ; ENTB0-3, EXLB, EXHB0-3); TOPS, BOTS to nothing drawn; traceb's fill blocks'
 ; JMPs; EINL; pp to dummy; the camera at tile (40, 30), sixteenths 0; dvs.  No
 ; OS calls: the tests (test/landsoak.py, test/gametest.py) run it under py65.
 ; Needs bank 4 paged in and writable.  Clobbers A, X, Y, ptr, tmp.
-init:   lda #0
-        tay
-        sta ptr
-        ldx #>LAND0
-        stx ptr+1
-:       sta (ptr),y
-        iny
-        bne :-
-        inc ptr+1
-        bpl :-                     ; (to $7FFF)
+init:
         ; STAB t = 2 * screen + half, at page >STAB + 2t: for each line x of
         ; YSKY..YGND+1, STA addr,Y (RTS at YGND+1), then LDA vo (even x) or
         ; TXA (odd); ENTL, ENTH hold each line's entry
@@ -604,46 +596,6 @@ init:   lda #0
         lsr a
         and #$FE                   ; 2 * (y >> 3)
         sta LAH,x
-        clc                        ; LAHSBt = LAH + the screens' pages (shs)
-        adc #SCR0
-        sta LAHSB0,x
-        sec
-        adc #0                     ; (C set: + 1)
-        sta LAHSB1,x
-        adc #SCR1-SCR0
-        sta LAHSB3,x
-        sec
-        sbc #1
-        sta LAHSB2,x
-        lda ENTH,x
-        ora #>STAB                 ; ENTBt = ENTH + >STAB + 2t
-        sta ENTB0,x
-        clc
-        adc #2
-        sta ENTB1,x
-        adc #2
-        sta ENTB2,x
-        adc #2
-        sta ENTB3,x
-        txa                        ; run's entries (EXLB, EXHBt): an odd line's
-        and #1                     ; is 2 bytes before its STA, at the even
-        asl a                      ; line's LDA vo, so run enters with A = ve
-        sta tmp+1                  ; whatever the first line's parity
-        lda ENTL,x
-        sec
-        sbc tmp+1
-        sta EXLB,x
-        lda ENTH,x
-        sbc #0
-        ora #>STAB
-        sta EXHB0,x
-        clc
-        adc #2
-        sta EXHB1,x
-        adc #2
-        sta EXHB2,x
-        adc #2
-        sta EXHB3,x
 :       inx
         beq :+
         jmp @ent
@@ -656,15 +608,6 @@ init:   lda #0
         sta BOTS,x
         dex
         bpl :-
-        ldx #YSKY                  ; RSMT: (y & $F8) - 1
-:       txa
-        and #$F8
-        sec
-        sbc #1
-        sta RSMT,x
-        inx
-        cpx #YGND+3
-        bne :-
         lda #<dummy                ; no RTS planted yet: run's first put-back
         sta pp                     ; lands on dummy
         lda #>dummy
@@ -683,6 +626,7 @@ init:   lda #0
         bpl :-
         rts
 
+        .code
 ; ---------------------------------------------------------------- project
 ; project: the block of corners (proto/land.py: project) as rows of points.
 ; Sets ZB, FACT, RN and nr from czs.  If the map columns (cxt) or rows (czt +
@@ -1838,7 +1782,11 @@ rc_t:   tax
         cpx mx
         bne rc_r
         dex                        ; one line, TOPS = mx - 1
-rc_h:   lda LAHSB0,x               ; (page: sethalf's, the screen and half)
+rc_h:   php                        ; the line's page: LAH + scrh (V kept:
+        lda LAH,x                  ; the ADC would clear it)
+        clc
+        adc scrh
+        plp
         sta zp_+1
         txa
         and #7
@@ -1848,12 +1796,14 @@ rc_h:   lda LAHSB0,x               ; (page: sethalf's, the screen and half)
         sta (zp_),y
         ldy x4
         jmp c_rd
-rc_r:   dex                        ; lines TOPS .. mx-1, black
-        ldy mx
+rc_r:   dex                        ; lines TOPS .. mx-1, black (V kept: run's
+        ldy mx                     ; entry arithmetic would clear it)
         lda #0
         sta ve
         sta vo
+        php
         jsr run
+        plp
         ldy x4
 ; c_rd: c_coly's rung tests again, from Y = x4 (V kept): rung ri wholly left
 ; (c_ri), in the column (c_split), or right of it (one box: o_nr).
@@ -2136,7 +2086,9 @@ nearpost:
         tax                        ; line flr1 black
         and #7
         sta zp_
-np_h:   lda LAHSB0,x               ; (page: sethalf's)
+np_h:   lda LAH,x                  ; the line's page: LAH + scrh
+        clc
+        adc scrh
         sta zp_+1
         ldy coff
         lda #0
@@ -2202,7 +2154,9 @@ np_z:     ldy x4                     ; not level: each pixel's bottom-row line
         cpx flr                    ; the lower pixels, flr being YGND)
         bcs np_e
 np_l:
-np_h2:    lda LAHSB0,x             ; line X: the pixels at or below their bottom
+np_h2:    lda LAH,x                  ; the line's page: LAH + scrh
+        clc
+        adc scrh
         sta zp_+1                  ; black (page: sethalf's)
         txa
         and #7
@@ -2227,7 +2181,9 @@ np_h2:    lda LAHSB0,x             ; line X: the pixels at or below their bottom
         bne np_x                   ; (X = YGND+1 after np_e's masked line: done)
 np_e:   cpx #YGND                  ; X = flr: every pixel at or below its bottom
         beq np_l                   ; unless bclip held some at YGND+1 (flr
-np_h3:  lda LAHSB0,x               ; YGND): masked then, else the byte black
+np_h3:  lda LAH,x                  ; the line's page: LAH + scrh
+        clc
+        adc scrh
         sta zp_+1                  ; (page: sethalf's)
         txa
         and #7
@@ -2271,20 +2227,10 @@ sh_b:   ora #0                     ; operand: 2 * back (setback's)
         lda shs,y
         sta scrh
         clv
-        lda enthh,y               ; ENTBt's page (one low byte for all four)
-        sta r_eh1+2
-        lda exhl,y                 ; EXHBt
-        sta r_eh2+1
-        lda exhh,y
-        sta r_eh2+2
-        lda lahsh,y               ; LAHSBt's page (one low byte for all four)
-        sta fs_h+2
-        sta z1_h+2
-        sta np_h+2
-        sta np_h2+2
-        sta np_h3+2
-        sta rc_h+2
-        sta sl_h+2
+        tya                        ; stabp = STAB's page for t: >STAB + 2t
+        asl a
+        adc #>STAB                 ; (C clear: t < 4)
+        sta stabp
         rts
 zbt0:   .byte $85, $D0             ; ob_st, zb_st by kind (cols): STA flr1,
 zbt1:   .byte flr1, 3              ; BNE +3 (ob_n, zb_n: past the JMP after)
@@ -2293,12 +2239,6 @@ npt0:   .byte $A5, $4C             ; c_np by kind (cols): LDA x4 / CLC, JMP
 npt1:   .byte x4, <nearpost        ; nearpost
 npt2:   .byte $18, >nearpost
 shs:    .byte SCR0, SCR0+1, SCR1, SCR1+1 ; scrh by t: the screen's page + the half
-exhl:   .byte <(EXHB0), <(EXHB1), <(EXHB2), <(EXHB3) ; run's EXHBt (init's)
-exhh:   .byte >(EXHB0), >(EXHB1), >(EXHB2), >(EXHB3)
-        .assert <(LAHSB0) = <(LAHSB1) && <(LAHSB0) = <(LAHSB2) && <(LAHSB0) = <(LAHSB3), error, "LAHSB0-3: one low byte (sethalf patches pages only)"
-lahsh:  .byte >(LAHSB0), >(LAHSB1), >(LAHSB2), >(LAHSB3) ; LAHSBt's page
-        .assert <(ENTB0) = <(ENTB1) && <(ENTB0) = <(ENTB2) && <(ENTB0) = <(ENTB3), error, "ENTB0-3: one low byte (sethalf patches pages only)"
-enthh:  .byte >(ENTB0), >(ENTB1), >(ENTB2), >(ENTB3) ; run's ENTBt page
 ; MASKB,n: the pixels whose bit is set in n (pixel i, 0 leftmost, is $88 >> i);
 ; MASKN,n the rest (nearpost's)
 MASKB:  .byte PM($00), PM($88), PM($44), PM($CC), PM($22), PM($AA), PM($66), PM($EE)
@@ -2343,9 +2283,14 @@ rbl     = *-1                      ; (fs_ln's)
 fs_w:   lda coff                   ; the walker's row: (zp_),y, Y its line
         sta zp_
         ldy mx
-fs_h:   lda LAHSB0,y               ; (page: sethalf's)
+fs_h:   lda LAH,y                  ; the line's page: LAH + scrh
+        clc
+        adc scrh
         sta zp_+1
-        lda RSMT,y                 ; the row's first line - 1
+        tya                        ; the row's first line - 1
+        and #$F8
+        sec
+        sbc #1
         sta rsm
         tya
         and #7
@@ -2437,7 +2382,10 @@ fr:     stx bpos                   ; a run from this line to t
         clc                        ; (LAH + scrh), rsm, Y
         adc scrh
         sta zp_+1
-        lda RSMT,y
+        tya
+        and #$F8
+        sec
+        sbc #1
         sta rsm
         tya
         and #7
@@ -2586,7 +2534,9 @@ fs_nj:  jmp fs_c                   ; (operand: sp_r while split runs fs_new)
 zone1:  ldx mn
         cpx flr1
         bcs z1_n
-z1_h:   lda LAHSB0,x               ; line X (page: sethalf's)
+z1_h:   lda LAH,x                  ; the line's page: LAH + scrh
+        clc
+        adc scrh
         sta zp_+1
         txa
         and #7
@@ -2781,7 +2731,9 @@ sp_ln:  sty bpos
         tay
         lda MASKB,y
         sta msk
-sl_h:   lda LAHSB0,x               ; (page: sethalf's)
+sl_h:   lda LAH,x                  ; the line's page: LAH + scrh
+        clc
+        adc scrh
         sta zp_+1
         txa
         and #7
@@ -3016,16 +2968,26 @@ LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF)
 ; put the STA back (init points pp at dummy first).  In: X, Y, ve, vo, coff;
 ; r_eh1, r_eh2's operands (sethalf's).  Clobbers A, X, Y.  Called by rc_r,
 ; np_r, split2 and gn_d.
-run:    lda EXLB,x                 ; line X's entry
+run:    txa                        ; line X's entry: ENTL, ENTH + stabp, less
+        lsr a                      ; 2 for an odd line (C)
+        lda ENTL,x
+        bcc :+
+        sbc #2                     ; (C set: - 2)
         sta r_j+1
-r_eh2:  lda EXHB0,x                 ; (operand: EXHBt, sethalf's)
+        lda ENTH,x
+        sbc #0
+        jmp :++
+:       sta r_j+1
+        lda ENTH,x
+:       ora stabp
         sta r_j+2
         ldx #0
         lda #OP_STAY               ; the last RTS back
         sta (pp,x)
         lda ENTL,y                 ; line Y's entry: the RTS
         sta pp
-r_eh1:  lda ENTB0,y                ; (page: ENTBt, sethalf's)
+        lda ENTH,y                 ; (+ stabp)
+        ora stabp
         sta pp+1
         lda #OP_RTS
         sta (pp,x)
@@ -3204,7 +3166,7 @@ sp_zg:  cpx fen_e+1
 ; readout: the frame rate at the top left of the screen being drawn, character
 ; row 2 (the game's area), eight characters "TU.t FPS": flip records each
 ; frame's vertical syncs in dvs (the last eight frames); their sum s gives
-; FPSL/FPSH + s = 4000 / s rounded, the rate in tenths (eight frames at 50
+; (4000 + s / 2) / s, the rate in tenths (eight frames at 50
 ; syncs a second), printed as tens (blank when 0), units, '.', tenths, ' ',
 ; "FPS".  The
 ; sum is held at 255 if it would pass it.  With fpson 0 (game.s's F key) eight
@@ -3235,11 +3197,32 @@ readout:
         bne :++
 :       dex
         bpl :--
-:       tax
-        lda FPSL,x                 ; fps10 = 4000 / s
+:       sta MT0                    ; fps10 = (4000 + s / 2) / s (0 for s 0)
+        lsr a
+        clc
+        adc #<4000
         sta fps10
-        lda FPSH,x
+        lda #>4000
+        adc #0
         sta fps10+1
+        lda MT0
+        beq @f0
+        lda #0                     ; the 16 by 8 division: quotient into fps10,
+        ldy #16                    ; the remainder in A
+@fd:    asl fps10
+        rol fps10+1
+        rol a
+        bcs @fs                    ; (past 255: s > 127)
+        cmp MT0
+        bcc @fn
+@fs:    sbc MT0
+        inc fps10
+@fn:    dey
+        bne @fd
+        beq @fz                    ; (always)
+@f0:    sta fps10
+        sta fps10+1
+@fz:
         lda #0
         sta tcol
         ldy #0                     ; fps10's hundreds (tens of frames a second)
@@ -3324,7 +3307,6 @@ dvi:    .res 1                     ; the next entry
 vlast:  .res 1                     ; vcount at the last flip
 tcol:   .res 1                     ; putg's column (readout's); glyphs' counter
 
-        .assert * <= MAP32, error, "code over MAP32"
         .include "b32tab.inc"     ; DCE, DCO
 
 ; ---------------------------------------------------------------- s2v
@@ -3476,6 +3458,12 @@ TENH5:  .repeat TNB+1, n
 
         .code
         .include "proj32.s"
+        .segment "GAME"
+        .include "game.s"
+; MAP32 + 32 z + x: corner (x, z)'s height (bits 0-3) and tile (x, z)'s colour
+; index (bits 4-7: DCE, DCO), b32/tools/gen32.py's.
+        .segment "MAPD"
+MAP32:  .incbin "MAP32"
 
 ; ---------------------------------------------------------------- the slow way
 ; Bank 4's free space again (zsh4 at $B900 and slow2 at $9200, the first R2OFF

@@ -275,9 +275,9 @@ CO      = $0A80
 SPB     = $0A90                    ; the slow way's: each pixel's box at the top
 STL     = $0AA0                    ; and its transitions (4 a pixel: line, step)
 STD     = $0AB0
-ENTL    = ENTB0-YSKY               ; each line's entry in its STAB: low byte,
-ENTH    = ENTB1-YSKY               ; and the page within the table (lines
-                                   ; YSKY..YGND+1: ENTB0, ENTB1 in LOWD)
+OL      = OLB-YSKY                 ; each line y's odd-pass entry in a parity
+                                   ; table, 3 ((y - YSKY) >> 1); OL + 1, y the
+                                   ; even pass's (lines YSKY..YGND+2: OLB in LDT)
 TOPS    = $0C00                    ; by screen (+64 for screen 1) and column:
 BOTS    = $0C80                    ; the land's highest and lowest line last
 CURT    = $0B60                    ; time there, and this frame's
@@ -285,8 +285,10 @@ CURB    = $0BA0
 STAB    = $0E00
 LAH     = LAHB-YSKY                ; each line's 2 * (y >> 3) (lines
                                    ; YSKY..YGND+1: LAHB in P1)
-STABN   = 437                      ; a STAB's bytes (init's): SG0, SG1 follow
-        .assert YGND+2-YSKY = 97, error, "LAH, ENTL, ENTH: 97 lines each (b32.cfg's packing)"
+PTN     = 3*((YGND+1-YSKY)/2+1)    ; a parity table's bytes (init's: one a page
+                                   ; from STAB, t = 2 screen + half)
+        .assert YGND+2-YSKY = 97 && (YSKY & 1) = 0 && ((YGND+1) & 1) = 0, error, "LAH: 97 lines; the parity tables' lines even"
+        .assert PTN <= $B5, error, "a parity table runs into SG0, SG1"
 CX      = $0AC0                    ; the columns' map x (project)
 BCL     = $B9                    ; this strip's bottom points past YGND: a
                                    ; count (0: none)
@@ -443,7 +445,7 @@ HLO:    .res 1                      ; the row's least and greatest heights
 RK:     .res 1                      ; prow32's: the row's 16 k
 DCUR:   .res 1                      ; the row's di as a corner row
 RN16:   .res 1                      ; 16 RN
-sdl:    .res 1
+rodd:   .res 1                      ; run's: the odd pass's end entry
 fps10:  .res 2                      ; readout's: the rate in tenths
 tcol:   .res 1                      ; putg's column (readout's)
 wn:     .res 1
@@ -471,7 +473,7 @@ pxh:    .res 1
 xrl:    .res 1
         .code
 .ifndef CODEPAD
-CODEPAD = 11                       ; (b32: the best of 0..15, by the flight)
+CODEPAD = 0                        ; (b32: the best of 0..15, by the flight)
 .endif
         .res CODEPAD               ; (the page phase of the code after: tuned)
 ; ---------------------------------------------------------------- start
@@ -653,34 +655,7 @@ setback:
         lda back
         asl a
         sta sh_b+1                 ; (sethalf's ORA #: t = 2 * back + half)
-; The two STABs (one a half) store to the screen `back`: when they hold the
-; other's addresses (stabs), each line's STA operand's high byte moves by the
-; screens' difference, in both.  Clobbers A, X, Y, ptr.
-        lda back
-        cmp stabs
-        beq @x
-        sta stabs
-        ldx #YSKY
-        ldy #2
-:       clc                        ; (C clear for the ADC: here, then cpx's;
-                                   ; the unnamed label kept for the count)
-@l:     lda ENTL,x                 ; line X's STA in STAB 0: its operand's
-        sta ptr                    ; high byte 2 on
-        lda ENTH,x
-        ora #>STAB
-        sta ptr+1
-        lda LAH,x                  ; written afresh, as init's: the line's
-        adc scrb                   ; page in screen `back`, LAH + scrb (even)
-        sta (ptr),y
-        inc ptr+1                  ; and in STAB 1, two pages on: + the half
-        inc ptr+1
-        ora #1
-        sta (ptr),y
-        inx
-        cpx #YGND+1
-        bne @l
-@x:     rts
-stabs:  .byte 0                    ; the screen the STABs store to (init's: 0)
+        rts
 
         .include "boot32.s"
 ; ---------------------------------------------------------------- init
@@ -747,38 +722,33 @@ init:   jsr shtab                  ; the ship's walker's tables
 :       inx
         cpx #NDI
         bne @r7
-        ; STAB t = 2 * screen + half, at page >STAB + 2t: for each line x of
-        ; YSKY..YGND+1, STA addr,Y (RTS at YGND+1), then LDA vo (even x) or
-        ; TXA (odd); ENTL, ENTH hold each line's entry
+        ; the parity tables: table t = 2 * screen + half at page >STAB + t,
+        ; for each even line y of YSKY..YGND+1 STA addr,Y (3 bytes); the odd
+        ; lines are the same stores with Y one more (the next byte in the
+        ; character cell).  OL: each line y's odd-pass entry, 3 ((y - YSKY)
+        ; >> 1), lines YSKY..YGND+2
         lda #0
         sta tmp                    ; t
 @tab:   lda tmp
-        asl a
+        clc
         adc #>STAB
         sta ptr+1
         lda #0
         sta ptr
         ldx #YSKY
-@line:  lda ptr
-        sta ENTL,x
-        lda ptr+1
-        and #1                     ; (each STAB starts at an even page: 0 or 1)
-        sta ENTH,x
         ldy #0
-        lda #OP_STAY
-        cpx #YGND+1
-        bne :+
-        lda #OP_RTS
-:       sta (ptr),y
-        txa
-        and #7                     ; the line's address: low byte y & 7,
-        iny
+@line:  lda #OP_STAY
         sta (ptr),y
-        txa
+        iny
+        txa                        ; the line's address: low byte y & 7,
+        and #7
+        sta (ptr),y
+        iny
+        txa                        ; high byte 2 * (y >> 3) + the half + the
+        lsr a                      ; screen's page
         lsr a
-        lsr a
-        and #$FE                   ; high byte 2 * (y >> 3) + the half + the
-        sta tmp+1                  ; screen's $30 or $58
+        and #$FE
+        sta tmp+1
         lda tmp
         and #1
         ora tmp+1
@@ -790,47 +760,28 @@ init:   jsr shtab                  ; the ship's walker's tables
 :       clc
         adc #SCR0
         adc tmp+1
-        iny
         sta (ptr),y
         iny
-        txa                        ; an even line: LDA vo (2 bytes); odd: TXA
-        lsr a
-        lda #OP_TXA
-        bcs :+
-        lda #OP_LDAZ
-        sta (ptr),y
-        iny
-        lda #vo
-:       sta (ptr),y
-        tya
-        sec                        ; ptr += Y + 1
-        adc ptr
-        sta ptr
-        bcc :+
-        inc ptr+1
-:       inx
-        cpx #YGND+2
-        bne @line
+        inx
+        inx
+        cpx #YGND+3
+        bcc @line
         inc tmp
         lda tmp
-        cmp #2
+        cmp #4
         bne @tab
-        ldx #YSKY                  ; RUNXB (run's): each line's entry, low
-@rx:    txa                        ; byte, an odd line's 2 early (its LDA
-        lsr a                      ; vo); r_k's operand: 1 + the last line
-        lda ENTL,x                 ; whose entry is in its STAB's first page
-        ldy ENTH,x
-        bcc @rx1
-        sbc #2                     ; (C set)
-        bcs @rx1
-        dey                        ; (a borrow: the page before)
-@rx1:   sta RUNXB-YSKY,x
+        ldx #YSKY
+@ol:    txa
+        sec
+        sbc #YSKY
+        lsr a
+        sta tmp
+        asl a
+        adc tmp                    ; (C clear) 3 ((y - YSKY) >> 1)
+        sta OL,x
         inx
-        tya
-        bne @rx2
-        stx r_k+1
-@rx2:   cpx #YGND+2
-        bne @rx
+        cpx #YGND+3
+        bne @ol
         ldx #0                     ; the line tables, for lines YSKY..YGND+1
 @ent:   cpx #YSKY                  ; (X runs 0..255; the rest skipped)
         bcc :+
@@ -2459,13 +2410,22 @@ sh_b:   ora #0                     ; operand: 2 * back (setback's)
         tay                        ; Y = t
         lda shs,y
         sta scrh
-        tya                        ; the STAB's page for the half: >STAB
-        and #1                     ; + 2 half (the STABs store to `back`):
-        asl a                      ; run's r_p1, r_p2 operands
-        adc #>STAB                 ; (C clear; V clear too: 0 or 2 + >STAB
-        .assert >STAB + 2 < $80, error, "sethalf: its ADC must clear V" ; can't overflow)
-        sta r_p1+1
-        sta r_p2+1
+        tya                        ; the parity table's page, >STAB + t: run's
+        clc                        ; r_e, r_o operands; the planted RTS (pp) put
+        adc #>STAB                 ; back first, pp then in the new page (an
+        .assert >STAB + 3 < $80, error, "sethalf: its ADC must clear V" ; STA there: run's put-back harmless)
+        sta r_e+2
+        sta r_o+2
+        tax
+        lda #OP_STAY
+        ldy #0
+        sta (pp),y
+        stx pp+1
+        ldy r_e+2                  ; (Y = t again)
+        tya
+        sec
+        sbc #>STAB
+        tay
         rts
 zbt0:   .byte $85, $D0             ; ob_st, zb_st by kind (cols): STA flr1,
 zbt1:   .byte flr1, 3              ; BNE +3 (ob_n, zb_n: past the JMP after)
@@ -3145,34 +3105,45 @@ bytes2: lda me
 LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF)
 
 ; run: lines X .. Y-1 (X < Y) of the column, ve on even lines and vo on odd,
-; through the STAB for the screen and half (init's: for each line STA line,Y,
-; then LDA vo after an even line and TXA after an odd).  A JMP to line X's
-; entry (EXLB, EXHBt; an odd line's entry is the LDA vo before its STA, so A
-; need only be ve) with A = X = ve and Y = coff; back by an RTS planted over
-; line Y's STA opcode (ENTL, ENTBt), whose address pp keeps so the next run can
-; put the STA back (init points pp at dummy first).  In: X, Y, ve, vo, coff;
-; r_eh1, r_eh2's operands (sethalf's).  Clobbers A, X, Y.  Called by rc_r,
-; np_r, split2 and gn_d.
-run:    lda RUNXB-YSKY,x           ; line X's entry: RUNXB (init's: an odd
-        sta r_j+1                  ; line's 2 early, at its LDA vo); its page
-r_k:    cpx #YSKY                  ; the STAB's (r_p1's operand, sethalf's),
-r_p1:   lda #0                     ; + 1 from line r_k's operand on (init's:
-        adc #0                     ; the entries in the STAB's second page)
-:       sta r_j+2
+; through the parity table for the screen and half (init's: STA line,Y for each
+; even line YSKY..YGND+1; an odd line is the same store with Y one more, the
+; next byte of the character cell).  Two passes, each from its first entry to
+; an RTS planted over its end entry: the even lines (OL+1,X .. OL+1,Y: a JSR,
+; A = ve, Y = coff), then the odd (OL,X .. OL,Y: a JMP, A = vo, Y = coff + 1;
+; its RTS returns to run's caller).  The two ends are one entry when Y is even.
+; pp keeps the planted RTS so the next run (or sethalf) puts the STA back.  In:
+; X, Y, ve, vo, coff; r_e, r_o's pages (sethalf's).  Clobbers A, X, Y, rodd.
+; Called by rc_r, np_r, split2, gn_d and run2.
+run:    lda OL+1,x                 ; the passes' first entries
+        sta r_e+1
+        lda OL,x
+        sta r_o+1
         ldx #0
         lda #OP_STAY               ; the last RTS back
         sta (pp,x)
-        lda ENTL,y                 ; line Y's entry: the RTS
+        lda OL,y                   ; the odd pass's end (rodd), the even's
+        sta rodd
+        lda OL+1,y
         sta pp
-:       lda ENTH,y                 ; (+ the STAB's page: r_p2's operand,
-r_p2:   ora #0                     ; sethalf's)
-        sta pp+1
         lda #OP_RTS
         sta (pp,x)
-        ldx ve                     ; A = X = ve (the odd lines' TXA)
-        txa
+        lda ve
         ldy coff
-r_j:    jmp $FFFF                  ; (the planted RTS returns to run's caller)
+r_e:    jsr $FF00                  ; (operand: the even entry, the page)
+        ldx #0
+        lda rodd
+        cmp pp
+        beq @o                     ; (one end: Y even)
+        lda #OP_STAY
+        sta (pp,x)
+        lda rodd
+        sta pp
+        lda #OP_RTS
+        sta (pp,x)
+@o:     lda vo
+        ldy coff
+        iny
+r_o:    jmp $FF00                  ; (operand: the odd entry, the page)
 
 ; recordc: record's twin for a column a rung splits (c_rec's target in a
 ; recording phase): CURT, then the black above (rc_t, whose c_rd re-tests the
@@ -3460,22 +3431,18 @@ dvs:    .res 8                     ; flip's: the last eight frames' vertical
 dvi:    .res 1                     ; the next entry
 vlast:  .res 1                     ; vcount at the last flip
 ; the line tables (init's): each at offset $40..$9F of its page (b32.cfg: LDT,
-; P2T, P1T), so that the table less YSKY, indexed by a line YSKY..YGND+1, stays
-; in the page (an indexed read crossing a page costs a cycle)
+; P1T), so that the table less YSKY, indexed by a line YSKY..YGND+1 (OL's to
+; YGND+2), stays in the page (an indexed read crossing a page costs a cycle)
         .segment "LDT"
-ENTB0:  .res YGND+2-YSKY
-        .segment "P2T"
-ENTB1:  .res YGND+2-YSKY
+OLB:    .res YGND+3-YSKY
         .segment "P1T"
 LAHB:   .res YGND+2-YSKY
         .code
 .macro LTPAGE t
         .assert <t >= YSKY && <t + YGND+1-YSKY <= $FF, error, "a line table crosses a page"
 .endmacro
-        LTPAGE ENTB0
-        LTPAGE ENTB1
         LTPAGE LAHB
-RUNXB:  .res YGND+2-YSKY           ; run's line entries, low bytes (init's)
+        .assert <OLB >= YSKY && <OLB + YGND+2-YSKY <= $FF, error, "OL crosses a page"
 
         .include "b32tab.inc"     ; DCE, DCO
 

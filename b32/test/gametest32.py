@@ -7,7 +7,7 @@ harness for the flat machine: LAND at $1900, DEV at $8000, no banks.
 SCRIPT as test/gametest.py's: comma-separated N:KEYS parts, N frames with KEYS held
 (L left, R right, F nose down, B nose up, T thrust, H shift, P F's key).  Each line:
 the frame, the keys, the frame's cycles (gstep, project, strips, gpre, ship, gpost,
-readout), then the ship's state.  vcount moves on 4 syncs a frame (FMIN), or with
+readout, flip: everything the main loop runs), then the ship's state.  vcount moves on 4 syncs a frame (FMIN), or with
 GT_VS=real as many as its cycles would take; the game takes one step a frame either
 way, so the state is the same.  Importable: Game().frame(keys, vs) and state().
 """
@@ -104,7 +104,7 @@ class Game:
             if r == 'ship' and not m[GSHV]:
                 continue
             c += self.call(self.lab[r])
-        self.call(self.lab['flip'])
+        c += self.call(self.lab['flip'])  # (with setback: the frame's own work)
         self.last = c
         return c
 

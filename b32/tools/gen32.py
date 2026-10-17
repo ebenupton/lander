@@ -161,16 +161,16 @@ def main():
     out = sys.argv[1]
     gametab(out)
     open(os.path.join(out, 'MAP32'), 'wb').write(map32())
-    open(os.path.join(out, 'PANELMAP'), 'wb').write(panel())
+    open(os.path.join(out, 'PANELMAP'), 'wb').write(panel())   # (the tests' reference)
     open(os.path.join(out, 'GLYPHS'), 'wb').write(glyphs())
     with open(os.path.join(out, 'qrtab.inc'), 'w') as f:
-        f.write('; b32/tools/gen32.py\'s qrtab: div8\'s table (land.s .includes the parts)\n')
-        for name, (t, off) in qrtab().items():
-            f.write(f'.macro {name}_DATA\n')
-            for i in range(0, len(t), 16):
-                f.write('        .byte ' + ', '.join(f'${v:02X}' for v in t[i:i + 16]) + '\n')
-            f.write('.endmacro\n')
-            f.write(f'.macro {name}_OFF\n        .byte ' + ', '.join(f'${v:02X}' for v in off) + '\n.endmacro\n')
+        # (the loader makes the tables: here only their sizes, checked against qrtab(),
+        # and the panel's colour byte for each colour index, for its map)
+        qa, qb = qrtab()['QRA'][0], qrtab()['QRB'][0]
+        f.write('; b32/tools/gen32.py: the loader-made tables\' sizes, the panel map\'s colours\n')
+        f.write(f'QRAN = {len(qa)}\nQRBN = {len(qb)}\n')
+        cls = [0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF for e in colours()]
+        f.write('.macro MAPCLS_DATA\n        .byte ' + ', '.join(f'${v:02X}' for v in cls + [0] * (16 - len(cls))) + '\n.endmacro\n')
     with open(os.path.join(out, 'b32tab.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py: a colour index\'s dither bytes, even and odd lines\n')
         bs = [G.dither_bytes(e) for e in colours()]

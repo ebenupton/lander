@@ -17,7 +17,8 @@ python3 b32/tools/gen32.py $B
 python3 b32/tools/ship32.py $B
 ca65 -g --cpu 6502 ${CODEPAD:+-D CODEPAD=$CODEPAD} -I b32/src -I $B --bin-include-dir $B -o $B/land.o b32/src/land.s -l $B/land.lst
 ld65 -C b32/src/b32.cfg -o $B/x.bin $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/game.dbg
-printf 'MODE1\rVDU19,1,0;0;19,2,0;0;19,3,0;0;23,1,0;0;0;0;\r*RUN L32\r' > $B/BOOT
+EXEC=$(awk '$3 == ".start" {print $2}' $B/labels.txt | sed 's/^00//')
+printf '*RUN LANDER\r' > $B/BOOT    # (the test disc's convenience: not the program's)
 python3 tools/mkdfs.py build $B/lander32.ssd LANDER32 "!BOOT:$B/BOOT:0000:FFFF" \
-    "L32:$B/L32:7000:7000" "L32M:$B/L32M:1900:1900"
-echo "L32M $(wc -c < $B/L32M | tr -d ' ') bytes, L32 $(wc -c < $B/L32 | tr -d ' '); $B/lander32.ssd"
+    "LANDER:$B/LANDER:2000:$EXEC"
+echo "LANDER $(wc -c < $B/LANDER | tr -d ' ') bytes ($(( ($(wc -c < $B/LANDER) + 255) / 256 )) sectors), exec \$$EXEC; $B/lander32.ssd"

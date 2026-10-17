@@ -139,7 +139,7 @@ def machine():
     mpu = MPU(memory=ObservableMemory())
     m = mpu.memory
     m[0:0x8000] = random.Random(32).randbytes(0x8000)   # the MOS's leftovers
-    for addr, name in ((0x1900, 'L32M'), (0x7000, 'L32')):
+    for addr, name in ((0x2000, 'LANDER'),):
         data = open(os.path.join(B, name), 'rb').read()
         m[addr:addr + len(data)] = data
     call(mpu, lab['takeover'])

@@ -3451,36 +3451,22 @@ LAHB:   .res YGND+2-YSKY
 ; then JMP t_back; TENxL, TENxH + n: the entry for n stores, TBLKx + 3 (TNB -
 ; n); tenl, tenh: the tables' addresses by the row (traceb patches its sites:
 ; the entries for n and for n + 1).
-QOA:    QRA_OFF                    ; div8's row offsets (qrtab.inc)
-QOB:    QRB_OFF
-QRB:    QRB_DATA                   ; (QRA is after the panel: one page)
-        .segment "FILLS"
-TBLK4:  .repeat TNB, i
-        sta ROWA-TNB+i,x
-        .endrepeat
-        jmp t_back
-TBLK5:  .repeat TNB, i
-        sta ROWB-TNB+i,x
-        .endrepeat
-        jmp t_back
-TEN4L:  .repeat TNB+1, n
-        .byte <(TBLK4 + 3*(TNB-n))
-        .endrepeat
-TEN5L:  .repeat TNB+1, n
-        .byte <(TBLK5 + 3*(TNB-n))
-        .endrepeat
-TEN4H:  .repeat TNB+1, n               ; (the H tables adjacent: one page)
-        .byte >(TBLK4 + 3*(TNB-n))
-        .endrepeat
-TEN5H:  .repeat TNB+1, n
-        .byte >(TBLK5 + 3*(TNB-n))
-        .endrepeat
+        .segment "FILLS"           ; (made by the loader: gfill, gqr)
+TBLK4:  .res 3*TNB+3
+TBLK5:  .res 3*TNB+3
+TEN4L:  .res TNB+1
+TEN5L:  .res TNB+1
+TEN4H:  .res TNB+1                 ; (the H tables adjacent: one page)
+TEN5H:  .res TNB+1
+QRB:    .res QRBN                  ; div8's table, rows 9..15 (QRA is after the
+QOA:    .res 7                     ; panel: one page); the rows' offsets
+QOB:    .res 7
+        .code
 tenl:   .byte <TEN4L, <TEN5L, >TEN4L, >TEN5L, <(TEN4L+1), <(TEN5L+1), >(TEN4L+1), >(TEN5L+1)
 tenh:   .byte <TEN4H, <TEN5H, <(TEN4H+1), <(TEN5H+1)
         .assert >TEN4H = >TEN5H && >(TEN4H+1) = >(TEN5H+1), error, "traceb: TEN4H, TEN5H must share a page"
         .assert ROWB = ROWA + $100 && <ROWA = 0, error, "fills: the row's page's bit 0 picks the tables"
 
-        .code
         .include "proj32.s"
         .segment "GAME"
         .include "game.s"
@@ -3490,14 +3476,12 @@ tenh:   .byte <TEN4H, <TEN5H, <(TEN4H+1), <(TEN5H+1)
 ; index (bits 4-7: DCE, DCO), b32/tools/gen32.py's.
         .segment "MAPD"
 MAP32:  .incbin "MAP32"
-; PANEL: the panel's 9 MODE 5 rows (64 bytes each): the map (gen32.py's image),
-; the readout's row (putg's), loaded with the program.
+; PANEL: the panel's 9 MODE 5 rows (64 bytes each): the map (the loader draws
+; it from MAP32: gpanel), the readout's row (putg's).
         .segment "PANELD"
-PANEL:  .incbin "PANELMAP"
-        .res 64
-        .assert * - PANEL = 9*64, error, "PANEL: 9 rows"
-QRA:    QRA_DATA                   ; div8's table, rows 2..8 (qrtab.inc): here,
-        .assert >QRA = >(* - 1), error, "QRA: one page"  ; at a fixed address, in one page
+PANEL:  .res 9*64                  ; (the loader's: gpanel, from MAP32)
+QRA:    .res QRAN                  ; div8's table, rows 2..8 (gqr's): here, at a
+        .assert >QRA = >(* - 1), error, "QRA: one page"  ; fixed address, in one page
 ; R7L, R7H + di: r, the row's pixels a tile at depth index di (d = 16 (DI0 +
 ; di)): land.recip(d) = (2^21 + k) div 2k, k = DI0 + di; init's.
         .segment "GA0"

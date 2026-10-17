@@ -1,11 +1,12 @@
 ; ============================================================================
-; boot32.s -- the 32K build's loader (.included by land.s into segment BOOT,
-; the file L32 at $7000, inside land buffer 1: go clears it).  !BOOT has set
-; MODE 1 with every colour black and the cursor off, then *RUN L32.
+; boot32.s -- the 32K build's loader (.included by land.s into segment BOOT:
+; the end of the one file, LANDER, which holds the program's stored parts --
+; MAP32 and the code -- then this; b32.cfg loads it at $2000, the loader above
+; the program's place, inside the land buffers: clr clears it).  *RUN LANDER
+; from any mode.
 ;
-; start, with the MOS still there: *LOAD L32M (the program: the map, the panel,
-; the code, loaded at $1900 to run from $1400), close !BOOT (the filing system
-; is then idle: its workspace is the program's).  Then the MOS is done with:
+; start, with the MOS still there: any EXEC or SPOOL file closed (the filing
+; system is then idle: its workspace is the program's).  Then the MOS is done with:
 ; interrupts off, the stack reset, every VIA interrupt disabled, IRQ1V ours
 ; (irq: the MOS ROM's entry still saves A in $FC and jumps through it), the
 ; program copied down, the holes b32.cfg packs the variables into zeroed, an
@@ -18,12 +19,8 @@
 IRQ1V   = $0204
 
         .segment "BOOT"
-LOADAT  = $1900                    ; where DFS loads L32M (b32/build32.sh's)
-start:  ldx #<cmd_main             ; the program, at LOADAT
-        ldy #>cmd_main
-        jsr OSCLI
-        lda #119                   ; !BOOT closed: no filing system call
-        jsr OSBYTE                 ; follows
+start:  lda #119                   ; any EXEC or SPOOL file closed: no filing
+        jsr OSBYTE                 ; system call follows
         sei                        ; the MOS's interrupts off for good, its
         ldx #$FF                   ; stack ours
         txs
@@ -43,8 +40,8 @@ start:  ldx #<cmd_main             ; the program, at LOADAT
         sta UVIA_IER
         cli
         jmp __IMG_LAST__+1
-; clr: run from the free block (relative branches only): $7000-$7FFF black (the
-; loader's pages: takeover cleared the rest of the land buffers), then loop.
+; clr: run from the free block (relative branches only): the loader's pages to
+; $7FFF black (takeover cleared the rest of the land buffers), then loop.
 clr:    lda #0
         sta ptr
         tay
@@ -57,17 +54,31 @@ clr:    lda #0
         bpl @p                     ; (to $7FFF)
         jmp loop
 clre:
-        .assert >start = $70, error, "clr: the loader's pages, $7000-$7FFF"
+        .assert >start >= >__IMG_LAST__+2 && __IMG_LAST__+1+clre-clr <= start, error, "clr: in the free block below the loader, a page clear between"
 
-; takeover: the machine taken from the MOS (interrupts off, the stack at $01FF),
-; as above: the VIAs, IRQ1V; the program copied down from LOADAT to its place
-; ($1400: b32.cfg's IMG, ascending, so the overlap is safe); then every hole the
-; uninitialised data lives in zeroed (zero page below $FC, page 1 below the
-; stack, page 2 past IRQ1V, $0300-$13FF), the NMI's RTI, init's tables, the
-; memory from the program's end through land buffer 0 to the loader cleared;
-; the CRTC (one MODE 1 frame) and palette.  (The tests call it in place of the
-; loader, with L32M at LOADAT.)  Clobbers A, X, Y.
+; takeover: the machine taken from the MOS (interrupts off, the stack at $01FF):
+; the picture black (the palette, MODE 1's ULA); the VIAs, IRQ1V; the program
+; copied to its place from the file (b32.cfg: MAP32 to $1400, then the code,
+; each ascending, the second's destination over the first's source); every hole
+; the uninitialised data lives in zeroed (zero page below $FC, page 1 below the
+; stack, page 2 past IRQ1V, $0300-$13FF), the NMI's RTI; the tables the file
+; leaves out made (gfill, gqr, gpanel) and init's; the memory from the
+; program's end through land buffer 0 to the loader cleared; the CRTC (one MODE
+; 1 frame) and the palette.  (The tests call it in place of the loader, with
+; the file at its load address.)  Clobbers A, X, Y.
 takeover:
+        ldx #15                    ; every colour black, MODE 1's ULA (the
+@pk:    txa                        ; screen's leftovers unseen)
+        asl a
+        asl a
+        asl a
+        asl a
+        ora #7
+        sta $FE21
+        dex
+        bpl @pk
+        lda #$D8
+        sta ULA_CTL
         lda #$7F
         sta SVIA_IER
         sta UVIA_IER
@@ -78,22 +89,22 @@ takeover:
         lda #0                     ; the user VIA's timers: 1 one-shot, 2
         sta UVIA_ACR               ; counting the clock from $FF00
         sta UVIA_T2L
-        ldy #0                     ; the program: whole pages, LOADAT to
-        sty ptr                    ; __IMG_START__ (what follows its end is
-        sty z:g0                   ; cleared below)
-        lda #>LOADAT
-        sta ptr+1
-        lda #>__IMG_START__
-        sta z:g0+1
-        ldx #>(__IMG_LAST__-__IMG_START__)+1
-@cp:    lda (ptr),y
-        sta (g0),y
-        iny
-        bne @cp
-        inc ptr+1
-        inc z:g0+1
-        dex
-        bne @cp
+        lda #<__MAPD_LOAD__        ; MAP32: four pages
+        ldx #>__MAPD_LOAD__
+        sta ptr
+        stx ptr+1
+        lda #<__MAPD_RUN__
+        ldx #>__MAPD_RUN__
+        ldy #4
+        jsr @copy
+        lda #<__CODE_LOAD__        ; the code: whole pages from its start (what
+        ldx #>__CODE_LOAD__        ; follows its end is cleared below)
+        sta ptr
+        stx ptr+1
+        lda #<__CODE_RUN__
+        ldx #>__CODE_RUN__
+        ldy #>(__SHIP_RUN__+__SHIP_SIZE__-__CODE_RUN__+255)
+        jsr @copy
         lda #0                     ; zeroed: zero page, page 1 below the stack,
         ldx #$FC                   ; page 2 past IRQ1V, $0300-$13FF (the MOS's
 @z0:    dex                        ; leftovers otherwise; init makes the tables
@@ -121,9 +132,12 @@ takeover:
         bne @z3
         lda #$40                   ; RTI: a stray NMI
         sta $0D00
+        jsr gfill
+        jsr gqr
+        jsr gpanel
         jsr init
         lda #0                     ; the pages after the program's to the loader
-        tay                        ; black (the free block, land buffer 0; go
+        tay                        ; black (the free block, land buffer 0; clr
         ldx #>__IMG_LAST__+1       ; clears the rest)
         stx ptr+1
         sta ptr
@@ -134,9 +148,9 @@ takeover:
         ldx ptr+1
         cpx #>start
         bne @z4
-        ldx #0                     ; the CRTC: one frame, 64 wide, 20 rows, the
-@cr:    lda crtc_regs,x            ; sync at row 28, land buffer 0 shown
-        sta CRTC_IDX
+        ldx #0                     ; the CRTC: one MODE 1 frame, 64 wide, 20
+@cr:    lda crtc_regs,x            ; rows, the sync at row 28, land buffer 0
+        sta CRTC_IDX               ; shown
         lda crtc_regs+1,x
         sta CRTC_DAT
         inx
@@ -149,23 +163,235 @@ takeover:
         dex
         bpl @pl
         rts
+; (copy: Y pages from (ptr) to X:A, ascending.  Clobbers A, X, Y, ptr, g0.)
+@copy:  sta z:g0
+        stx z:g0+1
+        tya
+        tax
+        ldy #0
+@cp:    lda (ptr),y
+        sta (g0),y
+        iny
+        bne @cp
+        inc ptr+1
+        inc z:g0+1
+        dex
+        bne @cp
+        rts
 
-crtc_regs:                         ; (register, value) pairs
-        .byte 1, 64                ; 64 characters displayed
+; gfill: the fills, TBLK4 and TBLK5 (TNB stores STA ROWA-TNB+i,X, ROWB-TNB+i,X,
+; then JMP t_back), and their entry tables TEN4L/H, TEN5L/H + n (n 0..TNB):
+; TBLKx + 3 (TNB - n).  Clobbers A, X, Y, ptr, tmp.
+        .assert TBLK5 = TBLK4+3*TNB+3 && ROWB = ROWA+$100 && <ROWA = 0 && TNB <= 256, error, "gfill"
+gfill:  lda #<TBLK4
+        sta ptr
+        lda #>TBLK4
+        sta ptr+1
+        ldy #0
+        lda #>ROWA-1               ; the stores' page: ROWA - 1, then ROWB - 1
+        sta tmp+1
+@t:     ldx #<-TNB
+@s:     lda #$9D                   ; STA abs,X
+        jsr @put
+        txa
+        jsr @put
+        lda tmp+1
+        jsr @put
+        inx
+        bne @s
+        lda #$4C                   ; JMP t_back
+        jsr @put
+        lda #<t_back
+        jsr @put
+        lda #>t_back
+        jsr @put
+        inc tmp+1
+        lda tmp+1
+        cmp #>ROWB
+        bne @t
+        ldx #0                     ; the entries, n = X: TBLK4's end less 3 n,
+        lda #<(TBLK4+3*TNB)        ; TBLK5's 3 TNB + 3 on
+        sta tmp
+        lda #>(TBLK4+3*TNB)
+        sta tmp+1
+@e:     lda tmp
+        sta TEN4L,x
+        clc
+        adc #<(3*TNB+3)
+        sta TEN5L,x
+        lda tmp+1
+        sta TEN4H,x
+        adc #>(3*TNB+3)
+        sta TEN5H,x
+        lda tmp
+        sec
+        sbc #3
+        sta tmp
+        bcs @n
+        dec tmp+1
+@n:     inx
+        cpx #TNB+1
+        bne @e
+        rts
+@put:   sta (ptr),y                ; (A at ptr, ptr on)
+        inc ptr
+        bne :+
+        inc ptr+1
+:       rts
+
+; gqr: div8's table: QRA rows d 2..8, QRB rows 9..15, each D d..31 in turn:
+; (D div d) << 4 | D mod d; QOA + d - 2 (QOB + d - 9, QOB following QOA): row
+; d's index less d (QOB's one less: div8's ADC there has C set).  Clobbers A, X,
+; Y, ptr, z:gt0..z:gt2.
+        .assert QOB = QOA+7, error, "gqr: QOB follows QOA"
+gqr:    ldx #2                     ; d
+@d:     cpx #2
+        beq @a
+        cpx #9
+        bne @o
+        lda #<QRB                  ; (row 9: QRB from its start)
+        ldy #>QRB
+        bne @p                     ; (always)
+@a:     lda #<QRA                  ; (row 2: QRA from its start)
+        ldy #>QRA
+@p:     sta ptr
+        sty ptr+1
+        lda #0
+        sta z:gt0                    ; (the index)
+@o:     stx z:gt1
+        lda #8                     ; the offset: index - d, less 1 from row 9
+        cmp z:gt1                    ; (C: d <= 8)
+        lda z:gt0
+        sbc z:gt1
+        sta QOA-2,x
+        lda #32                    ; the row's entries, 32 - d
+        sec
+        sbc z:gt1
+        sta z:gt2
+        lda #$10                   ; D = d: q 1, r 0
+@D:     ldy z:gt0
+        sta (ptr),y
+        inc z:gt0
+        clc                        ; D + 1: r + 1, or r 0 and q + 1 at d
+        adc #1
+        tay
+        and #$0F
+        cmp z:gt1
+        tya
+        bcc @k
+        sbc z:gt1                    ; (C set) q << 4
+        adc #$0F                   ; (C set: + $10)
+@k:     dec z:gt2
+        bne @D
+        inx
+        cpx #16
+        bne @d
+        rts
+        .assert QRAN = 189 && QRBN = 140, error, "gqr: the tables' sizes"
+
+; gpanel: PANEL's map rows: 64 lines of 32 pixels, line y, pixel t the tile x =
+; t - MAPX, z = MAPZ - (y >> 1) (mod 32): its colour index's byte (MAPCLS: sea,
+; land, the pad) under the pixel's bits; the readout's row cleared.  Clobbers A,
+; X, Y, ptr, g0, z:gt0, z:gt1.
+        .assert <PANEL = 0 && <MAP32 = 0, error, "gpanel: PANEL, MAP32 page-aligned"
+gpanel: lda #0
+        tax
+@c:     sta PANEL,x
+        sta PANEL+$100,x
+        sta PANEL+9*64-$100,x
+        inx
+        bne @c
+        stx z:gt0                    ; y
+@y:     lda z:gt0                    ; MAP32 + 32 z: page + (z >> 3), (z & 7) << 5
+        lsr a
+        sta z:gt1
+        lda #MAPZ
+        sec
+        sbc z:gt1
+        and #31
+        tax
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>MAP32
+        sta z:g0+1
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        sta z:g0
+        lda z:gt0                    ; PANEL + 64 (y >> 3) + (y & 7)
+        and #$38
+        asl a
+        asl a
+        asl a
+        sta ptr
+        lda #>PANEL
+        adc #0
+        sta ptr+1
+        lda z:gt0
+        and #7
+        ora ptr
+        sta ptr
+        ldx #31                    ; t
+@t:     txa
+        sec
+        sbc #MAPX
+        and #31
+        tay
+        lda (g0),y
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        tay
+        lda MAPCLS,y
+        sta z:gt1
+        txa
+        and #3
+        tay
+        lda PIXM,y
+        and z:gt1
+        sta z:gt1
+        txa
+        and #$1C
+        asl a
+        tay
+        lda (ptr),y
+        ora z:gt1
+        sta (ptr),y
+        dex
+        bpl @t
+        inc z:gt0
+        lda z:gt0
+        cmp #64
+        bne @y
+        rts
+MAPCLS: MAPCLS_DATA                ; a colour index's byte (qrtab.inc)
+
+crtc_regs:                         ; (register, value) pairs: MODE 1's, but
+        .byte 0, 127               ; 64 characters displayed
+        .byte 1, 64
         .byte 2, 90                ; the horizontal sync, centring the 64
+        .byte 3, $28
+        .byte 4, 38
+        .byte 5, 0
         .byte 6, 20                ; 20 rows displayed
         .byte 7, 28                ; the vertical sync at row 28
         .byte 8, 0                 ; not interlaced (the rupture wants whole
-                                   ; frames)
+        .byte 9, 7                 ; frames)
+        .byte 10, $20              ; the cursor off
         .byte 12, >(LAND0/8)
         .byte 13, <(LAND0/8)
-        .byte 10, $20              ; the cursor off
 crtc_end:
 ; palv: the ULA's palette writes, (entry << 4) | (colour ^ 7), MODE 1's
 ; logical colour c in the entries with c's high bit at bit 3, its low at 1
 palv:   .repeat 16, e
         .byte e << 4 | ((($3560 >> (4 * (((e >> 3) & 1) * 2 + ((e >> 1) & 1)))) & 7) ^ 7)
         .endrepeat
-cmd_main: .byte "LOAD L32M", 13
         .import __P1H_START__, __P1H_SIZE__
         .import __IMG_START__, __IMG_LAST__
+        .import __MAPD_LOAD__, __MAPD_RUN__, __CODE_LOAD__, __CODE_RUN__, __SHIP_RUN__, __SHIP_SIZE__

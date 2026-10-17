@@ -75,6 +75,24 @@ def map32():
     return out
 
 
+def panel():
+    """The panel's map: its first 4 rows (MODE 1, 128 bytes a row of 16 characters),
+    32 x 32 tiles a pixel pair each: line l, pixel pair t the tile x = t - MAPX, z = MAPZ
+    - l (mod 32); sea colour 1, land 3, the pad its dither (even, odd line)."""
+    mapx, mapz = 16 - L.PADN // 2, 15 + L.PADN // 2
+    m, cols = map32(), colours()
+    pd = G.dither_bytes(L.PADC)
+    img = bytearray(4 * 128)
+    for ln in range(32):
+        for t in range(32):
+            e = cols[m[32 * ((mapz - ln) & 31) + ((t - mapx) & 31)] >> 4]
+            v = pd[ln & 1] if e == L.PADC else 0x0F if e in L.SEAC else 0xFF
+            mask = 0xCC >> 2 * (t & 1)
+            o = 128 * (ln >> 3) + 8 * (t >> 1) + (ln & 7)
+            img[o] = img[o] & ~mask & 255 | v & mask
+    return img
+
+
 def gametab(out):
     """gametab.inc: tools/gamegen.py's tables less MAPI (the panel's map is drawn at
     the start from MAP32), MAPX, MAPZ for the 32-tile map."""
@@ -102,15 +120,12 @@ def main():
     out = sys.argv[1]
     gametab(out)
     open(os.path.join(out, 'MAP32'), 'wb').write(map32())
+    open(os.path.join(out, 'PANELMAP'), 'wb').write(panel())
     with open(os.path.join(out, 'b32tab.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py: a colour index\'s dither bytes, even and odd lines\n')
         bs = [G.dither_bytes(e) for e in colours()]
         f.write('DCE:    .byte ' + ', '.join(f'${b[0]:02X}' for b in bs) + '\n')
         f.write('DCO:    .byte ' + ', '.join(f'${b[1]:02X}' for b in bs) + '\n')
-        cl = [2 if e == L.PADC else 0 if e in L.SEAC else 1 for e in colours()]
-        f.write('MAPC:   .byte ' + ', '.join(str(c) for c in cl + [0] * (16 - len(cl))) + '\n')
-        pd = G.dither_bytes(L.PADC)
-        f.write(f'PADE:   .byte ${pd[0]:02X}\nPADO:   .byte ${pd[1]:02X}\n')
         assert all(L.recip((G.DI0 + di) * 16) == (2 ** 21 + G.DI0 + di) // (2 * (G.DI0 + di))
                    for di in range(G.NDI))           # (init's R7L, R7H)
     EYS = 255 - max(L.HORIZON + (((L.CAMH + L.HMAX) * L.recip((G.DI0 + di) * 16) + L.HSCALE * 128)

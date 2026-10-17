@@ -9,7 +9,7 @@
 ; (glyphs, OSWORD 10, into GLY).  Then the MOS is done with: interrupts off,
 ; every VIA interrupt disabled, IRQ1V ours (irq: the MOS ROM's entry still
 ; saves A in $FC and jumps through it), low RAM zeroed, an RTI at $0D00 for a
-; stray NMI.  The tables (init), the map drawn on the panel (mappix), land
+; stray NMI.  The tables (init), the panel's map copied in (pmap), land
 ; buffer 0 and the rest below the loader cleared, the CRTC set to a one-frame MODE 1
 ; with the sync at row 28 (irq takes it from there), the palette, the
 ; interrupts on: the sync (CA1) and the user VIA's timer 1; then go.
@@ -75,20 +75,13 @@ takeover:
         lda #$40                   ; RTI: a stray NMI
         sta $0D00
         jsr init
-        lda #0                     ; the map on the panel
-        sta mdc
-        sta mdl
-@ml:    lda #0
-        sta mdp
-@mp:    jsr mappix
-        inc mdp
-        lda mdp
-        cmp #2*MAPN
+        ldx #0                     ; the map on the panel (b32/tools/gen32.py's
+@mp:    lda pmap,x                 ; image: its first 4 rows)
+        sta PANEL,x
+        lda pmap+$100,x
+        sta PANEL+$100,x
+        inx
         bne @mp
-        inc mdl
-        lda mdl
-        cmp #MAPN
-        bne @ml
         lda #0                     ; land buffer 0 and buffer 1 below here
         tay                        ; black (go clears the rest)
         ldx #>LAND0
@@ -183,4 +176,6 @@ palv:   .repeat 16, e
         .byte e << 4 | ((($3560 >> (4 * (((e >> 3) & 1) * 2 + ((e >> 1) & 1)))) & 7) ^ 7)
         .endrepeat
 cmd_main: .byte "LOAD L32M", 13
+pmap:   .incbin "PANELMAP"         ; the panel's map rows
+        .assert * - pmap = $200, error, "PANELMAP: 4 rows of 128 bytes"
         .import __ZP_SIZE__

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Merge LAND's sideways-bank code segments into the table images they run from.
 
-    python3 tools/mergebank.py BUILDDIR MAPFILE IMAGE:SEG,SEG,... ...
+    python3 tools/mergebank.py BUILDDIR MAPFILE IMAGE[@HHHH]:SEG,SEG,... ...
 
 ld65 writes each bank segment to its own file, BUILDDIR/SEG, placed (src/land.cfg)
 in space the tables leave free.  Each IMAGE (TABLES, TABLES2, TABLES7: 16K, bank
@@ -28,15 +28,15 @@ def segments(mapfile):
     return out
 
 
-def merge(build, image, segs, starts):
+def merge(build, image, segs, starts, base=BASE):
     """Copy the segments segs (files in build) into build/image, each at its start
-    address less BASE."""
+    address less base (the image's address: BASE, $8000, unless given)."""
     path = f'{build}/{image}'
     img = bytearray(open(path, 'rb').read())
     assert len(img) == SIZE, f'{image}: {len(img)} bytes, not 16K'
     for seg in segs:
         code = open(f'{build}/{seg}', 'rb').read()
-        off = starts[seg] - BASE
+        off = starts[seg] - base
         assert 0 <= off and off + len(code) <= SIZE, f'{seg}: not within the bank'
         assert not any(img[off:off + len(code)]), f'{image}: {seg} over the tables or another segment'
         img[off:off + len(code)] = code
@@ -48,7 +48,8 @@ def main():
     starts = segments(mapfile)
     for spec in sys.argv[3:]:
         image, segs = spec.split(':')
-        merge(build, image, segs.split(','), starts)
+        image, _, base = image.partition('@')         # IMAGE@HHHH: the image at $HHHH
+        merge(build, image, segs.split(','), starts, int(base, 16) if base else BASE)
 
 
 if __name__ == '__main__':

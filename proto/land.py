@@ -50,7 +50,8 @@ import swatch35 as SW
 import nula as NU
 
 # The map
-MAP = 64                  # tiles a side (wrapping): landgen's MAP table, 64 bytes a row
+MAP = int(os.environ.get('LAND_MAP', 64))  # tiles a side (wrapping): landgen's MAP
+                          # table, MAP bytes a row (LAND_MAP=32: the 32K build's)
 HSCALE = 16               # height units a tile
 HMAX = int(os.environ.get('LAND_HMAX', 15))     # heights 0..HMAX: the MAP byte's low
                           # nibble, SYT7's 2 HMAX + 1 entries in a 32-byte row and
@@ -122,6 +123,10 @@ STEPS = 16                # camera positions a tile: a step is 256 / STEPS in 8.
                           # (land.s's cxs, czs are sixteenths)
 
 
+SINES32 = [(2, 1, -1), (2, 2, 1), (2, -2, 1), (2, 3, 2), (1, 2, 5), (1, 5, 3)]   # (amplitude,
+                          # x and z cycles a wrap): the 32-tile map's formula
+
+
 def heightmap():
     """The map: (h, base), each a (MAP, MAP) int array indexed [z, x].
 
@@ -129,15 +134,23 @@ def heightmap():
     under SEAS is SEA (0), the rest are 1..HMAX by linear scaling of the sum above
     SEAS, rounded; then corners 0..PADN both ways are PADH, the landing pad.  base is
     Lander's tile hash, bits 2 and 3 of its 24-bit altitude (s + 10) / 20 * 2^24:
-    the arc build's land kinds (arc_tile); the others' colours do not use it."""
+    the arc build's land kinds (arc_tile); the others' colours do not use it.
+
+    A 32-tile map (LAND_MAP=32) samples a formula of the same shape with its
+    frequencies about halved, SINES32, scaled by 0.96: Lander's own at 32 samples
+    a wrap is twice as steep a tile, and some 11% of strips would then break
+    strip.ok's guarantees (rows overlapping); this one breaks none."""
     s = np.zeros((MAP, MAP))
     base = np.zeros((MAP, MAP), dtype=int)
     t = 2 * math.pi / MAP
     for z in range(MAP):
         for x in range(MAP):
             a, b = x * t, z * t
-            s[z, x] = (2 * math.sin(a - 2 * b) + 2 * math.sin(4 * a + 3 * b) + 2 * math.sin(3 * b - 5 * a)
-                       + 2 * math.sin(7 * a + 5 * b) + math.sin(5 * a + 11 * b) + math.sin(10 * a + 7 * b))
+            if MAP == 32:
+                s[z, x] = sum(k * math.sin(p * a + q * b) for k, p, q in SINES32) * 0.96
+            else:
+                s[z, x] = (2 * math.sin(a - 2 * b) + 2 * math.sin(4 * a + 3 * b) + 2 * math.sin(3 * b - 5 * a)
+                           + 2 * math.sin(7 * a + 5 * b) + math.sin(5 * a + 11 * b) + math.sin(10 * a + 7 * b))
             raw = int((s[z, x] + 10) / 20 * (1 << 24))
             base[z, x] = (raw >> 2) & 3
     land = s >= SEAS

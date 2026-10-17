@@ -5,3 +5,4 @@ __pycache__/
 /*.png
 proto/*.png
 jsbeeb-*.json.gz
+build32/

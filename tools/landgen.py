@@ -165,9 +165,9 @@ def build():
         img[ADDR[name] - BASE + off] = val & 255
 
     hm, _ = L.heightmap()
-    for z in range(L.MAP):
-        for x in range(L.MAP):
-            put('MAP', z * 64 + x, int(hm[z, x]) | (int(L.TILERND[z, x]) << 4))
+    for z in range(64):                         # (a 32-tile map repeated 2 x 2)
+        for x in range(64):
+            put('MAP', z * 64 + x, int(hm[z % L.MAP, x % L.MAP]) | (int(L.TILERND[z % L.MAP, x % L.MAP]) << 4))
     for a in range(1, 32):
         for d in range(64):
             put('DQT', a * 64 + d, d // a)
@@ -238,9 +238,9 @@ def build2():
             img[ADDRA['CTE'] - BASE + e - NU.LENT] = de
             img[ADDRA['CTO'] - BASE + e - NU.LENT] = do
         return img
-    for z in range(L.MAP):
-        for x in range(L.MAP):
-            de, do = dither_bytes(L.colour(hm, x, z, 0, 0))
+    for z in range(64):
+        for x in range(64):
+            de, do = dither_bytes(L.colour(hm, x % L.MAP, z % L.MAP, 0, 0))
             img[ADDR2['CMAPE'] - BASE + z * 64 + x] = de
             img[ADDR2['CMAPO'] - BASE + z * 64 + x] = do
     return img

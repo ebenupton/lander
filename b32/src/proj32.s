@@ -123,8 +123,7 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         jsr lerp4
         sta WH+NX-1
         pla
-        sta WH
-        lda WH                     ; HLO, HHI: the row's heights' range
+        sta WH                     ; HLO, HHI: the row's heights' range (A = WH)
         sta HLO
         sta HHI
         ldy #NX-1                  ; (two heights a pass: NX-1 even)
@@ -490,14 +489,13 @@ xrow:   lda rh                     ; Q = r << 7 ...
 ; by q = (cxs + 8) & 15 on that row and the row before (16 bytes back in HT:
 ; one map row farther), then down by czs.  In: ZB, cxs, czs, HT.  Out: HGV.
 ; Clobbers A, X, Y, MT0, MT1, MQB, LQ, tmp.
-hgnd:   lda ZB                     ; X = 16 (ZB - ZSHIP) + 4 + (cxs >= 8)
-        sec
-        sbc #ZSHIP
+hgnd:   lda ZB                     ; X = 16 (ZB - ZSHIP) + 4 + (cxs >= 8): 16 ZB
+        asl a                      ; (mod 256) + 1 (the fourth ASL's C: ZB's
+        asl a                      ; bit 4, set for ZB = 16 or 17) + 3 - 16 ZSHIP
         asl a
         asl a
-        asl a
-        asl a
-        adc #4                     ; (C clear: ZB - ZSHIP < 16)
+        adc #<(3-16*ZSHIP)
+        .assert ZFCLIP = 16, error, "hgnd: ZB (ZFCLIP or ZFCLIP+1) has bit 4 set"
         ldy cxs
         cpy #8
         adc #0
@@ -558,35 +556,33 @@ eyrow:  lda rl                     ; r >> 5 = (rl & $E0 | rh) rotated left 3
 hsh:    ldx #NX-1
 @c:     lda SHF
         bmi @b
-        txa                        ; (X: the column; Y: 16 j + the column)
-        clc
-        adc #$70
+        txa                        ; (X: the column, < 16; Y: 16 j + the column,
+        ora #$60                   ; j 6 down to 0: the borrow past row 0 ends it)
         tay
-:       lda HT-16,y                ; rows 7 .. 1 from the row before
-        sta HT,y
-        tya
         sec
+:       lda HT,y                   ; rows 7 .. 1 from the row before
+        sta HT+16,y
+        tya
         sbc #16
         tay
-        cmp #16
         bcs :-
         lda HTN,x
         sta HT,x
-        jmp @n
-@b:     txa
+        bcc @n                     ; (always: the loop's borrow)
+@b:     txa                        ; Y = 16 j + the column + $90, j 0 up to 6:
+        ora #$90                   ; the carry out past row 6 ends it
         tay
-:       lda HT+16,y                ; rows 0 .. 6 from the row after
-        sta HT,y
-        tya
         clc
+:       lda HT+16-$90,y            ; rows 0 .. 6 from the row after
+        sta HT-$90,y
+        tya
         adc #16
         tay
-        cmp #$70
         bcc :-
         lda HTN,x
         sta HT+$70,x
 @n:     dex
         bpl @c
-        lda #0
-        sta SHF
+        inx                        ; X = $FF here (the dex/bpl fell through): 0
+        stx SHF
         rts

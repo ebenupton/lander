@@ -72,7 +72,7 @@ def apply(c):
         if len(idxs) > 1 and near is None:
             return f'old_text not unique in {f}'
         k = min(idxs, key=lambda i: abs(lineof(t, i) - near)) if near else idxs[0]
-        if near and abs(lineof(t, k) - near) > 60:
+        if near and abs(lineof(t, k) - near) > 150:
             return f'old_text found only {abs(lineof(t, k) - near)} lines from line {near}'
         if old.count('\n:') + old.startswith(':') != rep.count('\n:') + rep.startswith(':'):
             pass                     # (the anonymous labels: counted by the build's result)

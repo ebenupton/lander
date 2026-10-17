@@ -67,7 +67,9 @@ PADX    = PADN/2                   ; the pad's middle tile: the start
 ; gout, so the first projection has the camera.  Clobbers A, X, Y, g0, g1, gt0,
 ; gt2..gt4, su, scrg.
         .segment "BOOT"
-ginit:  lda #$5A                   ; (the LFSR's seed: never 0)
+ginit:  lda #$FF                   ; (the map's dot: none yet)
+        sta mky
+        lda #$5A                   ; (the LFSR's seed: never 0)
         sta rnd
         ldx #NPART-1
         lda #0
@@ -1153,92 +1155,93 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         sta (bsg),y
 @o:     rts
 
-; marker: the ship's tile on the map (the panel, loaded with the map drawn):
-; its pixel magenta on both its lines while GSHV is set -- tile row r = MAPZ -
-; z, pixel t = x + MAPX (the tile the ship is over, mod 32), lines 2r and 2r +
-; 1: PANEL + 64 (r >> 2) + 8 (t >> 2) + 2 (r & 3), and the next byte (MODE 5,
-; 64 bytes a character row).  The two bytes it covers are kept (mkb) and put
-; back when it moves (mka: the first's address, high byte 0 for none).
-; Clobbers A, X, Y, g0, g1, gt0..gt3.  Called by gpost.
+; marker: the ship's dot on the map (the panel, loaded with the map drawn):
+; the pixel of the tile the ship is over, two lines tall (square), magenta,
+; while GSHV is set -- column t = x + MAPX, top line y = 2 (MAPZ - z), mod 64.
+; The two bytes it covers are kept (mkb) and put back when it moves (mky, mkt:
+; its place, mky $FF none: ginit's).  Clobbers A, X, Y, g0, gt0..gt3.
+; Called by gpost.
         .assert <PANEL = 0 && (>PANEL & 1) = 0, error, "marker: PANEL page-aligned, even"
-marker: lda #0                     ; (no tile: address 0)
-        sta gt0
-        sta gt1
+marker: ldx #$FF                   ; (no dot)
         lda GSHV
         beq @h
-        lda #MAPZ                  ; r = MAPZ - z (mod 32): 64 (r >> 2) + 2 (r &
-        sec                        ; 3), high byte r >> 4
+        lda #MAPZ                  ; y = 2 (MAPZ - z)
+        sec
         sbc sz+2
-        and #MAPN-1
-        tax
-        and #3
         asl a
-        sta gt0
-        txa
-        and #$0C
-        asl a
-        asl a
-        asl a
-        asl a
-        ora gt0
-        sta gt0
-        txa
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora #>PANEL
-        sta gt1
-        lda sx+2                   ; t = x + MAPX (mod 32): + 8 (t >> 2), its
-        clc                        ; pixel's bits (gt2)
+        and #63
+        tax                        ; X = y
+        lda sx+2                   ; t = x + MAPX
+        clc
         adc #MAPX
         and #MAPN-1
-        tax
-        and #$1C
-        asl a
-        ora gt0
         sta gt0
-        txa
-        and #3
-        tax
-        lda PIXM,x
-        sta gt2
-@h:     lda gt0
-        cmp mka
+@h:     cpx mky                    ; unmoved?
         bne @mv
-        lda gt1
-        cmp mka+1
-        beq @r                     ; (unmoved)
-@mv:    lda mka+1                  ; the old tile's bytes back
-        beq @n
-        sta g0+1
-        lda mka
-        sta g0
-        ldy #1
-@b:     lda mkb,y
-        sta (g0),y
-        dey
-        bpl @b
-@n:     lda gt0                    ; the new one's address and bytes kept, its
-        sta mka                    ; pixel made magenta (colour 2: the pixel's
-        sta g0                     ; high-nibble bit)
-        lda gt1
-        sta mka+1
+        lda gt0
+        cmp mkt
         beq @r
-        sta g0+1
-        lda gt2
+@mv:    stx gt1                    ; (the new y)
+        ldx mky                    ; the old dot's bytes back
+        bmi @n
+        lda mkb
+        jsr @put
+        inx
+        lda mkb+1
+        jsr @put
+@n:     ldx gt1                    ; the new one: its place and bytes kept, its
+        stx mky                    ; pixel made magenta (colour 2: the pixel's
+        bmi @r                     ; high-nibble bit)
+        lda gt0
+        sta mkt
+        and #3
+        tay
+        lda PIXM,y
+        sta gt2                    ; (the pixel's bits)
         and #$F0
-        sta gt3
-        ldy #1
-@p:     lda (g0),y
-        sta mkb,y
-        ora gt2                    ; (the pixel's bits cleared, then set to
-        eor gt2                    ; magenta's)
+        sta gt3                    ; (its magenta)
+        jsr @mag
+        sta mkb
+        inx
+        jsr @mag
+        sta mkb+1
+@r:     rts
+@mag:   jsr mkad                   ; line X's byte: A = it as was, the pixel
+        lda (g0),y                 ; magenta in it
+        pha
+        ora gt2
+        eor gt2
         ora gt3
         sta (g0),y
-        dey
-        bpl @p
-@r:     rts
+        pla
+        rts
+@put:   pha                        ; line X's byte = A
+        jsr mkad
+        pla
+        sta (g0),y
+        rts
+; mkad: (g0) = the panel's byte for line X & 63, column mkt (0..31): PANEL +
+; 64 (y >> 3) + 8 (t >> 2) + (y & 7).  Out: Y = 0.  Clobbers A.
+mkad:   txa
+        and #$38                   ; 64 (y >> 3): the low byte's bits 6-7, the
+        asl a                      ; high byte's bit 0 (C)
+        asl a
+        asl a
+        sta g0
+        lda #>PANEL
+        adc #0
+        sta g0+1
+        txa
+        and #7
+        ora g0
+        sta g0
+        lda mkt                    ; + 8 (t >> 2)
+        and #$1C
+        asl a
+        ora g0
+        sta g0
+        ldy #0
+        rts
 
 PIXG    = PIXM                     ; pixel 0..3's bits (LAND's)
 
@@ -1268,8 +1271,9 @@ satt:   .res 1                     ; last written (ginit's: $FF)
 rnd:    .res 1                    ; rand's state
 scrg:   .res 1                    ; the screen being written to (high byte)
 pnext:  .res 1                    ; emit's last dot
-mka:    .res 2                     ; marker's: the tile's first byte ($xx00:
-mkb:    .res 2                     ; none) and what its two held
+mky:    .res 1                     ; marker's: the dot's top line ($FF: none),
+mkt:    .res 1                     ; its column, and what its two bytes held
+mkb:    .res 2
         .segment "GAME"
         .include "gametab.inc"
         .segment "GA0"             ; (the dots: b32.cfg's GA0, GA1, P1L, LOWP)

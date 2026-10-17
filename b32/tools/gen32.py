@@ -79,16 +79,15 @@ def panel():
     """The panel's map: its first 8 rows, MODE 5 (64 bytes a row of 8 characters, 4
     pixels a byte), 32 x 32 tiles a pixel and two lines each (square): lines 2l and 2l
     + 1, pixel t the tile x = t - MAPX, z = MAPZ - l (mod 32); sea colour 1, land 3,
-    the pad its dither (even, odd line).  Line y, pixel t's byte: 64 (y >> 3) + 8 (t >>
+    the pad black.  Line y, pixel t's byte: 64 (y >> 3) + 8 (t >>
     2) + (y & 7), its bits $88 >> (t & 3) (as MODE 1's)."""
     mapx, mapz = 16 - L.PADN // 2, 15 + L.PADN // 2
     m, cols = map32(), colours()
-    pd = G.dither_bytes(L.PADC)
     img = bytearray(8 * 64)
     for y in range(64):
         for t in range(32):
             e = cols[m[32 * ((mapz - (y >> 1)) & 31) + ((t - mapx) & 31)] >> 4]
-            v = pd[y & 1] if e == L.PADC else 0x0F if e in L.SEAC else 0xFF
+            v = 0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF
             mask = 0x88 >> (t & 3)
             o = 64 * (y >> 3) + 8 * (t >> 2) + (y & 7)
             img[o] = img[o] & ~mask & 255 | v & mask
@@ -96,7 +95,7 @@ def panel():
 
 
 # The readout's characters (gchars's order: "0123456789. FPS"), 3 pixels by 7 lines
-# in a 4-pixel MODE 5 cell (the 4th pixel and 8th line blank), colour 3.
+# in a 4-pixel MODE 5 cell (the 4th pixel and the top line blank), colour 3.
 FONT = {
     '0': '.#. #.# #.# #.# #.# #.# .#.', '1': '.#. ##. .#. .#. .#. .#. ###',
     '2': '.#. #.# ..# .#. #.. #.. ###', '3': '##. ..# ..# .#. ..# ..# ##.',
@@ -113,7 +112,7 @@ def glyphs():
     """GLY: 8 bytes a character (its lines), gchars's order."""
     out = bytearray()
     for c in '0123456789. FPS':
-        rows = FONT[c].split() + ['...']
+        rows = ['...'] + FONT[c].split()   # (a blank line on top: off the map)
         for r in rows:
             out.append(sum(0x88 >> i for i in range(3) if r[i] == '#'))
     return out

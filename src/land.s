@@ -13,17 +13,17 @@
 ; which build.sh splices into the table images at their addresses.
 ; landsyms.inc (the symbols shipb.s needs, L_ before each) is cut from
 ; labels.txt; then tools/shipgen.py and shipb.s make SHIPB (bank 6).
-; tools/mkdfs.py writes lander.ssd: !BOOT (the chooser, typed in), GO (the
-; loader), $.TABLES7 (the same in every version) and each version's LAND,
-; LANDS, TABLES, TABLES2 and SHIPB in its directory (M: MODE 1, C: CPC, N:
-; NULA).
+; tools/mkdfs.py writes lander.ssd: !BOOT (the chooser, typed in), $.TABLES7
+; (the same in every version), S.LAND and S.TABLES (the same in the MODE 2
+; versions) and each version's LANDS, TABLES2 and SHIPB in its directory (M:
+; MODE 1, with its LAND and TABLES; C: CPC; N: NULA; A: arc).
 ;
 ; Starting.  The chooser selects the version's mode with every colour black
-; and the cursor off, selects its directory and EXECs GO, which *LOADs LAND
-; and *RUNs LANDS.  LANDS (segment BOOT, the end of this file) finds four
-; sideways RAM banks (find_ram), patches each bank switch's write select for
-; the board (wpatch), loads each image through $3000 into its bank, closes GO
-; (the filing system is then idle: its workspace from $0E00 is LAND's), makes
+; and the cursor off, selects its directory and *RUNs LANDS.  LANDS (segment
+; BOOT, the end of this file) *LOADs LAND, finds four sideways RAM banks
+; (find_ram), patches each bank switch's write select for the board (wpatch),
+; loads each image through $3000 into its bank, closes !BOOT (the filing
+; system is then idle: its workspace from $0E00 is LAND's), makes
 ; the glyphs, narrows the screen, clears screen 0, sets the palette and jumps
 ; to `go`.  go runs init, hooks the vertical sync event, turns the VIAs' other
 ; interrupts off, runs G_INIT (bank 5: the game's start) and enters the main
@@ -43,7 +43,9 @@
 ;
 ; The MODE 2 builds (-D MODE2; proto/nula.py): NULA (build.sh nula, -D NULA),
 ; the VideoNULA's sixteen colours, flat; CPC (build.sh cpc, -D CPC), the 27
-; colours of 1 x 2 dithers of MODE 2's eight, as checkerboards.  Everything
+; colours of 1 x 2 dithers of MODE 2's eight, as checkerboards; arc (build.sh
+; arc, -D NULA -D ARC), Lander's own colours, the row's brightness added
+; (pcol5), as checkerboards of the VideoNULA's sixteen.  Everything
 ; here works in MODE 1's pixels, 256 across and four a byte; a MODE 2
 ; byte is two pixels, each showing the even one of the pair it covers, so only
 ; the masks (PM) and the colour bytes (bank 5's, landgen's) differ, with the
@@ -158,8 +160,9 @@
 ;     $9100), B4S2 ($9200), B4S ($A081), B4C ($A181), B4V1-3 ($B600-$B800),
 ;     B4Z ($B900)
 ;   bank 5, TABLES2: CMAPE $8000, CMAPO $9000 (each tile's dither bytes, even
-;     and odd lines, by map row * 64 + x), pcol5 at $A000, game.s from $A100,
-;     GLY5 $BE00 (the game's letters)
+;     and odd lines, by map row * 64 + x; arc: CMAPE the tile's kind and
+;     slope, CTE $90EC and CTO $92EC the bytes), pcol5 at $A000, game.s from
+;     $A100, GLY5 $BE00 (the game's letters)
 ;   bank 6, SHIPB (shipb.s): B6_KEYS $8000, B6_SHIP $8003 and the ship's spans
 ;   bank 7, TABLES7: R7L, R7H, SYT7 $8200, B1T $9800, CLP7, PINL7, PINR7,
 ;     LERPQ7 $B100, SYL7, SYH7, LQLO, LQHI, prow7 and its helpers ($B480-
@@ -171,6 +174,7 @@
 .ifdef MODE2
         .include "mode2.inc"       ; YELB, MAGB, NULAPAL, NFONTCH, NFONT
         .assert .defined(CPC) .xor .defined(NULA), error, "MODE2: CPC or NULA"
+        .assert .defined(NULA) || (.not .defined(ARC)), error, "ARC: with NULA"
 .endif
 ; PM m: MODE 1 pixel mask m as drawn.  The MODE 2 builds (-D MODE2: a byte
 ; two pixels, each showing the even one of the two of LAND's it covers) make
@@ -729,11 +733,13 @@ init:   lda #0
 ; Sets ZB, FACT, RN and nr from czs.  If the map columns (cxt) or rows (czt +
 ; ZB) differ from last frame's (pkx, pkz): refetches CX and every row's raw
 ; height into HT (bank 4's MAP via HPZ), or for a step of one row has zsh4
-; fetch the new row alone (HTN, SHF: prow7's hsh shifts HT), then bank 5's
-; pcol5 remakes the strips' box bytes (CLE, CLO) as needed.  Then, changed or
-; not, bank 7's prow7 makes the rows' points (PX, PY: x from B1T and r, y from
-; SYT7 by height less the ground's, hgnd, plus eyrow's EYV for CAME), the clip
-; planes' rows interpolated by 1 - fz, and np = NX.
+; fetch the new row alone (HTN, SHF: prow7's hsh shifts HT).  Then, changed
+; or not, bank 5's pcol5 remakes the strips' box bytes (CLE, CLO) as needed
+; (the arc build's change with czt, which can change on the same rows: czt +
+; 1 as czs goes from 15 to 0), and bank 7's prow7 makes the rows' points (PX,
+; PY: x from B1T and r, y from SYT7 by height less the ground's, hgnd, plus
+; eyrow's EYV for CAME), the clip planes' rows interpolated by 1 - fz, and np
+; = NX.
 ; In: cxt, cxs, czt, czs, CAME.  Out: ZB, RN, FACT, nr, np, CX, HT, HTN,
 ; SHF (0 after), PX, PY, HGV, EYV, pkx, pkz, CLE, CLO, ldCLE; bank 4 paged.
 ; Clobbers A, X, Y, tmp, rl, rh, syp, lp, MT0, MT1, $8E-$9E.  Called by the
@@ -880,14 +886,14 @@ project:
         iny
         sty nr
         lda cxt                    ; the same columns and map rows as last frame
-        cmp pkx                    ; (pkx, pkz): HT, CLE, CLO stand, prow7 only
+        cmp pkx                    ; (pkx, pkz): HT stands, pcol5 and prow7 only
         bne @cx
         lda czt
         clc
         adc ZB
         cmp pkz
         bne @zs
-        jmp @p7
+        jmp @p5
 @zs:    jsr zsh4                   ; (bank 4) a step of one map row: the new
         bcc @hl                    ; row's heights into HTN, SHF set for prow7's
         jmp @p5                    ; hsh to shift HT, C set; C clear: all anew
@@ -934,7 +940,7 @@ project:
         bpl @hc
 @p5:    PAGE 5                     ; (bank 5) the land strips' box bytes
         jsr pcol5
-@p7:    PAGE 7                     ; (bank 7) the rows' points
+        PAGE 7                     ; (bank 7) the rows' points
         jsr prow7
         PAGE 4
         rts
@@ -3642,20 +3648,24 @@ s2_o:   lda (zp_),y                ; an odd line (a row's last line is odd: the
 s2_m:   jmp s2_n
 
 ; ---------------------------------------------------------------- LANDS
-; LANDS: the start-up, a separate file *RUN at $7000 by GO (the chooser has
+; LANDS: the start-up, a separate file *RUN at $7000 by the chooser (which has
 ; set the mode, the palette all black, the cursor off and the version's
-; directory, and GO has *LOADed LAND at $1900).  It runs one time: the
-; sideways banks are found (find_ram) and pg4..pg7's and setup's write selects
-; patched for the board (wpatch); the four bank files are *LOADed at $3000 in
-; turn and copied up (ldbank: TABLES7 to bank 7, SHIPB to 6, TABLES2 to 5,
-; TABLES to 4, which is left paged in); the EXEC file is closed; the readout's
+; directory).  It runs one time: LAND is *LOADed at $1900 (S.LAND in a MODE 2
+; build: the three share it); the sideways banks are found (find_ram) and
+; pg4..pg7's and setup's write selects patched for the board (wpatch); the four
+; bank files are *LOADed at $3000 in turn and copied up (ldbank: TABLES7 to
+; bank 7, SHIPB to 6, TABLES2 to 5, TABLES, S.TABLES in a MODE 2 build, to 4,
+; which is left paged in); the EXEC file (!BOOT) is closed; the readout's
 ; and the game's glyphs are made (glyphs, glyphs5); the CRTC narrows the
 ; screen to 64 bytes by 20 rows; the shown screen is cleared and the palette
 ; set; then LAND's `go`.  LANDS sits at $7000..$740A ($7534 at most: the NULA
 ; build's), inside screen 1 ($5800..$7FFF), which init clears: nothing returns
 ; here.
         .segment "BOOT"
-start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
+start:  ldx #<cmd_land             ; LAND
+        ldy #>cmd_land
+        jsr OSCLI
+        lda ROMCOPY                ; the ROM in at entry: find_ram restores it
         sta old_bank
         jsr find_ram               ; BANKMAP, board; C set: under four banks
         bcc :+
@@ -3677,7 +3687,7 @@ start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
         ldy #>cmd_load
         lda #BANK
         jsr ldbank
-        lda #119                   ; OSBYTE 119: close the EXEC file (GO).
+        lda #119                   ; OSBYTE 119: close the EXEC file (!BOOT).
         jsr OSBYTE                 ; No filing system call follows, so its
                                    ; workspace from $0E00 (and the MOS's pages
                                    ; $0400..$0CFF) is LAND's; page $0D stays
@@ -3719,7 +3729,13 @@ start:  lda ROMCOPY                ; the ROM in at entry: find_ram restores it
 .endif
         jmp go
 
+.ifdef MODE2
+cmd_land: .byte "LOAD S.LAND", 13
+cmd_load: .byte "LOAD S.TABLES 3000", 13
+.else
+cmd_land: .byte "LOAD LAND", 13
 cmd_load: .byte "LOAD TABLES 3000", 13
+.endif
 cmd_load3: .byte "LOAD SHIPB 3000", 13
 cmd_load7: .byte "LOAD $.TABLES7 3000", 13
 cmd_load2: .byte "LOAD TABLES2 3000", 13
@@ -4859,14 +4875,23 @@ PIXM:   .byte PM($88), PM($44), PM($22), PM($11)
 ; row, map row czt + ZB - ns, is window row o + ns - 1), so with o in 0..3 the
 ; rows not yet made (outside VLO..VHI) are made and VLO, VHI widened.  When
 ; the column changes, or o leaves 0..3, the window is remade: WK = czt + ZB,
-; rows 1..7 (o 1).  Out: ldCLE = 16 o (setup's su_l7 adds it to its row
-; index); WX, WK, WO, VLO, VHI, WE.  In: cxt, czt, ZB, CX.  Clobbers A, X, Y,
-; WM.  Caller: project (PAGE 5 around it).
+; rows 1..7 (o 1).  The arc build's bytes are by the row as well: CMAPE holds
+; the tile's 16 kind + slope, and its bytes are CTE's and CTO's at that plus
+; j, its row's brightness (the near row's corner row, czt + ZBACK - z, 3..13:
+; land.colour), so the window is remade when czt changes too (WZ).  Out: ldCLE
+; = 16 o (setup's su_l7 adds it to its row index); WX, WK, WO, VLO, VHI, WE
+; (WZ).  In: cxt, czt, ZB, CX.  Clobbers A, X, Y, WM.  Caller: project (PAGE
+; 5 around it).
 pcol5:  lda cxt
         cmp WX
         beq :+
         jmp @f                     ; (new columns: all anew)
 :
+.ifdef ARC
+        ldy czt                    ; (arc: a new czt, all anew: every row's
+        cpy WZ                     ; brightness has changed)
+        bne @f
+.endif
         lda WK                     ; o = WK - czt - ZB + 1
         clc
         sbc czt                    ; (C clear: WK - czt - 1)
@@ -4915,6 +4940,9 @@ pcol5:  lda cxt
         rts
 @f:     sta WX                     ; (A = cxt) WK = czt + ZB; rows 1..7; o 1
         lda czt
+.ifdef ARC
+        sta WZ
+.endif
         clc
         adc ZB
         sta WK
@@ -4933,8 +4961,9 @@ pcol5:  lda cxt
         .assert <CLE = 0 && <CLO + 48 < $100, error, "crow: CLE page-aligned (@se's operand is 16 m); CLO + 48 in its page"
 ; crow: window row A (m, 0..9): map row (WK - m) & 63, entries 0..NX-2 by CX,
 ; into CLE + 16 m and CLO + 16 m (self-modifying: @le/@lo's operands the map
-; row's 64-byte rows of CMAPE and CMAPO, @se/@so's the window row).  In: A, WK,
-; CX.  Out: WM = m.  X kept; clobbers A, Y.  Caller: pcol5.
+; row's 64-byte rows of CMAPE and CMAPO, @se/@so's the window row; arc:
+; @le's CMAPE's, @ce/@co's CTE and CTO's by the row's j).  In: A, WK, CX
+; (czt).  Out: WM = m.  X kept; clobbers A, Y.  Caller: pcol5.
 crow:   sta WM
         asl a
         asl a
@@ -4949,29 +4978,49 @@ crow:   sta WM
         sta @so+2
         lda WK
         sec
-        sbc WM
+        sbc WM                     ; (no borrow: WK >= ZFCLIP > m)
+.ifdef ARC
+        tay                        ; (arc) j - ZBACK = czt - (WK - m), C set:
+        eor #$FF                   ; CTE, CTO + j at @ce, @co (their pages'
+        adc czt                    ; starts + j - ZBACK, landgen's ADDRA)
+        sta @ce+1
+        sta @co+1
+        tya
+.endif
         and #63                    ; z = (WK - m) & 63
         tay
         lsr a
         lsr a
         ora #>CMAPE                ; CMAPE + 64 z: page $80 + (z >> 2),
         sta @le+2
+.ifndef ARC
         ora #>$1000                ; CMAPO's a page $10 on
         sta @lo+2
+.endif
         tya
         lsr a
         ror a
         ror a
         and #$C0                   ; low byte (z & 3) << 6
         sta @le+1
+.ifndef ARC
         sta @lo+1
+.endif
         txa
         pha
         ldx #NX-2
 @c:     ldy CX,x
 @le:    lda CMAPE,y
+.ifdef ARC
+        tay                        ; (arc) the tile's 16 kind + slope
+@ce:    lda CTE & $FF00,y
+.endif
 @se:    sta CLE,x
+.ifdef ARC
+@co:    lda CTO & $FF00,y
+.else
 @lo:    lda CMAPO,y
+.endif
 @so:    sta CLO,x
         dex
         bpl @c
@@ -4986,7 +5035,13 @@ VLO:    .byte 0                    ; the rows made: VLO..VHI
 VHI:    .byte 0
 WE:     .byte 0                    ; o + 7
 WM:     .byte 0                    ; crow's m
+.ifdef ARC
+WZ:     .byte $FF                  ; (arc) the window's czt
+.endif
         .assert * <= $A100, error, "pcol5: bank 5 from $A100 is the game's (game.s)"
+.ifdef ARC
+        .assert <(CTE + ZBACK) = 0 && <(CTO + ZBACK) = 0, error, "crow: CTE, CTO at a page's start less ZBACK"
+.endif
 
         .include "game.s"
 

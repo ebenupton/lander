@@ -39,7 +39,7 @@ B = os.path.join(ROOT, 'build')
 RET = 0xFF00                                     # where a call returns to
 PIXM = LG.NU.PIXM                                # each pixel's mask (proto/nula.py)
 LG.NU.check_build(B)
-DB = [LG.dither_bytes(e) for e in range(35)]     # each dither: even, odd line bytes
+DB = [LG.dither_bytes(e) for e in range(LG.NU.entries())]  # each entry's even, odd line bytes
 FIXED = [(128, 98), (127, 99), (17, 87), (238, 124), (19, 86), (236, 125)]
 
 

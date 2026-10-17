@@ -46,7 +46,9 @@ hues has a ramp of swatch35's dithers (RAMPS), dark to light, indexed by the col
 green channel + the brightness, at most 15.  The ramps keep off the land's and the
 sea's dithers (proto/land.py's LAND and SEAC; 19, the floor's grey, is the pad's PADC).
 Over the pitches drawn faces 0-4 take 30, 20 and 9, faces 5 and 6 take 8, face 7
-takes 19 and face 8 takes 13; the ramps' other steps go unreached.
+takes 19 and face 8 takes 13; the ramps' other steps go unreached.  The arc build's
+faces take Lander's colours themselves (proto/nula.py's entry for the colour's kind,
+ARCSHIP, and the brightness).
 
 Lines: canvas() draws a stored entry's visible faces in face order with the reference
 rasteriser tri() (the exhaust last, over the floor), and spans() reads each line of
@@ -174,6 +176,8 @@ def shade(p, f, ng):
     ny = math.sin(a) * MN[f][0] + math.cos(a) * MN[f][1]
     br = SH.lander_brightness(-1 if ng else 1, int(ny * SH.ONE))
     col = SH.FACES[f]['colour']
+    if LG.NU.arc():                # Lander's colour itself (proto/nula.py)
+        return LG.NU.lentry(LG.NU.ARCSHIP[col], br)
     return RAMPS[HUE[col]][min(15, (col >> 4 & 15) + br)]
 
 
@@ -392,7 +396,7 @@ def write(out):
     exr = [max(l[1][-1] for l in ls) - 1 for ls in lss]
     assert all(-17 <= a <= -2 and 4 <= b <= 19 for a, b in zip(exl, exr))
     tab('EXB', [(a + 17) | (b - 4) << 4 for a, b in zip(exl, exr)])
-    db = [LG.dither_bytes(e) for e in range(len(SW.ALL))]
+    db = [LG.dither_bytes(e) for e in range(LG.NU.entries())]
     tab('SHDE', [db[SHD[p][f][n]][0] for p in range(NPITCH) for f in range(NF) for n in range(2)])
     tab('SHDO', [db[SHD[p][f][n]][1] for p in range(NPITCH) for f in range(NF) for n in range(2)])
     L.append('ELO:')

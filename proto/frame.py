@@ -63,12 +63,13 @@ def strips_of(hm, cx, cz, m=M, e=0):
     entries) for strip.py: the sky, the land strips, the ground, with the margins
     above (m the least margin).  Each row has 13 points: the margin points and
     land.project's 11; the entries are BLACK, the 10 tiles' (land.colour: box i is
-    tile (xs[i], the nearer row's z)) or BLACK for the sky and ground, and BLACK.
+    tile (xs[i], the nearer row's z), the strip's land row k + 1 of len(rows) - 1)
+    or BLACK for the sky and ground, and BLACK.
     Camera (cx, cz) in 8.8 tiles, raised e."""
     xs, rows = L.project(hm, cx, cz, e)
     pts = [[(sx, sy) for sx, sy, _ in row] for _, row in rows]
     n = len(xs) - 1
-    cols = [[L.colour(hm, x, rows[k + 1][0], 0, 0) for x in xs[:-1]]
+    cols = [[L.colour(hm, x, rows[k + 1][0], k + 1, len(rows) - 1) for x in xs[:-1]]
             for k in range(len(rows) - 1)]
     sky = [(x, YSKY) for x, _ in pts[0]]
     gnd = [(x, max(YGND, y + 1)) for x, y in pts[-1]]

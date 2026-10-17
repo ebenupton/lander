@@ -70,7 +70,7 @@ B6_SHIP = 0x8003
 DBG = bool(os.environ.get('SOAKDBG'))
 PIXM = G.NU.PIXM                                 # each pixel's mask (proto/nula.py)
 G.NU.check_build(B)
-DB = [G.dither_bytes(e) for e in range(35)]      # each dither: even, odd line bytes
+DB = [G.dither_bytes(e) for e in range(G.NU.entries())]   # each entry's even, odd line bytes
 
 
 def labels(f='labels.txt'):
@@ -173,7 +173,7 @@ def main():
             e = int(os.environ['SOAKE'])
         m[CAME] = e
         if DBG:
-            print('f', f, 'e', e, 'back', m[lab['back']])
+            print('f', f, f'cx {cx:04X} cz {cz:04X}', 'e', e, 'back', m[lab['back']])
         m[lab['vcount']] = (m[lab['vflip']] + 4) & 255
         for r in ('project', 'strips'):
             cyc[r].append(call(mpu, lab[r]))

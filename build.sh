@@ -1,18 +1,20 @@
 #!/bin/sh
-# LAND's build: build/lander.ssd, a DFS disc holding three versions: MODE 1 (directory
-# M), MODE 2 with the CPC palette (C) and MODE 2 with the VideoNULA's (N); see
-# proto/nula.py.  SHIFT+BREAK runs !BOOT, an EXEC file that types in and runs the chooser
-# (src/menu.bas): it tests for a VideoNULA, offers the versions (the NULA one only when
-# found), sets the chosen mode with the palette black and the cursor off, selects the
-# version's directory and EXECs GO (*LOAD LAND, *RUN LANDS); LANDS, LAND's start, loads
-# TABLES, TABLES2, SHIPB and $.TABLES7 (the same in every version) into sideways RAM
-# banks 4, 5, 6 and 7.  Needs ca65 and ld65 (cc65) and Python 3 with numpy and scipy.
+# LAND's build: build/lander.ssd, a DFS disc holding four versions: MODE 1 (directory
+# M), MODE 2 with the CPC palette (C), MODE 2 with the VideoNULA's (N) and MODE 2 in
+# Lander's own colours through the VideoNULA (A, arc); see proto/nula.py.  SHIFT+BREAK
+# runs !BOOT, an EXEC file that types in and runs the chooser (src/menu.bas): it tests
+# for a VideoNULA, offers the versions (the NULA ones only when found), sets the chosen
+# mode with the palette black and the cursor off, selects the version's directory and
+# *RUNs LANDS, LAND's start, which loads LAND, then TABLES, TABLES2, SHIPB and
+# $.TABLES7 (the same in every version) into sideways RAM banks 4, 5, 6 and 7.  The
+# MODE 2 versions' LAND and TABLES are the same, S.LAND and S.TABLES.  Needs ca65 and
+# ld65 (cc65) and Python 3 with numpy and scipy.
 #
 #   sh build.sh              the disc: each version built in turn (MODE 1 last, so it is
 #                            what build/ holds after), its files kept in build/disc/
-#   sh build.sh VERSION      one version (mode1, cpc or nula) into build/, no disc: for
-#                            the tests, which need NULA=1 or CPC=1 in the environment to
-#                            match (build/variant says which was built)
+#   sh build.sh VERSION      one version (mode1, cpc, nula or arc) into build/, no disc:
+#                            for the tests, which need CPC=1, NULA=1 or ARC=1 in the
+#                            environment to match (build/variant says which was built)
 #   DP11_MOUSE=1 sh build.sh with the mouse (src/game.s; off without)
 #
 # Steps for a version (everything into build/):
@@ -29,7 +31,7 @@
 #      the setTl..setBh tables), as L_name, from ld65's labels.txt.
 #   6. tools/shipgen.py: shipspan.inc, the ship's pre-rasterised spans; then ca65/ld65
 #      on src/shipb.s (src/shipb.cfg): SHIPB (bank 6).
-# then for the disc, !BOOT and GO, and tools/mkdfs.py.
+# then for the disc, !BOOT, and tools/mkdfs.py.
 #
 # The bank code segments and their room (src/land.cfg places them; tools/landgen.py's
 # docstring has every table):
@@ -53,10 +55,11 @@ MOUSE=
 
 one() {                                                                         # the version $1 into build/
 case $1 in
-    nula) export NULA=1 CPC=0; CA="-D MODE2 -D NULA" ;;
-    cpc) export NULA=0 CPC=1; CA="-D MODE2 -D CPC" ;;
-    mode1) export NULA=0 CPC=0; CA= ;;
-    *) echo "build.sh: no version $1 (mode1, cpc, nula)" >&2; exit 1 ;;
+    arc) export ARC=1 NULA=0 CPC=0; CA="-D MODE2 -D NULA -D ARC" ;;
+    nula) export ARC=0 NULA=1 CPC=0; CA="-D MODE2 -D NULA" ;;
+    cpc) export ARC=0 NULA=0 CPC=1; CA="-D MODE2 -D CPC" ;;
+    mode1) export ARC=0 NULA=0 CPC=0; CA= ;;
+    *) echo "build.sh: no version $1 (mode1, cpc, nula, arc)" >&2; exit 1 ;;
 esac
 echo $1 > $B/variant
 python3 tools/landgen.py $B                                                     # TABLES, TABLES2, TABLES7, tables.inc
@@ -85,24 +88,26 @@ echo "$1: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, LANDS $(wc -c < $B/LANDS | 
 
 [ $# -le 1 ] || { echo "build.sh: one VERSION at most" >&2; exit 1; }
 if [ -n "$1" ]; then
-    rm -rf $B/disc $B/lander.ssd $B/BOOT $B/GO                                  # (no disc from one version)
+    rm -rf $B/disc $B/lander.ssd $B/BOOT                                        # (no disc from one version)
     one "$1"
     exit 0
 fi
 rm -rf $B/disc
-for v in cpc:C nula:N mode1:M; do
+for v in cpc:C nula:N arc:A mode1:M; do
     one ${v%:*}
     mkdir -p $B/disc/${v#*:}
     cp $B/LAND $B/LANDS $B/TABLES $B/TABLES2 $B/SHIPB $B/TABLES7 $B/disc/${v#*:}/
 done
-for d in C N; do cmp -s $B/disc/$d/TABLES7 $B/disc/M/TABLES7 || { echo "build.sh: TABLES7 differs in $d" >&2; exit 1; }; done
+same() { cmp -s $B/disc/$2/$1 $B/disc/$3/$1 || { echo "build.sh: $1 differs in $2 and $3" >&2; exit 1; }; }
+for d in C N A; do same TABLES7 $d M; done                                     # $.TABLES7
+for d in N A; do same LAND $d C; same TABLES $d C; done                         # S.LAND, S.TABLES
 { printf 'VDU21\rNEW\r'; tr '\n' '\r' < src/menu.bas; printf 'RUN\r'; } > $B/BOOT      # the chooser typed in, unseen
-printf '*LOAD LAND\r*RUN LANDS\r' > $B/GO                                       # (the loads unseen: the palette black)
-F=
-for d in M C N; do
-    F="$F $d.LAND:$B/disc/$d/LAND:1900:1900 $d.LANDS:$B/disc/$d/LANDS:7000:7000 $d.TABLES:$B/disc/$d/TABLES:3000:3000"
-    F="$F $d.TABLES2:$B/disc/$d/TABLES2:3000:3000 $d.SHIPB:$B/disc/$d/SHIPB:3000:3000"
+F="M.LAND:$B/disc/M/LAND:1900:1900 M.TABLES:$B/disc/M/TABLES:3000:3000"
+F="$F S.LAND:$B/disc/C/LAND:1900:1900 S.TABLES:$B/disc/C/TABLES:3000:3000"
+for d in M C N A; do
+    F="$F $d.LANDS:$B/disc/$d/LANDS:7000:7000 $d.TABLES2:$B/disc/$d/TABLES2:3000:3000"
+    F="$F $d.SHIPB:$B/disc/$d/SHIPB:3000:3000"
 done
 python3 tools/mkdfs.py build $B/lander.ssd LANDER \
-    "!BOOT:$B/BOOT:0000:FFFF" "GO:$B/GO:0000:FFFF" "TABLES7:$B/disc/M/TABLES7:3000:3000" $F
-echo "$B/lander.ssd: MODE 1 (M), CPC (C) and NULA (N) versions"
+    "!BOOT:$B/BOOT:0000:FFFF" "TABLES7:$B/disc/M/TABLES7:3000:3000" $F
+echo "$B/lander.ssd: MODE 1 (M), CPC (C), NULA (N) and arc (A) versions, MODE 2's LAND and TABLES shared (S)"

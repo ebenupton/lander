@@ -655,23 +655,25 @@ psg:    sei
         rts
 
 ; ---------------------------------------------------------------- a step
-; step: one step of the model.  The attitude from gkb: Z/left and X/right
-; turn gk one direction (mod NDIR), K/up and M/down move gp a pitch
-; towards NPITCH-1 (nose down) or 0 (nose up).  Crashed: ctim counts down,
-; spawn at 0, only the dots move.  Flying: thr from SPACE or SHIFT, denied
-; without fuel, from 16 tiles up, or once the land has left the screen (CAME
-; past EOFF and landoff's scan); thrust lifts off (landed cleared); drag;
-; thrust, fuel and an exhaust dot; landed: velocities zeroed and REFUEL a
-; step up to FUELMX; else gravity, the move, and the ground test: the ship's
-; centre less than UNDER units above HGV (or below it, or y below 0) is a
-; touch, a landing if over the pad, within a pitch of level and slower than
-; LANDV, else a crash (burst, GSHV 0, ctim CRASHT).  Finally parts.
-; DP11_MOUSE: with mous set, attit sets the attitude in place of the keys;
-; thr 2 is hover (the middle button: HOVS, 3 fuel, a dot every fourth step:
-; hcnt).  Reads gkb, fuel, sy, CAME, HGV (mous); writes gk, gp, ctim, thr,
-; landed, gv*, s*, fuel, GSHV (hcnt).  Clobbers A, X, Y, g0, g1, gt0..gt5,
-; tt0, tt1.  Called by gstep.
-step:
+; step: one step of the model.  The attitude from gkb, unless landed (on the
+; pad it is held): Z/left and X/right turn gk one direction (mod NDIR), K/up
+; and M/down move gp a pitch towards NPITCH-1 (nose down) or 0 (nose up).
+; Crashed: ctim counts down, spawn at 0, only the dots move.  Flying: thr
+; from SPACE or SHIFT, denied without fuel, from 16 tiles up, or once the
+; land has left the screen (CAME past EOFF and landoff's scan); thrust lifts
+; off (landed cleared); drag; thrust, fuel and an exhaust dot; landed:
+; velocities zeroed and REFUEL a step up to FUELMX; else gravity, the move,
+; and the ground test: the ship's centre less than UNDER units above HGV (or
+; below it, or y below 0) is a touch, a landing if over the pad, within a
+; pitch of level and slower than LANDV, else a crash (burst, GSHV 0, ctim
+; CRASHT).  Finally parts.  DP11_MOUSE: with mous set, attit sets the
+; attitude in place of the keys (held likewise while landed); thr 2 is hover
+; (the middle button: HOVS, 3 fuel, a dot every fourth step: hcnt).  Reads
+; gkb, landed, fuel, sy, CAME, HGV (mous); writes gk, gp, ctim, thr, landed,
+; gv*, s*, fuel, GSHV (hcnt).  Clobbers A, X, Y, g0, g1, gt0..gt5, tt0, tt1.
+; Called by gstep.
+step:   lda landed                 ; on the pad: the attitude held
+        bne @att
 .ifdef DP11_MOUSE
         lda mous                   ; the mouse: Lander's attitude from it
         beq :+
@@ -708,10 +710,7 @@ step:
         beq :+
         dec gp
 :
-.ifdef DP11_MOUSE
-@att:
-.endif
-        lda ctim                   ; crashed: the dots only, then the pad
+@att:   lda ctim                   ; crashed: the dots only, then the pad
         beq @fly
         dec ctim
         bne :+
@@ -1433,11 +1432,17 @@ dot0:   lda sx+1
         sta ppyh,x
         rts
 
-; burst: the crash: every dot relaunched from the ship, x and z velocities
-; random in -64..63, y random upwards (0..1023, both bytes from one rand).
-; Clobbers A, X, Y, su.  Called by step.
+; burst: the crash: every dot relaunched from the ship, but at the ground's
+; height under it (HGV: by the crash the ship's underside is below it, and
+; under 0 too where the ground is low, where a dot would die at once), x and
+; z velocities random in -64..63, y random upwards (0..1023, both bytes from
+; one rand).  Clobbers A, X, Y, su.  Called by step.
 burst:  ldx #NPART-1
 @b:     jsr dot0
+        lda HGV
+        sta ppyh,x
+        lda #0
+        sta ppy,x
         lda #PLIFE
         sta plife,x
         jsr rand

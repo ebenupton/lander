@@ -56,6 +56,12 @@ Bank 5 (TABLES2):
   CMAPE, CMAPO + 64 z + x tile (x, z)'s colour (land.colour: sea if its four corners are
                           at sea level, the pad PADC, else land, lit) as its dither's even
                           and odd bytes (pcol5's: the strips' boxes' bytes).
+  The arc build's instead, its colours Lander's, brightened by the row (land.colour):
+  CMAPE + 64 z + x        16 kind + slope (land.arc_tile), CMAPO not made.
+  CTE, CTO + 16 kind + b  (kind, b)'s bytes, even and odd lines (proto/nula.py's entry
+                          LENT + 16 kind + b); kind 0..8, b 0..15.  At $9100 - ZBACK and
+                          $9300 - ZBACK: crow indexes CTE by the class from the page's
+                          start plus j - ZBACK (j the row, 3..13), a byte below 256.
 
 Bank 7 (TABLES7), by a row's depth index di.  Corner row j (0..NZ-1, far to near: map
 row czt + ZBACK - j) is at depth d = 256 (ZBACK - j) - 16 czs, 8.8 tiles; di = d/16 - DI0,
@@ -90,10 +96,11 @@ DI0 the nearest (j NZ-1, czs 15), NDI of them; r = land.recip(d), pixels a tile,
                           near's (16 ZCLIP - DI0), fixed but for cxs: PINL7, corners 1..NX-2
                           by B1T, PINR7; i 0..NX-1.  Neither overhangs the screen (asserted).
 
-tables.inc: every address above, then TNB, HMAX, NDI, NX (the drawn corners: land.NX less
-2 XSKIP), XSKIP, NZ, ZBACK, ZSKIP, ZCLIP, ZFCLIP, DI0, NCLP, XL, XR, LQOFF, ZSHIP, CAMH,
-EMAX, PADN, PADH, HORIZON, YSKY, YGND, R2OFF, RFA, EYS (255 less the greatest SYT7 entry:
-the least camera raise EYV at which a corner's y could pass 254, satrow's), TPE0-3, TPO0-3.
+tables.inc: every address above (CTE, CTO in the arc build alone), then TNB, HMAX,
+NDI, NX (the drawn corners: land.NX less 2 XSKIP), XSKIP, NZ, ZBACK, ZSKIP, ZCLIP,
+ZFCLIP, DI0, NCLP, XL, XR, LQOFF, ZSHIP, CAMH, EMAX, PADN, PADH, HORIZON, YSKY, YGND,
+R2OFF, RFA, EYS (255 less the greatest SYT7 entry: the least camera raise EYV at which
+a corner's y could pass 254, satrow's), TPE0-3, TPO0-3.
 """
 import os
 import sys
@@ -115,6 +122,7 @@ ADDR = dict(MAP=0x8000, MRL=0xBC00, MRH=0xBC40, FPSL=0xA400, FPSH=0xA500, DQT=0x
             TL0=0xBB63, TL1=0xA200, TL2=0xA280, TL3=0x9E83, TL4=0xA3A0, TL5=0xAE00,
             TL6=0x9300, TL7=0x9330, TL8=0xA3F0)
 ADDR2 = dict(CMAPE=0x8000, CMAPO=0x9000)
+ADDRA = dict(CTE=0x9100 - L.ZBACK, CTO=0x9300 - L.ZBACK)     # the arc build's (CMAPO's room)
 ADDR7 = dict(R7L=0x8000, R7H=0x8100, SYT7=0x8200, B1T=0x9800,
              CLP7=0xAE00, PINL7=0xAF00, PINR7=0xB000, LERPQ7=0xB100, SYL7=0xB300, SYH7=0xB3B0,
              LQLO=0xB460, LQHI=0xB470, PXF7=0xBEA0, PXN7=0xBF50)
@@ -216,9 +224,20 @@ def build():
 
 
 def build2():
-    """Bank 5's image (TABLES2): CMAPE, CMAPO, each tile's colour as its dither's bytes."""
+    """Bank 5's image (TABLES2): CMAPE, CMAPO, each tile's colour as its dither's bytes;
+    the arc build's CMAPE, CTE, CTO (the module docstring)."""
     img = bytearray(0x4000)
     hm = L.heightmap()
+    if NU.arc():
+        for z in range(L.MAP):
+            for x in range(L.MAP):
+                k, s = L.arc_tile(hm, x, z)
+                img[ADDR2['CMAPE'] - BASE + z * 64 + x] = 16 * k + s
+        for e in range(NU.LENT, NU.NENT):
+            de, do = dither_bytes(e)
+            img[ADDRA['CTE'] - BASE + e - NU.LENT] = de
+            img[ADDRA['CTO'] - BASE + e - NU.LENT] = do
+        return img
     for z in range(L.MAP):
         for x in range(L.MAP):
             de, do = dither_bytes(L.colour(hm, x, z, 0, 0))
@@ -290,7 +309,7 @@ def main():
                                   // (L.HSCALE * 256)) for di in range(NDI))
     with open(os.path.join(out, 'tables.inc'), 'w') as f:
         f.write('; tools/landgen.py\n')
-        for k, v in list(ADDR.items()) + list(ADDR2.items()) + list(ADDR7.items()):
+        for k, v in list(ADDR.items()) + list(ADDR2.items()) + list(ADDR7.items()) + (list(ADDRA.items()) if NU.arc() else []):
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=TNB, HMAX=L.HMAX, NDI=NDI, NX=NXD, XSKIP=L.XSKIP, NZ=L.NZ, ZBACK=L.ZBACK,
                       ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=DI0, NCLP=NCLP, XL=L.XL, XR=L.XR,

@@ -17,6 +17,7 @@ The disc boots to a chooser:
 | 1 | MODE 1: four colours, the landscape's shades as 2 x 2 dithers |
 | 2 | MODE 2: the CPC palette, 27 colours as checkerboard dithers |
 | 3 | MODE 2: VideoNULA, sixteen flat 12-bit colours (offered only when a NULA is found) |
+| 4 | MODE 2: VideoNULA, Lander's own colours as 1 x 2 dithers of sixteen (likewise) |
 
 The NULA test is a timing one (the NULA's registers cannot be read): the ULA's
 CRTC clock is set to 2 MHz, then &44 written to &FE22.  Without a NULA &FE22 is a
@@ -43,7 +44,8 @@ button: full thrust.  Middle: hover, a quarter of the thrust for a bit over half
 the fuel (Lander's buttons; the right, Lander's fire, does nothing).
 
 You start level on the pad, the grey square in the middle of the map.  Thrust pushes
-the ship along its roof, so tip the nose the way you want to go.  Land slowly and
+the ship along its roof, so tip the nose the way you want to go; on the pad the ship
+neither turns nor tips, so lift off first.  Land slowly and
 within one pitch step of level, anywhere on the pad, to refuel; touch the ground
 anywhere else, or the pad too fast or too tilted, and the ship is destroyed and, four
 seconds later, back on the pad.  The engines cut out once the landscape has sunk off
@@ -51,7 +53,7 @@ the bottom of the screen; the ship then coasts up and falls back.
 
 ## The MODE 2 versions
 
-Both are the same game in MODE 2.  The renderer is MODE 1's: it works in MODE 1's
+All three are the same game in MODE 2.  The renderer is MODE 1's: it works in MODE 1's
 pixels, 256 across, and each MODE 2 pixel shows the even one of the two it
 covers, which only its masks and colour bytes have to know about.  The palettes, the
 colours' assignments and the 3 x 7 letters are in `proto/nula.py`.
@@ -59,6 +61,16 @@ colours' assignments and the 3 x 7 letters are in `proto/nula.py`.
 - VideoNULA: sixteen flat 12-bit colours in place of MODE 1's dithers (black, three
   seas, the pad's grey, seven lands and four for the ship; each the average of the
   dither it replaces).
+- Archimedes colours (VideoNULA): the colours Lander itself gives each tile (its
+  `GetLandscapeTileColour`): one of four greens and browns picked by bits of the
+  altitude, blue for the sea and grey for the pad, each brightened by the tile's
+  row (nearer rows brighter, as the camera moves a tile the rows step) and by a
+  slope lit from the left, then reduced as Lander's VIDC 256-colour mode reduces
+  them.  Each is shown as the nearest checkerboard of two of sixteen NULA colours,
+  the sixteen fitted to the colours the game shows (`proto/nula.py`'s `fit`; the
+  ship takes Lander's colours too, and the map's marker an orange).  The tiles'
+  kinds and slopes are in the map and the row is added as the strips' colours are
+  made, so the colours can follow the row.
 - CPC palette, no NULA needed: the "Amstrad CPC palette", the 27 colours whose red,
   green and blue are each off, half or full, made as 1 x 2 dithers of MODE 2's eight
   colours (two MODE 2 pixels one above the other are about square), the phase
@@ -78,11 +90,13 @@ sh build.sh                            # build/lander.ssd: every version, MODE 1
 sh test/run.sh                         # the test suite on MODE 1 (a few minutes)
 sh build.sh cpc && CPC=1 sh test/run.sh    # one version alone (no disc) and its tests
 sh build.sh nula && NULA=1 sh test/run.sh
+sh build.sh arc && ARC=1 sh test/run.sh
 ```
 
 The build is deterministic: the disc it produces is byte for byte the one checked in
 (`test/identical.sh`).  On the disc each version's files are in a directory of their
-own (M, C, N), with `$.TABLES7`, the same in all three, shared.
+own (M, C, N, A), with `$.TABLES7`, the same in all four, and the MODE 2 versions'
+`LAND` and `TABLES`, the same in all three, shared (`S.LAND`, `S.TABLES`).
 
 The tests run the game's own 6502 code in py65; the first two compare its output byte
 for byte with the Python reference model:
@@ -142,7 +156,8 @@ and lowest lines the landscape reached the last time that screen was drawn are k
 so the next frame on it blacks exactly what has gone.  Tiles are coloured from the 35
 2 x 2 dithers of MODE 1's four colours: ten for land, picked by height and by slope
 (lit from the left) with a per-tile scatter, four for sea and a grey for the pad
-(the NULA version: seven and three, flat).
+(the NULA version: seven and three, flat; the Archimedes-colours version: Lander's
+rule, by row).
 
 **The ship.** Lander's ship is pre-rotated and pre-projected for 13 pitches (60
 degrees nose up to 60 nose down, 10 apart) by 32 directions, 17 of them stored and

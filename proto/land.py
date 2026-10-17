@@ -128,8 +128,8 @@ def heightmap():
     h is Lander's altitude formula, six sines in x and z summing to +-9.6: a corner
     under SEAS is SEA (0), the rest are 1..HMAX by linear scaling of the sum above
     SEAS, rounded; then corners 0..PADN both ways are PADH, the landing pad.  base is
-    Lander's tile hash, bits 2 and 3 of its 24-bit altitude (s + 10) / 20 * 2^24;
-    nothing in the build uses it (the tools unpack and drop it)."""
+    Lander's tile hash, bits 2 and 3 of its 24-bit altitude (s + 10) / 20 * 2^24:
+    the arc build's land kinds (arc_tile); the others' colours do not use it."""
     s = np.zeros((MAP, MAP))
     base = np.zeros((MAP, MAP), dtype=int)
     t = 2 * math.pi / MAP
@@ -316,11 +316,34 @@ def _targets(hm):
 _TGT = {}                 # _targets of the last map seen, by id(hm[0])
 
 
+def arc_tile(hm, i, j):
+    """Tile (i, j)'s colour as Lander makes it (GetLandscapeTileColour), from its
+    near right corner (i + 1, j) and the corner before it (i, j), less the row:
+    (kind, slope), proto/nula.py's ARCK kind: the pad (4) on the landing pad, the sea
+    (5) if both corners are at SEA, else the land kind base's at the corner (Lander's
+    altitude bits 2 and 3: red, green); slope how far the corner stands above the one
+    before (lit from the left), in units, a third, 0..2 on this map (as Lander's
+    max(0, rise) >> 22 is on its own: 0, 1 or 2, 1 for some 7% of tiles)."""
+    h, base = hm
+    if i % MAP < PADN and j % MAP < PADN:
+        return 4, 0
+    hc, hp = int(h[j % MAP, (i + 1) % MAP]), int(h[j % MAP, i % MAP])
+    if hc == SEA and hp == SEA:
+        return 5, 0
+    return int(base[j % MAP, (i + 1) % MAP]), max(0, hc - hp) // 3
+
+
 def colour(hm, i, j, row, nrows):
-    """Tile (i, j)'s palette entry (swatch35 numbering), fixed per tile: PADC on the
-    landing pad; for a sea tile (all four corners at SEA) the SEAC entry picked by
-    TILERND; for a land tile the LAND entry nearest its _targets point in the plane
-    of LANDAX.  row and nrows are accepted and ignored."""
+    """Tile (i, j)'s palette entry, as box `row` (1..nrows) of the frame's strips,
+    from the far one.  The arc build: Lander's colour (proto/nula.py's entry for
+    arc_tile's kind, brightness its slope plus the strip's near row's corner row,
+    10 - nrows + row, 4..10: Lander's row brightness, nearer brighter).  Otherwise
+    swatch35's, fixed per tile: PADC on the landing pad; for a sea tile (all four
+    corners at SEA) the SEAC entry picked by TILERND; for a land tile the LAND entry
+    nearest its _targets point in the plane of LANDAX."""
+    if NU.arc():
+        k, s = arc_tile(hm, i, j)
+        return NU.lentry(k, 10 - nrows + row + s)
     key = id(hm[0])
     if key not in _TGT:
         _TGT.clear()

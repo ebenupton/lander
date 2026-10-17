@@ -2,6 +2,7 @@
 # The 32K build's gate: build, then everything checked against the reference.
 #   soak32.py   the land, byte-exact against proto/land.py (plain and moving camera)
 #   shiptest32  the ship, every STEP'th orientation against b32/tools/ship32.py
+#   stackdepth  the main loop's worst-case stack within b32.cfg's 12 (+ IRQ, NMI)
 #   gametest32  the game: profile32.py's flight, every frame's state, against
 #               build32/gate_base.txt (made by `gate32.sh base` from a known-good build)
 # Prints GATE PASS and the flight's cycles a frame, or GATE FAIL <step>.
@@ -11,6 +12,8 @@ B=build32
 fail() { echo "GATE FAIL $1"; exit 1; }
 sh b32/build32.sh > $B/gate_build.log 2>&1 || fail build
 grep -qi 'error' $B/gate_build.log && fail build
+python3 b32/tools/stackdepth.py loop > $B/gate_stack.txt 2>&1 || fail stackdepth
+grep -q '^loop: \([0-9]\|1[0-2]\) bytes' $B/gate_stack.txt || fail "stack: the loop needs more than 12 bytes (b32.cfg's 19-byte stack)"
 SCRIPT=$(python3 -c "import sys; sys.path.insert(0,'b32/test'); import profile32; print(profile32.SCRIPT)")
 python3 b32/test/gametest32.py "$SCRIPT" > $B/gate_flight.txt 2>&1 || fail flight
 cut -c19- $B/gate_flight.txt > $B/gate_state.txt

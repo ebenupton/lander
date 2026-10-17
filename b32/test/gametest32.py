@@ -54,11 +54,11 @@ class Game:
         for addr, name in ((0x1900, 'L32M'), (0x7000, 'L32')):
             data = open(os.path.join(B, name), 'rb').read()
             mem._subject[addr:addr + len(data)] = data
-        self.call(self.lab['takeover'])
-        mem._subject[0x5000:0x8000] = bytes(0x3000)   # (go's: the loader ran from them)
+        self.call(self.lab['takeover'])                # (the loader's start-up)
         self.mpu.memory[self.lab['back']] = 0
         self.call(self.lab['setback'])
         self.call(self.lab['ginit'])
+        mem._subject[0x5000:0x8000] = bytes(0x3000)   # (clr's: the loader's pages)
 
     def call(self, addr):
         m = self.mpu

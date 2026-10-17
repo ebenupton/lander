@@ -3,7 +3,7 @@
 entry, over the static control flow of the linked program (b32/tools/dataflow's model of
 build32/game.dbg).
 
-    python3 b32/tools/stackdepth.py [ROOT ...]      (default: go, irq)
+    python3 b32/tools/stackdepth.py [ROOT ...]      (default: loop, irq)
 
 A routine's depth is the most, over the paths from its entry to an RTS (or an exit the
 model cannot follow), of PHA/PHP pushes less PLA/PLP pops, a JSR counting 2 plus the
@@ -70,7 +70,7 @@ def main():
                 work.append((t, d2))
         memo[entry.key] = best
         return best
-    roots = sys.argv[1:] or ['go', 'irq']
+    roots = sys.argv[1:] or ['loop', 'irq']
     for r in roots:
         print(f'{r}: {depth(sym[r])} bytes below its entry')
     # every other entry (address-taken labels: the patched jumps' targets among them)

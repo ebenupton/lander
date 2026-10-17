@@ -271,22 +271,22 @@ RTPL    = $0AA0                    ; and its transitions' base: pixel x's line
                                    ; is in RTBUF's page at offset RTPL + x + 1
 CE      = $0AC0                    ; each box's byte on even and odd lines
 CO      = $0AD0
-SPB     = $0B00                    ; the slow way's: each pixel's box at the top
-STL     = $0B10                    ; and its transitions (4 a pixel: line, step)
-STD     = $0B20
-ENTL    = $1600-YSKY               ; each line's entry in its STAB: low byte,
-ENTH    = $1661-YSKY               ; and the page within the table (lines
-                                   ; YSKY..YGND+1)
+SPB     = $0AE0                    ; the slow way's: each pixel's box at the top
+STL     = $0AF0                    ; and its transitions (4 a pixel: line, step)
+STD     = $0B00
+ENTL    = ENTB0-YSKY               ; each line's entry in its STAB: low byte,
+ENTH    = ENTB1-YSKY               ; and the page within the table (lines
+                                   ; YSKY..YGND+1: ENTB0, ENTB1 in LOWD)
 TOPS    = $0C00                    ; by screen (+64 for screen 1) and column:
 BOTS    = $0C80                    ; the land's highest and lowest line last
 CURT    = $0B60                    ; time there, and this frame's
 CURB    = $0BA0
 STAB    = $0E00
-LAH     = $16C2-YSKY               ; each line's 2 * (y >> 3) (lines
-                                   ; YSKY..YGND+1)
-        .assert ENTL + YSKY >= STAB + 2*$100 + 437 && ENTH + YGND+2 <= LAH + YSKY, error, "ENTL, ENTH: past STAB 1, before LAH"
-        .assert YGND+2-YSKY <= 97, error, "LAH, ENTL: 97 lines each"
-CX      = $0B30                    ; the columns' map x (project)
+LAH     = LAHB-YSKY                ; each line's 2 * (y >> 3) (lines
+                                   ; YSKY..YGND+1: LAHB in P1)
+STABN   = 437                      ; a STAB's bytes (init's): SG0, SG1 follow
+        .assert YGND+2-YSKY = 97, error, "LAH, ENTL, ENTH: 97 lines each (b32.cfg's packing)"
+CX      = $0B10                    ; the columns' map x (project)
 BCL     = $07D5                    ; this strip's bottom points past YGND: a
                                    ; count (0: none)
 ZB      = $07D1                    ; ZBACK less the first row's j: row k's map
@@ -419,7 +419,9 @@ TRB:    .res 12                    ; as an LM mask (a second rung's from 6;
                                    ; also bank 6's scratch)
 kb:     .res 1                     ; split2's: the second rung's transition
                                    ; index (s2v's: rung ri's)
-pp:     .res 2                     ; run's planted RTS (dummy: none)
+pp:     .res 2                     ; run's planted RTS (PPNONE: none)
+PPNONE  = $0200                    ; pp's first target, the first run's put-back:
+                                   ; a byte nothing uses (b32.cfg: below IRQ1V)
 tsp:    .res 2                     ; TOPS, BOTS of the screen being drawn (its
 bsp:    .res 2                     ; set)
 bpos2:  .res 1                     ; split2's, s2v's: the second boundary
@@ -430,24 +432,11 @@ mo:     .res 1
 
         .code
 ; ---------------------------------------------------------------- start
-; go: the loader's (boot32.s) last jump, with the machine taken over and the
-; tables made.  The land buffers cleared, screen 0 the one drawn (setback), the
-; game's start; then each frame the game's step, the projection, the strips,
-; the dots beyond the ship, the ship (unless crashed), the nearer dots and the
-; map's marker, the readout, flip.  Never returns.
-go:     lda #0                     ; the land buffers black (the loader ran
-        tay                        ; from them)
-        sta ptr
-        ldx #>LAND0
-        stx ptr+1
-:       sta (ptr),y
-        iny
-        bne :-
-        inc ptr+1
-        bpl :-                     ; (to $7FFF)
-        sta back                   ; screen 0 first
-        jsr setback
-        jsr ginit
+; loop: the main loop, entered from the loader (boot32.s: its start-up done,
+; the land buffers black, screen 0 the one drawn) with the stack empty.  Each
+; frame the game's step, the projection, the strips, the dots beyond the ship,
+; the ship (unless crashed), the nearer dots and the map's marker, the readout,
+; flip.  Never returns.
 loop:   jsr gstep
         jsr project
         jsr strips
@@ -645,15 +634,15 @@ setback:
         bne @l
 @x:     rts
 stabs:  .byte 0                    ; the screen the STABs store to (init's: 0)
-rk:     .res 2                     ; (init's: k, the divisor, the dividend and
-rd:     .res 2                     ; quotient, the remainder)
-rn:     .res 3
-rr:     .res 2
 sdl:    .byte 0
 
         .include "boot32.s"
 ; ---------------------------------------------------------------- init
         .segment "BOOT"            ; (the loader's: run once, then overwritten)
+rk:     .res 2                     ; (init's: k, the divisor, the dividend and
+rd:     .res 2                     ; quotient, the remainder)
+rn:     .res 3
+rr:     .res 2
 ; init: both screens black ($3000-$7FFF: LANDS with them); the four STABs and
 ; the line tables (ENTL, ENTH; LAH; in bank 4: LAHSB0-3,
 ; ENTB0-3, EXLB, EXHB0-3); TOPS, BOTS to nothing drawn; traceb's fill blocks'
@@ -802,9 +791,9 @@ init:   jsr shtab                  ; the ship's walker's tables
         sta BOTS,x
         dex
         bpl :-
-        lda #<dummy                ; no RTS planted yet: run's first put-back
-        sta pp                     ; lands on dummy
-        lda #>dummy
+        lda #<PPNONE               ; no RTS planted yet: run's first put-back
+        sta pp                     ; lands on PPNONE
+        lda #>PPNONE
         sta pp+1
         lda #40                    ; the camera (proto's start: tile 40, 30)
         sta cxt
@@ -3215,7 +3204,6 @@ run:    txa                        ; line X's entry: ENTL, ENTH + stabp, less
         txa
         ldy coff
 r_j:    jmp $FFFF                  ; (the planted RTS returns to run's caller)
-dummy:  .byte 0                    ; pp's first target: the first run's put-back
 
 ; recordc: record's twin for a column a rung splits (c_rec's target in a
 ; recording phase): CURT, then the black above (rc_t, whose c_rd re-tests the
@@ -3305,18 +3293,6 @@ gn_d:   stx tj
         sta vo
         jsr run
         ldx tj
-        rts
-
-; The vertical sync event handler (EVNTV): vcount += 1, and the user VIA's
-; timer 2 restarted (the time since the sync, for flip and strips).  A and
-; the flags kept.
-vsync:  php
-        pha
-        lda #$FF
-        sta UVIA_T2H
-        pla
-        inc vcount
-        plp
         rts
 
 ; bclip: the bottom row's line held on the screen.  If setup saw a bottom
@@ -3512,16 +3488,21 @@ pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:
                                    ; none yet)
 SHF:    .byte 0                    ; zsh4's: HT to shift a row on (1) or back
                                    ; ($FF) with HTN; 0 none
-        .segment "HIB"
+        .segment "LOWD"
 fps10:  .res 2                     ; readout's: the rate in tenths
         .code
 fpson:  .byte 1                    ; the readout on (game.s's F toggles it)
-        .segment "HIB"
+        .segment "LOWD"
 dvs:    .res 8                     ; flip's: the last eight frames' vertical
                                    ; syncs (init zeroes them)
 dvi:    .res 1                     ; the next entry
 vlast:  .res 1                     ; vcount at the last flip
-tcol:   .res 1                     ; putg's column (readout's); glyphs' counter
+tcol:   .res 1                     ; putg's column (readout's)
+; the line tables (init's), each in one page (b32.cfg: LOWD, P1)
+ENTB0:  .res YGND+2-YSKY
+ENTB1:  .res YGND+2-YSKY
+        .segment "P1"
+LAHB:   .res YGND+2-YSKY
         .code
 
         .include "b32tab.inc"     ; DCE, DCO
@@ -3566,11 +3547,19 @@ tenh:   .byte <TEN4H, <TEN5H, >TEN4H, >TEN5H, <(TEN4H+1), <(TEN5H+1), >(TEN4H+1)
 ; index (bits 4-7: DCE, DCO), b32/tools/gen32.py's.
         .segment "MAPD"
 MAP32:  .incbin "MAP32"
+; PANEL: the panel's 9 MODE 5 rows (64 bytes each): the map (gen32.py's image),
+; the readout's row (putg's), loaded with the program.
+        .segment "PANELD"
+PANEL:  .incbin "PANELMAP"
+        .res 64
+        .assert * - PANEL = 9*64, error, "PANEL: 9 rows"
 ; R7L, R7H + di: r, the row's pixels a tile at depth index di (d = 16 (DI0 +
 ; di)): land.recip(d) = (2^21 + k) div 2k, k = DI0 + di; init's.
-        .segment "MID"
+        .segment "GA0"
 R7L:    .res NDI
+        .segment "GA1"
 R7H:    .res NDI
+        .code
 
 ; ---------------------------------------------------------------- the slow way
 ; Bank 4's free space again (zsh4 at $B900 and slow2 at $9200, the first R2OFF

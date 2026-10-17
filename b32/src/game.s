@@ -62,11 +62,11 @@ PADX    = PADN/2                   ; the pad's middle tile: the start
 
 
 ; ---------------------------------------------------------------- init
-; ginit (G_INIT): once, after LAND's init has blacked both screens.  The map
-; and the FUEL label on both screens; the marks cleared; every dot dead; the
-; sound chip silenced; the ship spawned on the pad; then gout, so LAND's first
-; projection has the camera and bank 6 the ship.  Clobbers A, X, Y, g0, g1,
-; gt0, gt2..gt4, su, scrg.
+; ginit: once, by the loader (it is the loader's, BOOT: discarded after).
+; Every dot dead; the sound chip silenced; the ship spawned on the pad; then
+; gout, so the first projection has the camera.  Clobbers A, X, Y, g0, g1, gt0,
+; gt2..gt4, su, scrg.
+        .segment "BOOT"
 ginit:  lda #$5A                   ; (the LFSR's seed: never 0)
         sta rnd
         ldx #NPART-1
@@ -86,6 +86,7 @@ ginit:  lda #$5A                   ; (the LFSR's seed: never 0)
         jmp gout
 SINI:   .byte $FF, $DF, $BF, $9F   ; noise, tone 2, 1, 0: attenuation 15 (off)
 SININ   = * - SINI
+        .segment "GAME"
 
 ; spawn: the ship on the pad, still, landed, level, facing SPAWNK, the tank
 ; full, drawn, no thrust; HGV set to the pad's height for gout before hgnd
@@ -693,7 +694,7 @@ thc:    and #31
         eor #$FF
         adc #0
 @d:     rts
-        .segment "HIB"
+        .segment "P1"
 thxs:   .res 1                     ; throw's X
 tx:     .res 1                     ; throw's thrust, x and z
 tz:     .res 1
@@ -1343,7 +1344,7 @@ marker: lda #0                     ; (no tile: address 0)
 PIXG    = PIXM                     ; pixel 0..3's bits (LAND's)
 
 ; ---------------------------------------------------------------- state
-        .segment "HIB"             ; (uninitialised: the loader zeroes it)
+        .segment "P1"              ; (uninitialised: the loader zeroes it)
 gkb:    .res 1                    ; the keys down (keys' bits)
 gk:     .res 1                    ; the ship's direction (0..NDIR-1) and pitch
 gp:     .res 1                    ; (0..NPITCH-1, PFLAT level)
@@ -1372,15 +1373,17 @@ mka:    .res 2                     ; marker's: the tile's first byte ($xx00:
 mkb:    .res 2                     ; none) and what its two held
         .segment "GAME"
         .include "gametab.inc"
-        .segment "LOW1"            ; (the dots: page 1, and LOWP)
+        .segment "GA0"             ; (the dots: b32.cfg's GA0, GA1, G1C, LOWP)
 plife:  .res NPART                 ; the dots: life (0 dead); position x, z (8.8
 ppx:    .res NPART                 ; tiles), y (8.8 units); velocity x, z (1/256
 ppxh:   .res NPART                 ; tile), y (1/256 unit)
 ppz:    .res NPART
+        .segment "GA1"
 ppzh:   .res NPART
 ppy:    .res NPART
 ppyh:   .res NPART
 pvx:    .res NPART
+        .segment "G1C"
 pvxh:   .res NPART
         .segment "LOWP"
 pvz:    .res NPART

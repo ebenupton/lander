@@ -26,7 +26,7 @@ import landgen as G   # noqa: E402
 import land as L      # noqa: E402
 import gamegen as GG  # noqa: E402
 
-LAND0, LAND1, PANEL = 0x5000, 0x6800, 0x1200
+LAND0, LAND1 = 0x5000, 0x6800
 SCR = (LAND0 - 0x1000, LAND1 - 0x1000)      # the buffers' virtual screen starts
 B7SHIFT = 0x4000                            # bank 7's tables at $C000 (dev)
 MAP32 = 0x3800                              # 32 bytes a map row
@@ -160,7 +160,7 @@ def main():
     with open(os.path.join(out, 'tables.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py\n')
         addr = {}
-        addr.update(LAND0=LAND0, LAND1=LAND1, PANEL=PANEL)
+        addr.update(LAND0=LAND0, LAND1=LAND1)
         for k, v in addr.items():
             f.write(f'{k:8s}= ${v:04X}\n')
         consts = dict(TNB=64, HMAX=L.HMAX, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, NZ=L.NZ,

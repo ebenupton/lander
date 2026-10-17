@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import soak32 as S         # noqa: E402  (its machine; LAND_MAP=32 set)
 import ship32 as M         # noqa: E402
 
-GSHK, GSHP, GSHX, GSHY = 0x07DB, 0x07DC, 0x07DD, 0x07DE
+import gametest32 as GT  # noqa: E402
+GSHK, GSHP, GSHX, GSHY = (GT.equ(n) for n in ('GSHK', 'GSHP', 'GSHX', 'GSHY'))
 
 
 def main():

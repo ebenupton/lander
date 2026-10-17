@@ -65,12 +65,15 @@ import land as L      # noqa: E402
 import frame as F     # noqa: E402
 import landgen as G   # noqa: E402
 import shipgen as SG  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gametest32 import equ  # noqa: E402
+CAME = equ('CAME')    # LAND's: the camera raise
 import points as P    # noqa: E402
 
 B = os.path.join(ROOT, 'build32')
 RET = 0xFF00                                     # where a call returns to
 ROMSEL = 0xFE30
-CAME = 0x07D6                                    # LAND's: the camera raise
+
 B6_SHIP = 0x8003
 DBG = bool(os.environ.get('SOAKDBG'))
 PIXM = G.NU.PIXM                                 # each pixel's mask (proto/nula.py)

@@ -12,6 +12,7 @@ abs or abs,X/Y operand is what moving the byte to zero page would make one cycle
 byte cheaper).  Writes build32/profile.json:
     frames, cycles                      the frames run and their cycles (the loop's routines)
     pcs   {addr: cycles}                per instruction (hex address)
+    xpage {addr: cycles}                per instruction: page crossings' extra cycles
     data  {addr: [reads, writes, {mode: n}, [pcs]]}  per data byte touched
     sp_min                              the lowest stack pointer seen (the harness calls
                                         each routine with S = $FD)
@@ -70,7 +71,9 @@ def main():
     mpu = g.mpu
     dis = mpu.disassemble
     pcs = collections.Counter()
+    xpage = collections.Counter()        # page-crossing cycles by instruction
     spmin = [0xFF]
+    base = mpu.cycletime
 
     def call(addr):
         mpu.memory = cm
@@ -86,7 +89,13 @@ def main():
             cm.lo, cm.hi, cm.mode, cm.pc = pc, pc + LEN[mode], dis[op][0] + ' ' + mode, pc
             c0 = m.processorCycles
             m.step()
-            pcs[pc] += m.processorCycles - c0
+            c = m.processorCycles - c0
+            pcs[pc] += c
+            extra = c - base[op]
+            if mode == 'rel' and m.pc != pc + 2:
+                extra -= 1                   # (a taken branch's own cycle)
+            if extra > 0:
+                xpage[pc] += extra
             if m.sp < spmin[0]:
                 spmin[0] = m.sp
         return m.processorCycles - start
@@ -112,8 +121,13 @@ def main():
         if cm.r[a] or cm.w[a]:
             data[f'{a:04X}'] = [cm.r[a], cm.w[a], dict(cm.modes[a]), sorted(f'{p:04X}' for p in cm.who[a])]
     json.dump(dict(frames=frames, cycles=total, sp_min=spmin[0],
-                   pcs={f'{a:04X}': c for a, c in pcs.items()}, data=data), open(out, 'w'))
+                   pcs={f'{a:04X}': c for a, c in pcs.items()},
+                   xpage={f'{a:04X}': c for a, c in xpage.items()}, data=data), open(out, 'w'))
     print(f'{frames} frames, {total} cycles, {total // frames} a frame; lowest S ${spmin[0]:02X}')
+    xs = sorted(((c, a) for a, c in xpage.items()), reverse=True)
+    print(f'page crossings: {sum(xpage.values()) / frames:.1f} cycles a frame; the costliest:')
+    for c, a in xs[:25]:
+        print(f'  ${a:04X} {sym(a):24s} {c / frames:8.1f}')
     rows = []
     for a in range(0x100, 0x8000):
         if not (0x100 <= a < 0x200) and (cm.r[a] or cm.w[a]):

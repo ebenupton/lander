@@ -1088,16 +1088,7 @@ ca:     .res 1                    ; the angles' cosines, sines
 sa:     .res 1
 cb:     .res 1
 sb:     .res 1
-pi:     .res 1                    ; xform's point and its sums
-pxl:    .res 1
-pxh:    .res 1
-pyl:    .res 1
-pyh:    .res 1
 px8:    .res 1
-xrl:    .res 1
-xrh:    .res 1
-zrl:    .res 1
-zrh:    .res 1
 tql:    .res 1
 tqh:    .res 1
 SXV:    .res 9                     ; the vertices' pixel offsets
@@ -1105,9 +1096,7 @@ SYV:    .res 9
 NVIS:   .res 1                    ; normals: shown, "negative x" (bit f)
 NNEG:   .res 1
 NBR:    .res 8                     ; (4096 - py) >> 9
-NFL:    .res 1                    ; the faces set up
 fi:     .res 1
-fj2:    .res 1
 cx3:    .res 3                     ; fset's corners
 cy3:    .res 3
 EOFS    = 9                        ; the edges' arrays: long edges by face slot
@@ -1125,24 +1114,10 @@ ED:     .res 18
 ef:     .res 1
 ey:     .res 1
 edx:    .res 1
-sxl:     .res 1
-sxr:     .res 1
-yc:     .res 1                    ; the line
 YLO:    .res 1
 YHI:    .res 1
-lx0:    .res 1                    ; its extent
-lx1:    .res 1
-lxs:    .res 1
-tqa:    .res 3                     ; tq8's
-tqb:    .res 3
-smA:    .res 1                     ; smul's
-smB:    .res 1
-smB0:   .res 1
         .segment "SG0"             ; (scratch: b32.cfg's SG0, G1B, G1A, P1)
-wn:     .res 1
 WB:     .res 8                     ; its boundaries and faces
-WF:     .res 8
-db:     .res 1                    ; DBUF's next byte
 bh:     .res 1                    ; the open band's header ($FF: none)
 bln:    .res 1                    ; its lines
 NPAT:   .res 1                    ; the patterns: the last made

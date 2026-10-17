@@ -13,6 +13,7 @@ way, so the state is the same.  Importable: Game().frame(keys, vs) and state().
 """
 import os
 import random
+import re
 import sys
 
 from py65.devices.mpu6502 import MPU
@@ -22,7 +23,19 @@ ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
 B = os.path.join(ROOT, 'build32')
 RET = 0xFF00
 SVIA_ORA_NH = 0xFE4F
-CAME, HGV, GSHY, GSHV = 0x07D6, 0x07D7, 0x07DE, 0x07DF
+
+
+def equ(name):
+    """A fixed-address equate's value (NAME = $xxxx in b32/src)."""
+    for f in os.listdir(os.path.join(ROOT, 'b32', 'src')):
+        if f.endswith('.s'):
+            m = re.search(r'^' + name + r'\s*=\s*\$([0-9A-Fa-f]+)\b', open(os.path.join(ROOT, 'b32', 'src', f)).read(), re.M)
+            if m:
+                return int(m.group(1), 16)
+    raise KeyError(name)
+
+
+CAME, HGV, GSHY, GSHV = equ('CAME'), equ('HGV'), equ('GSHY'), equ('GSHV')
 KEYS = {'L': 0x61, 'R': 0x42, 'F': 0x46, 'B': 0x65, 'T': 0x62, 'H': 0x00, 'P': 0x43}
 
 

@@ -95,7 +95,7 @@ takeover:
         dex
         bne @cp
         lda #0                     ; zeroed: zero page, page 1 below the stack,
-        ldx #<__ZP_SIZE__          ; page 2 past IRQ1V, $0300-$13FF (the MOS's
+        ldx #$FC                   ; page 2 past IRQ1V, $0300-$13FF (the MOS's
 @z0:    dex                        ; leftovers otherwise; init makes the tables
         sta $00,x                  ; over it)
         bne @z0
@@ -168,5 +168,5 @@ palv:   .repeat 16, e
         .byte e << 4 | ((($3560 >> (4 * (((e >> 3) & 1) * 2 + ((e >> 1) & 1)))) & 7) ^ 7)
         .endrepeat
 cmd_main: .byte "LOAD L32M", 13
-        .import __ZP_SIZE__, __P1_START__, __P1_SIZE__, __P2B_START__, __P2B_SIZE__
+        .import __P1_START__, __P1_SIZE__, __P2B_START__, __P2B_SIZE__
         .import __IMG_START__, __IMG_LAST__

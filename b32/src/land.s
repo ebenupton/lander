@@ -261,12 +261,12 @@ HTN     = $07E0                    ; zsh4's: the new row's heights, for hsh
 HT      = $0880                    ; the rows' raw heights, 16 a row (project)
 CLE     = $0900                    ; pcol5's window of box bytes: 16 a row, even
 CLO     = $09A0                    ; and odd lines
-TX      = $0A40                    ; the strip's top row's points (0 and NX+1:
+TX      = $BC                    ; the strip's top row's points (0 and NX+1:
 TY      = $0A50                    ; the margins)
-BX      = $0A60                    ; and its bottom row's
+BX      = $CC                    ; and its bottom row's
 BY      = $0A70
-LO      = $0A80                    ; each rung's pixels: LO..HI-1 (HI = LO:
-HI      = $0A90                    ; none)
+LO      = $DC                    ; each rung's pixels: LO..HI-1 (HI = LO:
+HI      = $EC                    ; none)
 RTPL    = $0AA0                    ; and its transitions' base: pixel x's line
                                    ; is in RTBUF's page at offset RTPL + x + 1
 CE      = $0AC0                    ; each box's byte on even and odd lines
@@ -287,19 +287,19 @@ LAH     = LAHB-YSKY                ; each line's 2 * (y >> 3) (lines
 STABN   = 437                      ; a STAB's bytes (init's): SG0, SG1 follow
         .assert YGND+2-YSKY = 97, error, "LAH, ENTL, ENTH: 97 lines each (b32.cfg's packing)"
 CX      = $0B10                    ; the columns' map x (project)
-BCL     = $07D5                    ; this strip's bottom points past YGND: a
+BCL     = $B9                    ; this strip's bottom points past YGND: a
                                    ; count (0: none)
 ZB      = $07D1                    ; ZBACK less the first row's j: row k's map
 RN      = $07D2                    ; row is czt + ZB - k; the near clip's row
 FACT    = $07D4                    ; (ZB - ZCLIP, the last); the far clip's row
                                    ; is between the rows either side (1) or a
                                    ; corner row (0)
-CAME    = $07D6                    ; the camera above CAMH (0..EMAX: game.s's)
+CAME    = $BB                    ; the camera above CAMH (0..EMAX: game.s's)
 HGV     = $07D7                    ; the ground under the ship (hgnd's, for
                                    ; game.s)
-EYV     = $07D8                    ; prow7's: a row's extra y for CAME (eyrow),
-MT0     = $07D9                    ; and eyrow's, satrow's and cliprow7's
-MT1     = $07DA                    ; scratch
+EYV     = $BA                    ; prow7's: a row's extra y for CAME (eyrow),
+MT0     = $B7                    ; and eyrow's, satrow's and cliprow7's
+MT1     = $B8                    ; scratch
 
         .assert YGND+2-YSKY <= 97 && 97+YGND+1-YSKY < $100, error, "SWT: a line table crosses its page"
 OP_STAY = $99                      ; STA abs,Y
@@ -430,6 +430,44 @@ lo2:    .res 1                     ; split2's: the middle's EORed with the
 me:     .res 1                     ; right's
 mo:     .res 1
 
+; the hottest variables (b32/tools/zprank.py: zero page saves a cycle an access):
+; the ship's multiply and rasteriser, the projection's, setback's, the
+; readout's here; the rest in ZP2 ($A0..) and the equates MT0.. HI ($B7-$FB)
+smB:    .res 1
+smA:    .res 1                      ; smul's
+smB0:   .res 1
+HHI:    .res 1
+MQB:    .res 1                      ; mul4's multiplier
+HLO:    .res 1                      ; the row's least and greatest heights
+RK:     .res 1                      ; prow32's: the row's 16 k
+DCUR:   .res 1                      ; the row's di as a corner row
+RN16:   .res 1                      ; 16 RN
+sdl:    .res 1
+fps10:  .res 2                      ; readout's: the rate in tenths
+tcol:   .res 1                      ; putg's column (readout's)
+wn:     .res 1
+WF:     .res 8
+db:     .res 1                      ; DBUF's next byte
+        .segment "ZP2": zeropage
+lxs:    .res 1
+sxr:    .res 1
+lx1:    .res 1
+tqb:    .res 3
+tqa:    .res 3                      ; tq8's
+pxl:    .res 1
+lx0:    .res 1                      ; its extent
+fj2:    .res 1
+pi:     .res 1                      ; xform's point and its sums
+yc:     .res 1                      ; the line
+NFL:    .res 1                      ; the faces set up
+sxl:    .res 1
+pyh:    .res 1
+pyl:    .res 1
+zrh:    .res 1
+zrl:    .res 1
+xrh:    .res 1
+pxh:    .res 1
+xrl:    .res 1
         .code
 ; ---------------------------------------------------------------- start
 ; loop: the main loop, entered from the loader (boot32.s: its start-up done,
@@ -634,7 +672,6 @@ setback:
         bne @l
 @x:     rts
 stabs:  .byte 0                    ; the screen the STABs store to (init's: 0)
-sdl:    .byte 0
 
         .include "boot32.s"
 ; ---------------------------------------------------------------- init
@@ -3489,7 +3526,6 @@ pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:
 SHF:    .byte 0                    ; zsh4's: HT to shift a row on (1) or back
                                    ; ($FF) with HTN; 0 none
         .segment "LOWD"
-fps10:  .res 2                     ; readout's: the rate in tenths
         .code
 fpson:  .byte 1                    ; the readout on (game.s's F toggles it)
         .segment "LOWD"
@@ -3497,7 +3533,6 @@ dvs:    .res 8                     ; flip's: the last eight frames' vertical
                                    ; syncs (init zeroes them)
 dvi:    .res 1                     ; the next entry
 vlast:  .res 1                     ; vcount at the last flip
-tcol:   .res 1                     ; putg's column (readout's)
 ; the line tables (init's), each in one page (b32.cfg: LOWD, P1)
 ENTB0:  .res YGND+2-YSKY
 ENTB1:  .res YGND+2-YSKY

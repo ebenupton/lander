@@ -188,9 +188,6 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
 @x:     rts
         .assert <PY = 0, error, "PY page-aligned"
         .segment "SG1"
-RK:     .res 1                     ; prow32's: the row's 16 k
-RN16:   .res 1                     ; 16 RN
-DCUR:   .res 1                     ; the row's di as a corner row
 YT:     .res 16                    ; ytab's: line by height
         .code
 
@@ -275,7 +272,6 @@ mul4:   sta MT1
         clc
         rts
         .segment "SG1"
-MQB:    .res 1                     ; mul4's multiplier
         .code
 
 ; ytab: YT + h = corner height h's line in the row: HORIZON + ((CAMH + hg - h)
@@ -365,8 +361,6 @@ ytab:   lda HGV                    ; (CAMH + hg - HLO) r, 8 x 16: the
 @x:     rts
         .assert HORIZON = -16, error, "ytab: HORIZON -16"
         .segment "SG1"
-HLO:    .res 1                     ; the row's least and greatest heights
-HHI:    .res 1
         .code
 
 ; xrow: PX + X + i, the row's x's (land.project's sx): the ends on the clip

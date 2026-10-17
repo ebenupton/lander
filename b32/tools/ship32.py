@@ -164,6 +164,8 @@ def inc(path):
     """ship32.inc: the model and the walker's tables, ca65 data.
       VQX, VQY, VQZ + i  point i: vertices 0..8 (quarter pixels), then the faces' normals
                          (x 64), 9..16
+      TWIN + i           point i's mirror twin (equal X and Y, Z negated) of higher
+                         index, $FF none
       SINT + k           round(64 sin(k 11.25 degrees)), k 0..31
       PSIN, PCOS + p     the pitches' sines and cosines, x 64
       FV0, FV1, FV2 + f  face f's vertices
@@ -182,6 +184,14 @@ def inc(path):
     pts = VQ + NQ
     for c, nm in enumerate(('VQX', 'VQY', 'VQZ')):
         emit(nm, [v[c] for v in pts])
+    twin = [0xFF] * len(pts)                 # TWIN + i: point i's mirror twin (equal X,
+    for i, (x, y, z) in enumerate(pts):      # Y, Z negated), when that has the higher
+        for j in range(i + 1, len(pts)):     # index (rast makes points 16 down to 0:
+            if z and pts[j] == (x, y, -z) and twin[i] == 0xFF and j not in twin:  # it is
+                twin[i] = j                  # made first); $FF none
+                break
+    assert all(twin[i] == 0xFF or pts[twin[i]] == (pts[i][0], pts[i][1], -pts[i][2]) for i in range(len(pts)))
+    emit('TWIN', twin)
     emit('SINT', SINT)
     emit('PSIN', PSIN)
     emit('PCOS', PCOS)

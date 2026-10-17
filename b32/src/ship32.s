@@ -410,8 +410,16 @@ rast:   ldy GSHP                   ; the angles
         sta cpi
         ldx #16                    ; the 17 points, 16 down to 0
 @pt:    bit cmiss
-        bmi @mk
-        lda CPX8,x                 ; (kept)
+        bpl @kp
+        ldy TWIN,x                 ; a mirror twin made already: the same px8,
+        bmi @mk                    ; py (equal X, Y)
+        lda CPX8,y
+        sta CPX8,x
+        lda CPYL,y
+        sta CPYL,x
+        lda CPYH,y
+        sta CPYH,x
+@kp:    lda CPX8,x                 ; (kept)
         sta px8
         lda CPYL,x
         sta pyl
@@ -455,34 +463,76 @@ rast:   ldy GSHP                   ; the angles
         adc pyh
         sta pyh
         sta CPYH,x
-@yw:    lda px8                    ; Xr = cb px8 + sb Z
+@yw:    ldy TWIN,x                 ; Xr = cb px8 + sb Z, Zr = cb Z - sb px8:
+        bmi @ow                    ; a mirror twin's from its products (PA = cb
+        lda PAL,y                  ; px8, PB = sb px8, PC = sb Z, PD = cb Z: the
+        sec                        ; same px8, Z negated): Xr = PA - PC, Zr =
+        sbc PCL,y                  ; -(PD + PB)
+        sta xrl
+        lda PAH,y
+        sbc PCH,y
+        sta xrh
+        lda PDL,y
+        clc
+        adc PBL,y
+        sta zrl
+        lda PDH,y
+        adc PBH,y
+        sta zrh
+        lda #0
+        sec
+        sbc zrl
+        sta zrl
+        lda #0
+        sbc zrh
+        sta zrh
+        jmp @xz
+@ow:    lda px8                    ; its own: the products kept (for a twin)
         ldy cb
         jsr smul
         sta xrl
-        sty xrh
-        lda VQZ,x
+        sta PAL,x
+        tya
+        sta xrh
+        sta PAH,x
+        lda px8
         ldy sb
         jsr smul
+        sta PBL,x
+        tya
+        sta PBH,x
+        lda VQZ,x
+        beq @z0                    ; (Z 0: PC = PD = 0, and no twin)
+        ldy sb
+        jsr smul
+        sta PCL,x
         clc
         adc xrl
         sta xrl
         tya
+        sta PCH,x
         adc xrh
         sta xrh
-        lda px8                    ; Zr = cb Z - sb px8 (sb px8 first, into
-        ldy sb                     ; zrl, zrh)
-        jsr smul
-        sta zrl
-        sty zrh
         lda VQZ,x
         ldy cb
         jsr smul
+        sta PDL,x
         sec
-        sbc zrl
+        sbc PBL,x
         sta zrl
         tya
-        sbc zrh
+        sta PDH,x
+        sbc PBH,x
         sta zrh
+        jmp @xz
+@z0:    lda #0                     ; Zr = -PB
+        sec
+        sbc PBL,x
+        sta zrl
+        lda #0
+        sbc PBH,x
+        sta zrh
+@xz:
         cpx #9
         bcs @nm
         lda zrl                    ; a vertex: T = (Zr TQ) >> 8; sy = (py - T
@@ -608,11 +658,16 @@ rast:   ldy GSHP                   ; the angles
         sta lx0                    ; their difference too stays a byte)
         lda #<-48
         sta lx1
-        ldx #0                     ; each face in order: its span, a step on
-        cpx NFL                    ; (X = 0: none set up)
-        beq @scan
-@fl:    jsr fline                  ; (fline keeps X: ecore keeps it)
-        inx
+        ldx #0                     ; each face in order: its span, a step on,
+        cpx NFL                    ; if the line is among its lines (FAY ..
+        beq @scan                  ; FCY-1) (X = 0: none set up)
+@fl:    lda yc
+        cmp FAY,x
+        bmi @fz                    ; above its top
+        cmp FCY,x
+        bpl @fz                    ; at or below its bottom
+        jsr fline                  ; (fline keeps X: ecore keeps it)
+@fz:    inx
         cpx NFL
         bcc @fl
 @scan:  lda lx0                    ; no pixels: before the first band, the box
@@ -859,16 +914,12 @@ ecore:  sta ED,y
         sta ER,y
 @x:     rts
 
-; fline: face slot X's span on line yc into LB, if yc is among its lines
-; (FAY .. FCY-1): its short edge first moved to b-c at b's line; the span
-; between the two edges' x (empty if they meet); then both a line on.
-; Keeps X (rast relies on it).  Clobbers A, Y.
-fline:  lda yc
-        cmp FAY,x
-        bmi @x                     ; above its top
-        cmp FCY,x
-        bpl @x                     ; at or below its bottom
-        cmp FBY,x                  ; at b's line: the short edge b-c
+; fline: face slot X's span on line yc into LB, yc among its lines (FAY ..
+; FCY-1: rast's test; A = yc): its short edge first moved to b-c at b's line;
+; the span between the two edges' x (empty if they meet); then both a line on
+; (estep's, inline: slots X and X + EOFS).  Keeps X (rast relies on it).
+; Clobbers A, Y.
+fline:  cmp FBY,x                  ; at b's line: the short edge b-c
         bne :+
         txa
         clc
@@ -911,26 +962,26 @@ fline:  lda yc
         iny
 @sr:    cpy #0                     ; operand: 20 + sxr
         bne :-
-@st:    txa                        ; both edges a line on
-        jsr estep
-        txa
+@st:    lda EE,x                   ; both edges a line on: x += q, error += r;
+        clc                        ; past dy, x + 1 and error - dy (C the
+        adc ER,x                   ; step: estep's)
+        cmp ED,x
+        bcc :+
+        sbc ED,x
+:       sta EE,x
+        lda EX,x
+        adc EQ,x
+        sta EX,x
+        lda EE+EOFS,x
         clc
-        adc #EOFS
-        jmp estep                  ; (tail call: its RTS is fline's)
-@x:     rts
-; estep: edge slot A a line on: x += q, error += r; past dy, x + 1 and error
-; - dy.  X kept; clobbers A, Y.
-estep:  tay
-        lda EE,y                   ; the error first: C = the step past dy
-        clc
-        adc ER,y
-        cmp ED,y
-        bcc :+                     ; (C clear: no step)
-        sbc ED,y                   ; (C set, A >= ED: stays set, the x + 1)
-:       sta EE,y
-        lda EX,y                   ; x += q + the step
-        adc EQ,y
-        sta EX,y
+        adc ER+EOFS,x
+        cmp ED+EOFS,x
+        bcc :+
+        sbc ED+EOFS,x
+:       sta EE+EOFS,x
+        lda EX+EOFS,x
+        adc EQ+EOFS,x
+        sta EX+EOFS,x
         rts
 
 ; smul: A:Y (low, high) = A times Y, signed 8 x 8: the unsigned product of the
@@ -1098,6 +1149,16 @@ PATON:  .res 16
 PATF:   .res 96
         .segment "P2L"
 LB:     .res 48
+        .segment "ST0"             ; (rast's products, for a point's twin)
+PAL:    .res 17
+PAH:    .res 17
+PBL:    .res 17
+PBH:    .res 17
+        .segment "ST2"
+PCL:    .res 17
+PCH:    .res 17
+PDL:    .res 17
+PDH:    .res 17
         .segment "P2T"             ; (rast's pitched points, by the pitch cpi)
 CPX8:   .res 17
 CPYL:   .res 17

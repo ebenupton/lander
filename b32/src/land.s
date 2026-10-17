@@ -288,7 +288,7 @@ LAH     = LAHB-YSKY                ; each line's 2 * (y >> 3) (lines
 PTN     = 3*((YGND+1-YSKY)/2+1)    ; a parity table's bytes (init's: one a page
                                    ; from STAB, t = 2 screen + half)
         .assert YGND+2-YSKY = 97 && (YSKY & 1) = 0 && ((YGND+1) & 1) = 0, error, "LAH: 97 lines; the parity tables' lines even"
-        .assert PTN <= $B5, error, "a parity table runs into SG0, SG1"
+        .assert PTN <= $93, error, "a parity table runs into ST0, ST2, SG0, SG1"
 CX      = $0AC0                    ; the columns' map x (project)
 BCL     = $B9                    ; this strip's bottom points past YGND: a
                                    ; count (0: none)

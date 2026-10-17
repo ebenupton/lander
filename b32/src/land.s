@@ -150,7 +150,6 @@
 ;   $16C2-$1722   LAH: each line's 2 * (y >> 3)
 ;   $1740-$17A3   EINL,y for y = YSKY-1..YGND+3 (EINL = $1701): run2's table
 ;                 offsets by line
-;   $1800-$18EF   GLY: the readout's 15 characters, 16 bytes each
 ;   $1900-$2EC0   the code (this file's CODE segment)
 ;   $2F00         DBUF: shipspan.s's (bank 6), so the code must end below it
 ;   $3000-$57FF   screen 0; $5800-$7FFF screen 1, LANDS at $7000-$740A
@@ -217,14 +216,14 @@ UVIA_T2L = $FE68                   ; its timer 2: the time since the vertical
 UVIA_T2H = $FE69                   ; sync, counting down from $FF00 (vsync's)
                                    ; at 1 MHz: high byte $FF - ceil(us/256)
 UVIA_ACR = $FE6B                   ; (0: timer 2 counts the clock)
-CR_ROWS = 20                       ; the CRTC's character rows displayed (R6),
-CR_VSYNC = 28                      ; the row of its vertical sync (R7) and its
-CR_TOTAL = 39                      ; rows a frame (R4 + 1, the MODE's), of 512us
-T2ROW0  = $FF - EV1US/256 + 3     ; T2H at least: at most 7680us since the
-                                   ; sync, before irq's E1 (at EV1US) takes
-                                   ; lfront for the land's segment (flip's)
+CR_ROWS = PROWS+12                 ; the field's row where the land's display
+CR_VSYNC = 28                      ; ends, the row of the vertical sync and the
+CR_TOTAL = 39                      ; rows a field (the MODE's), of 512us
+T2ROW0  = $FF - EV1US/256 + 3     ; T2H at least: at most EV1US - 768us since
+                                   ; the sync, before irq's E1 takes lfront for
+                                   ; the land's frame (flip's)
 T2DEND  = $FF - (CR_TOTAL-CR_VSYNC+CR_ROWS)*512/256  ; T2H at least: at most
-                                   ; 15872us, the display's end (strips')
+                                   ; 16896us, the land's display over (strips')
 WRSEL_WATFORD = $FF30              ; a Watford board's write select: a store to
 WRSEL_SOLIDISK = $FE60             ; here + the socket; a Solidisk's: port B
 BOARD_STD = 0                      ; find_ram's board kinds (writes through
@@ -275,7 +274,6 @@ CO      = $0AD0
 SPB     = $0B00                    ; the slow way's: each pixel's box at the top
 STL     = $0B10                    ; and its transitions (4 a pixel: line, step)
 STD     = $0B20
-GLY     = $1800                    ; the readout's characters: 16 bytes each
 ENTL    = $1600-YSKY               ; each line's entry in its STAB: low byte,
 ENTH    = $1661-YSKY               ; and the page within the table (lines
                                    ; YSKY..YGND+1)
@@ -463,24 +461,30 @@ loop:   jsr gstep
         jmp loop
 
 ; ---------------------------------------------------------------- the display
-; Two CRTC frames a field (vertical rupture), 39 rows of 8 lines in all, the
-; vertical sync at row 28 as a one-frame MODE 1 has it:
-;   the panel: rows 0..7, R4 7, the first 5 displayed (R6 5), 16 characters
-;     wide (R1 16, at the left), from PANEL: the map and the readout; the
-;     other 3 rows black border;
-;   the land: rows 8..38, R4 30, 12 displayed (R6 12), 64 wide, from the
-;     front land buffer (lfront), its sync at its row 20 (R7 20).
+; Two CRTC frames a field (vertical rupture), 39 rows of 8 lines (512us) in all,
+; the vertical sync at row 28 as a one-frame MODE 1 has it:
+;   the panel: rows 0..9, R4 9, MODE 5 (the ULA's $C4, the CRTC at 1MHz: R0 63,
+;     R2 45, R3 $24), 8 characters wide (R1 8: 32 pixels), the first 9 rows
+;     displayed (R6 9) from PANEL: the map (rows 0..7: 32 by 64 pixels, a tile a
+;     pixel by 2 lines) and the readout (row 8); row 9 black;
+;   the land: rows 10..38, R4 28, MODE 1 (the ULA's $D8, the CRTC at 2MHz: R0
+;     127, R2 90, R3 $28), 12 rows displayed (R6 12), 64 wide, from the front land
+;     buffer (lfront), its sync at its row 18 (R7 18).
 ; A frame's start address is taken at its start (VCC 0); R4 is compared at
 ; each row's end and R6 at each row's start, so each frame's are written while
-; it runs, the next's start address too.  Three interrupts (irq):
+; it runs, the next's start address too.  The modes change where nothing is
+; displayed: in the sync and in the panel's black row (the line the change
+; lands in is the only one of another length).  Three interrupts (irq):
 ;   E0, the sync (the system VIA's CA1): vcount, timer 2 restarted (the time
-;     since the sync), the panel's R1, R6, start; timer 1 for E1;
-;   E1, EV1US later, the panel's row 5 (its display over): R4 7, R7 20, the
-;     land's R1, R6 and start (lfront); timer 1 for E2;
-;   E2, EV2US on, the land's row 0: R4 30.
-EV1US   = 11*512 + 5*512 + 250     ; the sync to E1: the panel's row 5 (it
+;     since the sync), MODE 5 and the panel's R1, R6, start; timer 1 for E1;
+;   E1, EV1US later, the panel's row 9 (its display over): MODE 1, R4 9, R7 18,
+;     the land's R1, R6 and start (lfront); timer 1 for E2;
+;   E2, EV2US on, the land's row 0: R4 28.
+PROWS   = 10                       ; the panel frame's rows (9 shown)
+EV1US   = 11*512 + 9*512 + 250     ; the sync to E1: the panel's row 9 (it
                                    ; starts 11 rows after the sync)
-EV2US   = 3*512 + 300              ; E1 to E2: the land's row 0 (+ 300us)
+EV2US   = 1*512 + 300              ; E1 to E2: the land's row 0 (+ 300us)
+ULA_CTL = $FE20                    ; the video ULA's control register
 SVIA_IFR = $FE4D
 SVIA_IER = $FE4E
 UVIA_T1L = $FE64                   ; the user VIA's timer 1 (low, high: a
@@ -507,8 +511,13 @@ irq:    txa
         inc vcount
         lda #$FF
         sta UVIA_T2H               ; the time since the sync
-        CRW 1, 16                  ; the panel: 16 wide, 5 rows, PANEL
-        CRW 6, 5
+        lda #$C4                   ; MODE 5: the ULA, then the CRTC's line (64us
+        sta ULA_CTL                ; at 1MHz)
+        CRW 0, 63
+        CRW 2, 45
+        CRW 3, $24
+        CRW 1, 8                   ; the panel: 8 wide, 9 rows, PANEL
+        CRW 6, 9
         CRW 12, >(PANEL/8)
         CRW 13, <(PANEL/8)
         lda #<EV1US
@@ -517,15 +526,23 @@ irq:    txa
         sta UVIA_T1H               ; (timer 1 off for E1; its flag cleared)
         lda #0
         sta evn
-        beq @x                     ; (always)
+@x:     pla
+        tax
+        lda $FC
+        rti
 @t:     lda UVIA_IFR               ; timer 1 (E1, E2)?
         and #$40
         beq @x
         lda UVIA_T1L               ; (its flag cleared)
         lda evn
         bne @e2
-        CRW 4, 7                   ; E1: the panel's end; the land's frame
-        CRW 7, 20
+        lda #$D8                   ; E1: MODE 1 (the ULA, then the CRTC's line:
+        sta ULA_CTL                ; 64us at 2MHz)
+        CRW 0, 127
+        CRW 2, 90
+        CRW 3, $28
+        CRW 4, PROWS-1             ; the panel's end; the land's frame
+        CRW 7, CR_VSYNC-PROWS
         CRW 1, 64
         CRW 6, 12
         CRW 12
@@ -535,9 +552,9 @@ irq:    txa
         lda #>EV2US
         sta UVIA_T1H
         inc evn
-        bne @x                     ; (always)
-@e2:    CRW 4, 30                  ; E2: the land's 31 rows
-@x:     pla
+        bne @x2                    ; (always)
+@e2:    CRW 4, CR_TOTAL-PROWS-1    ; E2: the land's 29 rows
+@x2:    pla
         tax
         lda $FC
         rti
@@ -3376,8 +3393,8 @@ sp_zg:  cpx fen_e+1
 ; blanks are drawn instead.  In: fpson, dvs, scrb.  Clobbers A, X, Y, fps10,
 ; tcol, ptr.  Caller: loop (after G_POST, before flip; so dvs is the eight
 ; frames before this one).
-G_DOT   = 10                       ; GLY's characters: gchars's index (LANDS's
-                                   ; glyphs makes them)
+G_DOT   = 10                       ; GLY's characters: "0123456789. FPS"'s
+                                   ; index (b32/tools/gen32.py's FONT)
 G_SP    = 11
 G_F     = 12
 
@@ -3466,33 +3483,29 @@ readout:
         jsr putg
         lda #G_F+2
                                    ; (falls into putg)
-; putg: character A (GLY's index) at column tcol (8 pixels: two bytes wide) of
-; character row 2 of the screen being drawn (scrb), tcol then one on.  The 16
-; bytes at GLY + 16 A go to the screen's row 2 + 16 tcol: a character cell's 8
-; lines, then the next cell's.  In: A, tcol, scrb.  Clobbers A, X, Y, ptr.
+; putg: character A (GLY's index) at column tcol of the panel's row 8 (MODE 5:
+; a character a byte wide, 4 pixels), tcol then one on: GLY + 8 A's 8 bytes
+; (its lines) to PANEL + 8*64 + 8 tcol.  In: A, tcol.  Clobbers A, X, Y.
 ; Callers: readout.
 putg:   asl a
         asl a
         asl a
-        asl a
-        tax                        ; X = 16 A (GLY is page-aligned)
+        tax                        ; X = 8 A
         lda tcol
         asl a
         asl a
         asl a
-        asl a
-        sta ptr                    ; ptr = the panel's row 4 + 16 tcol (128
-        lda #>(PANEL+4*128)        ; bytes a row)
-        sta ptr+1
-        ldy #0
-:       lda GLY,x
-        sta (ptr),y
+        tay                        ; Y = 8 tcol: the panel's row 8 (64 bytes a
+:       lda GLY,x                  ; row, 8 a character)
+        sta PANEL+8*64,y
         inx
         iny
-        cpy #16
+        tya
+        and #7
         bne :-
         inc tcol
         rts
+GLY:    .incbin "GLYPHS"           ; the readout's 15 characters, 8 bytes each
 
 pkx:    .byte $FF                  ; project's: the cxt and czt + ZB the heights
 pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:

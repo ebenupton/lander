@@ -1254,77 +1254,91 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
 @o:     rts
 
 ; marker: the ship's tile on the map (the panel, loaded with the map drawn):
-; its pixel pair magenta while GSHV is set -- line MAPZ - z, pair x + MAPX
-; (the tile the ship is over, mod 32: PANEL + 128 (line >> 3) + 8 (pair >> 1)
-; + (line & 7), the byte's left or right pair).  The byte it covers is kept
-; (mkb) and put back when it moves (mka: its address, high byte 0 for none).
-; Clobbers A, X, Y, g0, g1, gt0..gt2.  Called by gpost.
+; its pixel magenta on both its lines while GSHV is set -- tile row r = MAPZ -
+; z, pixel t = x + MAPX (the tile the ship is over, mod 32), lines 2r and 2r +
+; 1: PANEL + 64 (r >> 2) + 8 (t >> 2) + 2 (r & 3), and the next byte (MODE 5,
+; 64 bytes a character row).  The two bytes it covers are kept (mkb) and put
+; back when it moves (mka: the first's address, high byte 0 for none).
+; Clobbers A, X, Y, g0, g1, gt0..gt3.  Called by gpost.
         .assert <PANEL = 0 && (>PANEL & 1) = 0, error, "marker: PANEL page-aligned, even"
 marker: lda #0                     ; (no tile: address 0)
         sta gt0
         sta gt1
         lda GSHV
         beq @h
-        lda #MAPZ                  ; the line, MAPZ - z (mod 32)
-        sec
+        lda #MAPZ                  ; r = MAPZ - z (mod 32): 64 (r >> 2) + 2 (r &
+        sec                        ; 3), high byte r >> 4
         sbc sz+2
         and #MAPN-1
         tax
-        lsr a
-        lsr a
-        lsr a
-        lsr a                      ; line >> 4 (C: bit 3)
-        ora #>PANEL
-        sta gt1
+        and #3
+        asl a
+        sta gt0
         txa
-        and #7
-        bcc @l
-        ora #$80
-@l:     sta gt0
-        lda sx+2                   ; the pair, x + MAPX (mod 32): its byte, 8
-        clc                        ; (pair >> 1), and which half (gt2: 0 left)
-        adc #MAPX
-        and #MAPN-1
-        lsr a
-        ror gt2
+        and #$0C
+        asl a
         asl a
         asl a
         asl a
         ora gt0
         sta gt0
+        txa
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora #>PANEL
+        sta gt1
+        lda sx+2                   ; t = x + MAPX (mod 32): + 8 (t >> 2), its
+        clc                        ; pixel's bits (gt2)
+        adc #MAPX
+        and #MAPN-1
+        tax
+        and #$1C
+        asl a
+        ora gt0
+        sta gt0
+        txa
+        and #3
+        tax
+        lda PIXM,x
+        sta gt2
 @h:     lda gt0
         cmp mka
         bne @mv
         lda gt1
         cmp mka+1
         beq @r                     ; (unmoved)
-@mv:    ldy #0
-        lda mka+1                  ; the old tile's byte back
+@mv:    lda mka+1                  ; the old tile's bytes back
         beq @n
         sta g0+1
         lda mka
         sta g0
-        lda mkb
+        ldy #1
+@b:     lda mkb,y
         sta (g0),y
-@n:     lda gt0                    ; the new one's address and byte kept, its
-        sta mka                    ; pair made magenta (colour 2: the pair's
-        sta g0                     ; high-nibble bits)
+        dey
+        bpl @b
+@n:     lda gt0                    ; the new one's address and bytes kept, its
+        sta mka                    ; pixel made magenta (colour 2: the pixel's
+        sta g0                     ; high-nibble bit)
         lda gt1
         sta mka+1
         beq @r
         sta g0+1
-        lda (g0),y
-        sta mkb
-        bit gt2
-        bmi @rt
-        and #$33                   ; the left pair
-        ora #$C0
+        lda gt2
+        and #$F0
+        sta gt3
+        ldy #1
+@p:     lda (g0),y
+        sta mkb,y
+        ora gt2                    ; (the pixel's bits cleared, then set to
+        eor gt2                    ; magenta's)
+        ora gt3
         sta (g0),y
+        dey
+        bpl @p
 @r:     rts
-@rt:    and #$CC                   ; the right pair
-        ora #$30
-        sta (g0),y
-        rts
 
 PIXG    = PIXM                     ; pixel 0..3's bits (LAND's)
 
@@ -1354,8 +1368,8 @@ satt:   .res 1                     ; last written (ginit's: $FF)
 rnd:    .res 1                    ; rand's state
 scrg:   .res 1                    ; the screen being written to (high byte)
 pnext:  .res 1                    ; emit's last dot
-mka:    .res 2                     ; marker's: the tile's byte ($xx00: none)
-mkb:    .res 1                     ; and what it held
+mka:    .res 2                     ; marker's: the tile's first byte ($xx00:
+mkb:    .res 2                     ; none) and what its two held
         .segment "GAME"
         .include "gametab.inc"
         .segment "LOW1"            ; (the dots: page 1, and LOWP)

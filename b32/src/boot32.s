@@ -5,8 +5,7 @@
 ;
 ; start, with the MOS still there: *LOAD L32M (the program and its data, $1900
 ; up to the land buffers), close !BOOT (the filing system is then idle: its
-; workspace is the program's), the readout's characters from the MOS's font
-; (glyphs, OSWORD 10, into GLY).  Then the MOS is done with: interrupts off,
+; workspace is the program's).  Then the MOS is done with: interrupts off,
 ; every VIA interrupt disabled, IRQ1V ours (irq: the MOS ROM's entry still
 ; saves A in $FC and jumps through it), low RAM zeroed, an RTI at $0D00 for a
 ; stray NMI.  The tables (init), the panel's map copied in (pmap), land
@@ -23,7 +22,6 @@ start:  ldx #<cmd_main             ; the program
         jsr OSCLI
         lda #119                   ; !BOOT closed: no filing system call
         jsr OSBYTE                 ; follows
-        jsr glyphs                 ; GLY
         sei                        ; the MOS's interrupts off for good
         jsr takeover
         lda #$82                   ; the sync (CA1) and timer 1 on
@@ -34,7 +32,7 @@ start:  ldx #<cmd_main             ; the program
         jmp go
 
 ; takeover: the machine taken from the MOS (interrupts off), as above: the VIAs,
-; IRQ1V, low RAM zeroed (all but the stack, IRQ1V and GLY), the NMI's RTI,
+; IRQ1V, low RAM zeroed (all but the stack and IRQ1V), the NMI's RTI,
 ; init, the map, the land buffers below the loader, the CRTC and palette.  (The tests
 ; call it in place of the loader.)  Clobbers A, X, Y.
 takeover:
@@ -49,7 +47,7 @@ takeover:
         sta UVIA_ACR               ; counting the clock from $FF00
         sta UVIA_T2L
         lda #0                     ; zeroed: zero page, page 1 below the stack,
-        ldx #<__ZP_SIZE__          ; page 2 past IRQ1V, then $0300 up to GLY
+        ldx #<__ZP_SIZE__          ; page 2 past IRQ1V, then $0300 up to $18FF
 :       dex                        ; (the panel, MID, STAB...: the MOS's
         sta $00,x                  ; leftovers otherwise; init makes the
         bne :-                     ; tables over it)
@@ -70,7 +68,7 @@ takeover:
         bne :-
         inc ptr+1
         ldx ptr+1
-        cpx #>GLY
+        cpx #$19                   ; (to the program)
         bne :-
         lda #$40                   ; RTI: a stray NMI
         sta $0D00
@@ -109,55 +107,6 @@ takeover:
         dex
         bpl :-
         rts
-
-; glyphs: the readout's characters (gchars) into GLY: each from OSWORD 10, its
-; 8 rows as MODE 1 bytes, colour 3 where set: the left 4 pixels at GLY + 16 i
-; + row, the right 4 at + 8.  Clobbers A, X, Y, tcol, tmp.
-glyphs: ldx #0
-@c:     stx tcol
-        lda gchars,x
-        sta oswblk
-        lda #10
-        ldx #<oswblk
-        ldy #>oswblk
-        jsr OSWORD
-        lda tcol
-        asl a
-        asl a
-        asl a
-        asl a
-        tax
-        ldy #0
-@l:     lda oswblk+1,y
-        and #$F0
-        sta tmp
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora tmp
-        sta GLY,x
-        lda oswblk+1,y
-        and #$0F
-        sta tmp
-        asl a
-        asl a
-        asl a
-        asl a
-        ora tmp
-        sta GLY+8,x
-        inx
-        iny
-        cpy #8
-        bne @l
-        ldx tcol
-        inx
-        cpx #gchars_end-gchars
-        bne @c
-        rts
-gchars: .byte "0123456789. FPS"    ; (G_DOT 10, G_SP 11, G_F 12: readout's)
-gchars_end:
-oswblk: .res 9
 
 crtc_regs:                         ; (register, value) pairs
         .byte 1, 64                ; 64 characters displayed

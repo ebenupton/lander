@@ -2005,9 +2005,28 @@ fsplit: lda mx                     ; no lines (mx >= flr1): nothing to draw
 ; rc_t: record's and recordc's black above: lines TOPS (A, < mx) .. mx-1, one
 ; line here (rc_h) or a run; then c_rd.  V is kept throughout (run's STAB code
 ; is STA, LDA, TXA, RTS).
-rc_t:   tax                        ; lines TOPS .. mx-1, black, by run even
-        ldy mx                     ; for one line (V kept: run's entry
-        lda ve                     ; arithmetic would clear it; RVE, RVO kept)
+rc_t:   tax                        ; lines TOPS .. mx-1, black: one line (TOPS
+        inx                        ; = mx - 1) its byte at once, as np_h (V
+        cpx mx                     ; kept: PHP, PLP), else by run (RVE, RVO
+        bne rc_r                   ; kept)
+        dex
+        php
+        txa
+        and #7
+        sta zp_
+        lda LAH,x                  ; the line's page: LAH + scrh
+        clc
+        adc scrh
+        sta zp_+1
+        ldy coff
+        lda #0
+        sta (zp_),y
+        plp
+        ldy x4
+        jmp c_rd
+rc_r:   dex
+        ldy mx
+        lda ve
         sta svE
         lda vo
         sta svO

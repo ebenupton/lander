@@ -263,7 +263,7 @@ HT      = $0880                    ; the rows' raw heights, 16 a row (project)
 CLE     = $0900                    ; pcol5's window of box bytes: 16 a row, even
 CLO     = $09A0                    ; and odd lines
 TX      = $BC                    ; the strip's top row's points (0 and NX+1:
-TY      = $0A40                    ; the margins)
+                                   ; (TY: zero page, below)
 BX      = $CC                    ; and its bottom row's
 BY      = $0A50
 LO      = $DC                    ; each rung's pixels: LO..HI-1 (HI = LO:
@@ -298,7 +298,7 @@ FACT    = $07D4                    ; (ZB - ZCLIP, the last); the far clip's row
                                    ; is between the rows either side (1) or a
                                    ; corner row (0)
 CAME    = $BB                    ; the camera above CAMH (0..EMAX: game.s's)
-HGV     = $07D7                    ; the ground under the ship (hgnd's, for
+                                   ; (HGV, zero page below: the ground under the ship (hgnd's, for
                                    ; game.s)
 EYV     = $BA                    ; prow7's: a row's extra y for CAME (eyrow),
 MT0     = $B7                    ; and eyrow's, satrow's and cliprow7's
@@ -313,6 +313,8 @@ OP_INX  = $E8
 OP_DEX  = $CA
 
         .zeropage
+TY:     .res NX+2                  ; the strip's top row's points' y (0 and
+                                   ; NX+1: the margins)
 cxt:    .res 1                     ; the camera: tile and sixteenth, x and z
 cxs:    .res 1
 czt:    .res 1
@@ -323,7 +325,6 @@ np:     .res 1                     ; points a row: NX (prow7's; game.s reads
                                    ; it: the renderer uses NX)
 nr:     .res 1                     ; rows: 7 or 8 (project's)
 vcount: .res 1                     ; vertical syncs (vsync's)
-vflip:  .res 1                     ; vcount at the last flip
 ptr:    .res 2                     ; a pointer (init, putg, LANDS)
 tmp:    .res 2                     ; scratch (init, prow7's 16 j, hgnd, slow,
                                    ; slow2, LANDS)
@@ -345,13 +346,10 @@ topa:   .res 2                     ; its top row's line by pixel (ROWA or
 bota:   .res 2                     ; ROWB), and its bottom's (the other)
 ; trace
 tdx2:   .res 1                     ; traceb's: 2 dx, 2 |dy|, the error, the y
-tdy2:   .res 1                     ; walked, the segment's x1; tj: an index or
                                    ; scratch (the segment, the rung, gone's
                                    ; column, slow's pixel, mktr's index,
                                    ; s2v's stretch end; fsplit's fwu)
 terr:   .res 1
-tyy:    .res 1
-tx1:    .res 1
 tj:     .res 1
 ; rungs
 tyv:    .res 1                     ; traceb's: the pending run's y
@@ -365,7 +363,6 @@ rtp:    .res 2                     ; a rung's transitions by position (split,
                                    ; mktr)
 dva:    .res 1                     ; the divisor a and dividend D (divs, divt)
 dvd:    .res 1
-fe:     .res 1                     ; traceb's: a long fill's end
 tcnt:   .res 1                     ; traceb's: the pending run's first x
 tsy:    .res 1                     ; gone's: xr / 4, the first column right
                                    ; of the near strip
@@ -379,7 +376,6 @@ BO      = BE+5                     ; and odd lines (both in the shared scratch
 ; columns
 x4:     .res 1                     ; the column's first pixel x (a multiple
                                    ; of 4)
-x4p4:   .res 1                     ; x4 + 4 (slow's)
 coff:   .res 1                     ; (8 * column) & 255: the byte within the
                                    ; half
 scrh:   .res 1                     ; the screen's high byte + the half (shs)
@@ -397,11 +393,8 @@ ve:     .res 1                     ; the bytes being drawn: even and odd lines
 vo:     .res 1                     ; (also run2's, RVE, RVO: the black runs,
 RVE     = ve                       ; rc_t's and nearpost's, keep them)
 RVO     = vo
-re:     .res 1                     ; split2's right box's bytes
-ro:     .res 1
 bpos:   .res 1                     ; a split column's boundary: pixels left
                                    ; of it
-p0:     .res 1                     ; mktr's: the rung's position at the top,
 p1:     .res 1                     ; bottom
 yy:     .res 1                     ; split2's: the run's first line, its
 kk:     .res 1                     ; transition index (yy: slow2's line too)
@@ -419,7 +412,6 @@ zp_:    .res 2                     ; a line's address, for (zp_),y
 dvx:    .res 1                     ; div8's divisor
 svE:    .res 1                     ; rc_t's, np_r's: RVE, RVO kept
 svO:    .res 1
-stabp:  .res 1                     ; STAB's page for t (sethalf's)
 TRL:    .res 12                    ; mktr's transitions: line, and bpos after
 TRB:    .res 12                    ; as an LM mask (a second rung's from 6;
                                    ; also bank 6's scratch)
@@ -431,10 +423,6 @@ PPNONE  = $0200                    ; pp's first target, the first run's put-back
 tsp:    .res 2                     ; TOPS, BOTS of the screen being drawn (its
 bsp:    .res 2                     ; set)
 bpos2:  .res 1                     ; split2's, s2v's: the second boundary
-le:     .res 1                     ; split2's, s2v's: the left box's bytes;
-lo2:    .res 1                     ; split2's: the middle's EORed with the
-me:     .res 1                     ; right's
-mo:     .res 1
 
 ; the hottest variables (b32/tools/zprank.py: zero page saves a cycle an access):
 ; the ship's multiply and rasteriser, the projection's, setback's, the
@@ -453,15 +441,15 @@ wn:     .res 1
 WF:     .res 8
 db:     .res 1                      ; DBUF's next byte
         .segment "ZP2": zeropage
-lxs:    .res 1
-sxr:    .res 1
+HGV:    .res 1                     ; the ground under the ship (hgnd's)
+c_v1:   .res 1                     ; $40 (init's): BIT c_v1 sets V, clears N
+bln:    .res 1                     ; (the ship's: a band's lines)
+px8:    .res 1                     ; (rast's: (px + 32) >> 6)
 lx1:    .res 1
 tqb:    .res 3
 tqa:    .res 3                      ; tq8's
 pxl:    .res 1
 lx0:    .res 1                      ; its extent
-fj2:    .res 1
-pi:     .res 1                      ; xform's point and its sums
 yc:     .res 1                      ; the line
 NFL:    .res 1                      ; the faces set up
 sxl:    .res 1
@@ -688,7 +676,9 @@ rr:     .res 2
 ; JMPs; EINL; pp to dummy; the camera at tile (40, 30), sixteenths 0.  No
 ; OS calls: the tests (test/landsoak.py, test/gametest.py) run it under py65.
 ; Needs bank 4 paged in and writable.  Clobbers A, X, Y, ptr, tmp.
-init:   jsr shtab                  ; the ship's walker's tables
+init:   lda #$40                   ; c_v1: BIT's V
+        sta c_v1
+        jsr shtab                  ; the ship's walker's tables
         lda #<DI0                  ; R7L, R7H: (2^21 + k) div 2k, k = DI0 + di
         sta rk                     ; (rk, rk+1: k)
         lda #>DI0
@@ -1980,7 +1970,6 @@ pT5:    lda TOPS,x                 ; (strips: this screen's set)
         bcs o_nr                   ; nothing above to black: one box
         bcc rc_t
 
-c_v1:   .byte $40                  ; BIT c_v1: V set (bit 6), N clear
 
 ; c_ld: rung ri's two boxes have the same bytes (fs_s1's and split's finding),
 ; so the column is one box: RVE, RVO = box ri-1's; its run (c_r1) if the top is
@@ -3358,6 +3347,19 @@ pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:
 SHF:    .byte 0                    ; zsh4's: HT to shift a row on (1) or back
                                    ; ($FF) with HTN; 0 none
         .code
+        .segment "SG0"             ; (out of zero page: rare paths)
+tdy2:   .res 1                     ; traceb's t_old, t_steep
+tyy:    .res 1
+tx1:    .res 1
+x4p4:   .res 1                     ; slow's: x4 + 4
+re:     .res 1                     ; split2's boxes' bytes
+ro:     .res 1
+le:     .res 1
+lo2:    .res 1
+me:     .res 1
+mo:     .res 1
+p0:     .res 1                     ; mktr's
+vflip:  .res 1                     ; flip's: vcount at the last flip
         .segment "LDL"
 vlast:  .res 1                     ; vcount at the last flip
 ; the line tables (init's): each at offset $40..$9F of its page (b32.cfg: LDT,

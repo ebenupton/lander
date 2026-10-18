@@ -1104,7 +1104,6 @@ ca:     .res 1                    ; the angles' cosines, sines
 sa:     .res 1
 cb:     .res 1
 sb:     .res 1
-px8:    .res 1
 tql:    .res 1
 tqh:    .res 1
 SXV:    .res 9                     ; the vertices' pixel offsets
@@ -1137,7 +1136,6 @@ YHI:    .res 1
         .segment "SG0"             ; (scratch: b32.cfg's SG0, G1B, G1A, P2L)
 WB:     .res 8                     ; its boundaries and faces
 bh:     .res 1                    ; the open band's header ($FF: none)
-bln:    .res 1                    ; its lines
 NPAT:   .res 1                    ; the patterns: the last made
 PEND:   .res 1                    ; the open band's faces
 PATTOP: .res 1                    ; PATF's next

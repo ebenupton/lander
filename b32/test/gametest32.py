@@ -26,12 +26,16 @@ SVIA_ORA_NH = 0xFE4F
 
 
 def equ(name):
-    """A fixed-address equate's value (NAME = $xxxx in b32/src)."""
+    """A fixed-address equate's value (NAME = $xxxx in b32/src), or a label's."""
     for f in os.listdir(os.path.join(ROOT, 'b32', 'src')):
         if f.endswith('.s'):
             m = re.search(r'^' + name + r'\s*=\s*\$([0-9A-Fa-f]+)\b', open(os.path.join(ROOT, 'b32', 'src', f)).read(), re.M)
             if m:
                 return int(m.group(1), 16)
+    for ln in open(os.path.join(ROOT, 'build32', 'labels.txt')):     # (or a label)
+        _, a, n = ln.split()
+        if n.lstrip('.') == name:
+            return int(a, 16)
     raise KeyError(name)
 
 

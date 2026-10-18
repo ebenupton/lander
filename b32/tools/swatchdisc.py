@@ -2,10 +2,10 @@
 """The swatch selector disc: build32/swatch.ssd.  SHIFT+BREAK types in and runs a BASIC
 program (MODE 1, black, cyan, magenta, yellow) showing, for each of proto/swatch35.py's
 35 colours (k black, c cyan, m magenta, y yellow pixels in a 2 x 2 cell), a row: its
-number on the left, then a 16 x 16 pixel swatch of each arrangement of its four
+number on the left, then a 32 x 32 pixel swatch of each arrangement of its four
 pixels in the cell, counted once up to a shift (a cell shifted a pixel across or down
 tiles the same dither): the game's own (swatch35.cell) first, the rest after.
-Swatches 4 pixels apart, rows 4 pixels apart, 12 rows a page; SPACE turns the page.
+Swatches 4 pixels apart, rows 4 pixels apart, 6 rows a page (6 pages); SPACE turns the page.
 A VideoNULA is reset first (its palette would otherwise survive BREAK; without one the
 write is the ULA's, which MODE 1 then sets).
 
@@ -58,15 +58,15 @@ PROGRAM = r'''10 VDU6:OSCLI"FX151,34,64":MODE1:VDU23,1,0;0;0;0;19,1,6;0;19,2,5;0
 30 FORC%=0TO34:READN%(C%):FORI%=0TON%(C%)-1:READE%(C%,I%),O%(C%,I%):NEXT:NEXT
 40 P%=0
 50 CLS:VDU5:GCOL0,3
-60 FORR%=0TO11:C%=P%*12+R%:IFC%<35 PROCrow
+60 FORR%=0TO5:C%=P%*6+R%:IFC%<35 PROCrow
 70 NEXT
-80 MOVE0,31:PRINT"Page ";P%+1;" of 3   SPACE: next page";
-90 REPEATUNTILGET=32:P%=(P%+1)MOD3:GOTO50
+80 MOVE0,31:PRINT"Page ";P%+1;" of 6   SPACE: next page";
+90 REPEATUNTILGET=32:P%=(P%+1)MOD6:GOTO50
 100 DEFPROCrow
-110 Y%=4+R%*20:MOVE0,(255-Y%-4)*4:PRINT;C%;
-120 FORI%=0TON%(C%)-1:X%=(6+5*I%)*8:FORL%=0TO15:Z%=Y%+L%
+110 Y%=4+R%*36:MOVE0,(255-Y%-12)*4:PRINT;C%;
+120 FORI%=0TON%(C%)-1:X%=(6+9*I%)*8:FORL%=0TO31:Z%=Y%+L%
 130 A%=&3000+(Z% DIV 8)*640+(Z% AND 7)+X%:IF Z% AND 1 THEN B%=O%(C%,I%) ELSE B%=E%(C%,I%)
-140 ?A%=B%:A%?8=B%:A%?16=B%:A%?24=B%:NEXT:NEXT
+140 FORJ%=0TO56STEP8:A%?J%=B%:NEXT:NEXT:NEXT
 150 ENDPROC
 '''
 

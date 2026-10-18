@@ -432,8 +432,6 @@ gpanel: ldx #0
 :       inx
         bne @c
         .assert 48*8 > $100 && 48*8 <= $200, error, "gpanel: TOP 1..2 pages"
-        lda #<MGP                  ; (mcl: x on)
-        sta mcp+1
         lda #(MAPZ+1) & 63         ; row MAPZ + 1, line -1's, at slot 64
         ldx #64
         jsr @row
@@ -575,7 +573,7 @@ gpc:    .byte 0
 gpx:    .byte 0
 
 mtc:    .word MGP_S, MGP
-        .byte 30
+        .byte 32
         .word HTL_S, HTL
         .byte 30
         .word LUT_S, LUT
@@ -585,8 +583,8 @@ mtc:    .word MGP_S, MGP
         .word B1N_S, B1N
         .byte 32
 mtce:
-        .assert MGQ = MGP+6 && YQT = MGQ+6 && LQT = YQT+7 && SEAI = LQT+7 && HTH = HTL+15, error, "mtc: the holes' tables in order"
-        .assert MGQ_S = MGP_S+6 && YQT_S = MGQ_S+6 && LQT_S = YQT_S+7 && SEAI_S = LQT_S+7 && HTH_S = HTL_S+15, error, "mtc: the sources in order"
+        .assert YQT = MGP+6 && MGQ = YQT+9 && LQT = MGQ+6 && SEAI = LQT+7 && HTH = HTL+15, error, "mtc: the holes' tables in order"
+        .assert YQT_S = MGP_S+6 && MGQ_S = YQT_S+9 && LQT_S = MGQ_S+6 && SEAI_S = LQT_S+7 && HTH_S = HTL_S+15, error, "mtc: the sources in order"
 
 crtc_regs:                         ; (register, value) pairs: MODE 1's, but
         .byte 0, 127               ; 64 characters displayed

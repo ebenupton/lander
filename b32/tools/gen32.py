@@ -74,7 +74,8 @@ def mapgen():
     odd ql's in the high nibble); RA; SEAI: the sea's colour indices by R1 & 3; PADI
     the pad's."""
     cols = colours()
-    assert [k for k, _, _ in MG.TERMS] == [2, 2, 2, 2, 1, 1]
+    assert MG.TERMS == [(2, 1, -2), (2, 4, 3), (2, -5, 3), (2, 7, 5), (1, 5, 11), (1, 10, 7)], \
+        "mapgen.s's mcl sums the phases for these terms"
     lut = MG._lut()
     lb = []
     for qy in range(8):
@@ -84,8 +85,9 @@ def mapgen():
     assert all(0 < t < 65536 for t in ht)
     code = [('SL', [(v + 256) & 255 for v in MG.SIN16]), ('RA', MG.RA)]
     # (the rest the loader copies to holes: mapgen.s's .res for each, these as _S)
-    held = [('MGP', [p & 63 for _, p, _ in MG.TERMS]), ('MGQ', [q & 63 for _, _, q in MG.TERMS]),
-            ('YQT', MG.YQ), ('LQT', MG.LQ), ('SEAI', [cols.index(e) for e in L.SEAC]),
+    held = [('MGP', [p & 63 for _, p, _ in MG.TERMS]), ('YQT', MG.YQ + [0, 0]),
+            ('MGQ', [q & 63 for _, _, q in MG.TERMS]),
+            ('LQT', MG.LQ), ('SEAI', [cols.index(e) for e in L.SEAC]),
             ('HTL', [t & 255 for t in ht]), ('HTH', [t >> 8 for t in ht]), ('LUT', lb)]
     out = ['; b32/tools/gen32.py: proto/mapgen.py\'s tables (b32/src/mapgen.s)',
            f'PADI    = {cols.index(L.PADC)}']

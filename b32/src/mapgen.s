@@ -29,6 +29,7 @@ MGT     = $9B                      ; scratch
 MGU     = $9C
 MGW     = $9D
 MGR     = $9E                      ; mtl's random byte
+MWK     = $9F                      ; mwin's row
 
 ; mwin: the window to the camera (cxt, czt + ZB): stepped a column or row at a
 ; time while within 8 columns or 7 rows, else made anew (and the first time:
@@ -165,17 +166,14 @@ mxt:    lda #0
         dec MGN
         jmp mtl
 mxl:    lda #1                     ; x on, 16
-        ldx #<MGP
         ldy #16
         bne :+                     ; (always)
 mzl:    lda #16                    ; z on, 8
-        ldx #<MGQ
         ldy #8
-:       sta MGD
-        stx mcp+1                  ; (mcl's phase steps: p or q)
+:       sta MGD                    ; (also mcl's phase steps' index)
         sty MGN
         rts
-        .assert >MGP = >MGQ, error, "mxl, mzl: MGP, MGQ in one page"
+        .assert MGQ = MGP+15, error, "mcl: MGQ = MGP - 1 + 16"
 
 ; mset: MGX, MGZ, MGS for the window's corner A across, Y down (each 0..15):
 ; x = WX0 + A, z = WZ0 + Y (mod 64), slot MWO + 16 Y + A (mod 128).  Clobbers A.
@@ -202,45 +200,110 @@ mset:   sta MGT
         sta MGS
         rts
 
+.macro MADD t                      ; A, X (low, high) + term t's SIN16 + 256
+        ldy MGPH+t
+        cpy #33
+        bcs :+
+        inx
+:       clc
+        adc SL,y
+        bcc :+
+        inx
+:
+.endmacro
 ; mcl: MGN corners from (MGX, MGZ) at slot MGS, each next MGD slots on and x or
-; z one on (mcp's operand: MGP or MGQ, the phases' steps): each height into its
+; z one on (MGD 1 or 16: MGP or MGQ the phases' steps): each height into its
 ; slot (colour 0).  The height: PADH on the pad (x, z <= PADN),
 ; else the count of HTL/HTH's thresholds the sum + 2560 reaches, the sum the
-; six terms' SIN16 + 256 (madd's), the four k = 2 terms' doubled.  Clobbers A,
+; six terms' SIN16 + 256 (MADD's), the four k = 2 terms' doubled.  Clobbers A,
 ; X, Y.
-mcl:    ldx #5                     ; the phases: p x + q z (mod 64)
-@ph:    lda MGP,x
-        ldy MGX
-        jsr mul64
+mcl:    lda MGX                    ; the phases, p x + q z (mod 64), by sums of
+        asl a                      ; x, z doubled (gen32 asserts the terms):
+        sta MGA                    ; MGA, MGB, MGT 2x, 4x, 8x; MGU, MGW, MGR
+        asl a                      ; 2z, 4z, 8z (mod 256: only bits 0-5 matter)
+        sta MGB
+        asl a
+        sta MGT
+        lda MGZ
+        asl a
+        sta MGU
+        asl a
         sta MGW
-        lda MGQ,x
-        ldy MGZ
-        jsr mul64
+        asl a
+        sta MGR
+        lda MGX                    ; x - 2z
+        sec
+        sbc MGU
+        and #63
+        sta MGPH
+        lda MGB                    ; 4x + 3z
+        clc
+        adc MGU
+        clc
+        adc MGZ
+        and #63
+        sta MGPH+1
+        lda MGU                    ; -5x + 3z
+        clc
+        adc MGZ
+        sec
+        sbc MGB
+        sec
+        sbc MGX
+        and #63
+        sta MGPH+2
+        lda MGT                    ; 7x + 5z
+        sec
+        sbc MGX
         clc
         adc MGW
+        clc
+        adc MGZ
         and #63
-        sta MGPH,x
-        dex
-        bpl @ph
+        sta MGPH+3
+        lda MGB                    ; 5x + 11z
+        clc
+        adc MGX
+        clc
+        adc MGR
+        clc
+        adc MGU
+        clc
+        adc MGZ
+        and #63
+        sta MGPH+4
+        lda MGT                    ; 10x + 7z
+        clc
+        adc MGA
+        clc
+        adc MGR
+        sec
+        sbc MGZ
+        and #63
+        sta MGPH+5
 mcl_c:  lda MGX                    ; the pad?
         cmp #PADN+1
         bcs :+
         lda MGZ
         cmp #PADN+1
+        bcs :+
         lda #PADH
-        bcc mcl_s
-:       lda #0                     ; the sum: terms 3..0 (k = 2) doubled, then
-        sta MGB                    ; terms 4, 5 (A its low byte, MGB its high)
-        ldx #3
-:       jsr madd
-        dex
-        bpl :-
+        jmp mcl_s
+:       ldx #0                     ; the sum: terms 0..3 (k = 2) doubled, then
+        txa                        ; terms 4, 5 (A its low byte, X its high):
+        MADD 0                     ; each SL's byte, 256 more for i <= 32
+        MADD 1
+        MADD 2
+        MADD 3
         asl a
-        rol MGB
-        ldx #4
-        jsr madd
-        inx
-        jsr madd
+        sta MGA
+        txa
+        rol a
+        tax
+        lda MGA
+        MADD 4
+        MADD 5
+        stx MGB
         sta MGA
         ldy #0                     ; Y: the thresholds reached (T k at HTL + k
         cmp HTL+7                  ; - 1, k 1..15; A = MGA)
@@ -275,27 +338,16 @@ mcl_s:  ldy MGS
         sta MC,y
         jsr mnext
         beq mcl_x
-        ldx #5                     ; the phases on
-:       lda MGPH,x
+        ldy MGD                    ; the phases on: MGP - 1 + MGD + t (MGD 1, x
+        .repeat 6, t               ; on: MGP; 16, z on: MGQ, MGP + 15)
+        lda MGPH+t
         clc
-mcp:    adc MGP,x                  ; (operand's low byte: MGP or MGQ, mxl's)
+        adc MGP-1+t,y
         and #63
-        sta MGPH,x
-        dex
-        bpl :-
+        sta MGPH+t
+        .endrepeat
         jmp mcl_c
 mcl_x:  rts
-; madd: A (and MGB) + term X's SIN16 + 256: SL's byte, 256 more for i <= 32.
-; Clobbers Y.
-madd:   ldy MGPH,x
-        cpy #33
-        bcs :+
-        inc MGB
-:       clc
-        adc SL,y
-        bcc :+
-        inc MGB
-:       rts
 ; mnext: a line's next: MGN - 1 (Z set: done), else the slot MGD on and x (MGD
 ; 1) or z one on (Z clear after).  Clobbers A, X.
 mnext:  dec MGN
@@ -318,21 +370,6 @@ mnext:  dec MGN
         lda #1                     ; (Z clear)
 @x:     rts
         .assert MGZ = MGX + 1, error, "mnext: MGZ after MGX"
-
-; mul64: A = A Y mod 64 (A 0..63).  Clobbers Y, MGU, MGT.
-mul64:  sta MGU
-        sty MGT
-        lda #0
-        ldy #6
-@l:     lsr MGU
-        bcc :+
-        clc
-        adc MGT
-:       asl MGT
-        dey
-        bne @l
-        and #63
-        rts
 
 ; mtl: MGN tiles from (MGX, MGZ) at slot MGS on (as mcl): each one's colour
 ; index into its slot's high nibble, from its corners (the
@@ -481,17 +518,18 @@ mtl_s:  asl a                      ; A: the colour index, into the high nibble
 :       rts
 
 MWX:    .byte 0                    ; the window: WX0, WZ0, MWO (its slot), MOK
-MWZ:    .byte 0                    ; (0: none made yet), MWK (mwin's row)
+MWZ:    .byte 0                    ; (0: none made yet)
 MWO:    .byte 0
 MOK:    .byte 0
-MWK:    .byte 0
+
         .include "mapgen.inc"      ; SL, RA, PADI; the rest's sources (_S, BOOT)
 ; the tables the loader copies into holes (takeover's mtc): the phases' steps,
 ; the quantiles, the sea's colours; the height thresholds; the colour table.
         .segment "P2T"
 MGP:    .res 6
-MGQ:    .res 6
 YQT:    .res 7
+        .res 2
+MGQ:    .res 6
 LQT:    .res 7
 SEAI:   .res 4
         .segment "ST2"

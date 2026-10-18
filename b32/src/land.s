@@ -420,7 +420,7 @@ TRB:    .res 12                    ; as an LM mask (a second rung's from 6;
 kb:     .res 1                     ; split2's: the second rung's transition
                                    ; index (s2v's: rung ri's)
 pp:     .res 2                     ; run's planted RTS (PPNONE: none)
-PPNONE  = $0200                    ; pp's first target, the first run's put-back:
+PPNONE  = $02FF                    ; pp's first target, the first run's put-back:
                                    ; a byte nothing uses (b32.cfg: below IRQ1V)
 tsp:    .res 2                     ; TOPS, BOTS of the screen being drawn (its
 bsp:    .res 2                     ; set)
@@ -2480,6 +2480,8 @@ sh_b:   ora #0                     ; operand: 2 * back (setback's)
         ldy #0
         sta (pp),y
         stx pp+1
+        lda #$FF                   ; (pp: none planted on this page; its put-back
+        sta pp                     ; lands at $FF, kept free)
         ldy r_e+2                  ; (Y = t again)
         tya
         sec
@@ -3166,39 +3168,47 @@ LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF)
 ; run: lines X .. Y-1 (X < Y) of the column, ve on even lines and vo on odd,
 ; through the parity table for the screen and half (init's: STA line,Y for each
 ; even line YSKY..YGND+1; an odd line is the same store with Y one more, the
-; next byte of the character cell).  Two passes, each from its first entry to
-; an RTS planted over its end entry: the even lines (OL+1,X .. OL+1,Y: a JSR,
-; A = ve, Y = coff), then the odd (OL,X .. OL,Y: a JMP, A = vo, Y = coff + 1;
-; its RTS returns to run's caller).  The two ends are one entry when Y is even.
-; pp keeps the planted RTS so the next run (or sethalf) puts the STA back.  In:
-; X, Y, ve, vo, coff; r_e, r_o's pages (sethalf's).  Clobbers A, X, Y, rodd.
-; Called by rc_r, np_r, split2, gn_d and run2.
+; next byte of the character cell).  One RTS, planted over entry OL,Y, ends
+; both passes: the even lines (from OL+1,X: a JSR, A = ve, Y = coff), then the
+; odd (from OL,X: a JMP, A = vo, Y = coff + 1; its RTS returns to run's
+; caller).  For Y odd the even pass's own end, OL+1,Y, is one entry on: the
+; even pass stops one short and run stores line Y-1 itself through the STA the
+; RTS covers (its operand).  pp keeps the planted RTS, so a run ending where the
+; last did (the same Y, on the same page: sethalf makes pp's low byte $FF)
+; plants nothing.  In: X, Y, ve, vo, coff; r_e, r_o's pages (sethalf's).
+; Clobbers A, X, Y, rodd, rl, rh.  Called by rc_r, np_r, split2, gn_d and run2.
 run:    lda OL+1,x                 ; the passes' first entries
         sta r_e+1
         lda OL,x
         sta r_o+1
+        lda OL+1,y                 ; the even pass's end (rodd: OL,y's but for Y
+        sta rodd                   ; odd)
+        lda OL,y                   ; one RTS, at OL,y (both ends for Y even, the
+        cmp pp                     ; odd pass's for Y odd): there already when
+        beq @k                     ; the last run ended there (pp: $FF none)
         ldx #0
+        pha
         lda #OP_STAY               ; the last RTS back
         sta (pp,x)
-        lda OL,y                   ; the odd pass's end (rodd), the even's
-        sta rodd
-        lda OL+1,y
+        pla
         sta pp
         lda #OP_RTS
         sta (pp,x)
-        lda ve
+@k:     lda ve
         ldy coff
 r_e:    jsr $FF00                  ; (operand: the even entry, the page)
-        ldx #0
-        lda rodd
-        cmp pp
-        beq @o                     ; (one end: Y even)
-        lda #OP_STAY
-        sta (pp,x)
-        lda rodd
-        sta pp
-        lda #OP_RTS
-        sta (pp,x)
+        lda rodd                   ; Y odd: the even pass stopped one short, at
+        cmp pp                     ; the RTS: line Y-1's byte by hand, through
+        beq @o                     ; that STA's operand (pp + 1, + 2)
+        ldy #1
+        lda (pp),y
+        sta rl
+        iny
+        lda (pp),y
+        sta rh
+        ldy coff
+        lda ve
+        sta (rl),y
 @o:     lda vo
         ldy coff
         iny

@@ -105,6 +105,15 @@ takeover:
         ldx #>__CODE_RUN__
         ldy #>(__SHIP_RUN__+__SHIP_SIZE__-__CODE_RUN__+255)
         jsr @copy
+        lda #<__CODE2_LOAD__       ; CODE2 after RUNGT's gap (its source is
+        ldx #>__CODE2_LOAD__       ; past what the copy above wrote: the run
+        sta ptr                    ; addresses are below the load addresses)
+        stx ptr+1
+        lda #<__CODE2_RUN__
+        ldx #>__CODE2_RUN__
+        ldy #>(__CODE2_SIZE__+255)
+        jsr @copy
+        .assert __CODE2_RUN__ < __CODE2_LOAD__ && __SHIP_LOAD__+__SHIP_SIZE__ >= ((__SHIP_RUN__+__SHIP_SIZE__+255) & $FF00), error, "takeover: the copies overlap"
         lda #0                     ; zeroed: zero page, page 1 below the stack,
         ldx #$FC                   ; page 2 past IRQ1V, $0300-$13FF (the MOS's
 @z0:    dex                        ; leftovers otherwise; init makes the tables
@@ -134,6 +143,7 @@ takeover:
         sta $0D00
         jsr gfill
         jsr gqr
+        jsr grung
         jsr gpanel
         jsr init
         lda #0                     ; the pages after the program's to the loader
@@ -289,6 +299,106 @@ gqr:    ldx #2                     ; d
         rts
         .assert QRAN = 189 && QRBN = 140, error, "gqr: the tables' sizes"
 
+; grung: the rungs' tables (land.s's rg_rf, rg_lf), for a 2..9 and D 0..31 at
+; (a & 7) << 5 | D: RQF (D div a) << 4 | t(1), RPT the pattern: b(j) = t(j +
+; 1) - t(j) - q2 for j 1 .. a-1, from bit 7.  t(j) = ceil(D (2j - 1) / 2a) is
+; stepped as gq, gr = t, 2a t - D (2j - 1): gr down by 2D a pixel, then up by
+; 2a (gq + 1 each) until it is 0 or more.  Clobbers A, X, Y.
+grung:  lda #2
+        sta ga
+@a:     asl a                      ; (A = a)
+        sta ga2
+        lda #0
+        sta gd
+@d:     lda gd                     ; q2 = D div a
+        ldx #0
+@q:     cmp ga
+        bcc @qd
+        sbc ga
+        inx
+        bne @q                     ; (always)
+@qd:    stx gq2
+        lda #0                     ; t(1): gr = -D, gq = 0, then up
+        sta gq
+        sec
+        sbc gd
+        jsr @up
+        lda gq
+        sta gtp
+        lda ga                     ; X: the index
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        ora gd
+        tax
+        lda gq2
+        asl a
+        asl a
+        asl a
+        asl a
+        ora gq
+        sta RQF,x
+        lda #0
+        sta gpat
+        lda gd
+        asl a
+        sta gd2                    ; 2D
+        ldy ga
+        dey                        ; a - 1 steps
+@j:     lda gr
+        sec
+        sbc gd2
+        jsr @up
+        lda gq                     ; b = t - t before - q2: 0 or 1
+        sec
+        sbc gtp
+        sec
+        sbc gq2
+        lsr a
+        rol gpat
+        lda gq
+        sta gtp
+        dey
+        bne @j
+        lda #9                     ; from bit 7: << (9 - a)
+        sec
+        sbc ga
+        tay
+        beq @s0
+@sh:    asl gpat
+        dey
+        bne @sh
+@s0:    lda gpat
+        sta RPT,x
+        inc gd
+        lda gd
+        cmp #32
+        beq :+
+        jmp @d
+:       inc ga
+        lda ga
+        cmp #10
+        beq :+
+        jmp @a
+:       rts
+@up:    bpl @ux                    ; A = gr: while below 0, + 2a, gq + 1
+@u:     inc gq
+        clc
+        adc ga2
+        bmi @u
+@ux:    sta gr
+        rts
+ga:     .byte 0                    ; (grung's: a, 2a, D, 2D, gr, gq, t before,
+ga2:    .byte 0                    ; q2, the pattern)
+gd:     .byte 0
+gd2:    .byte 0
+gr:     .byte 0
+gq:     .byte 0
+gtp:    .byte 0
+gq2:    .byte 0
+gpat:   .byte 0
 ; gpanel: PANEL's map rows: 64 lines of 32 pixels, line y, pixel t the tile x =
 ; t - MAPX, z = MAPZ - (y >> 1) (mod 32): its colour index's byte (MAPCLS: sea,
 ; land, the pad) under the pixel's bits; the readout's row cleared.  Clobbers A,
@@ -394,4 +504,4 @@ palv:   .repeat 16, e
         .endrepeat
         .import __P1H_START__, __P1H_SIZE__
         .import __IMG_START__, __IMG_LAST__
-        .import __MAPD_LOAD__, __MAPD_RUN__, __CODE_LOAD__, __CODE_RUN__, __SHIP_RUN__, __SHIP_SIZE__
+        .import __MAPD_LOAD__, __MAPD_RUN__, __CODE_LOAD__, __CODE_RUN__, __SHIP_RUN__, __SHIP_SIZE__, __CODE2_RUN__, __CODE2_SIZE__, __CODE2_LOAD__, __SHIP_LOAD__

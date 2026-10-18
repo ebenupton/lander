@@ -1629,7 +1629,13 @@ rg_lft:   sta LO,x
         sec
         sbc TY,x
         sta dvd
-        jmp rg_lsl
+        cmp #32                    ; a <= 9, D < 32: rg_lf's tables
+        bcs :+
+        ldy dva
+        cpy #10
+        bcs :+
+        jmp rg_lf
+:       jmp rg_lsl
 rungs:  lda xl                     ; the margins: upright, no pixels
         sta LO
         sta HI
@@ -1661,6 +1667,12 @@ rg_r:     stx tj                   ; rung X
         sec
         sbc TY,x
         sta dvd
+        cmp #32                    ; a <= 9, D < 32: rg_rf's tables
+        bcs rg_rsl
+        ldy dva
+        cpy #10
+        bcs rg_rsl
+        jmp rg_rf
 rg_rsl:   jsr divs                 ; leaning right, a >= 32 or D >= 64: divs,
         lda rrem                   ; then RSET's E = 255 - e (e = 2a - rem, or
         beq rg_rz                  ; 0: rg_rz) and C = (rem > 0): 255 - (2a -
@@ -3509,6 +3521,124 @@ tenh:   .byte <TEN4H, <TEN5H, <(TEN4H+1), <(TEN5H+1)
         .include "game.s"
         .segment "SHIP"
         .include "ship32.s"
+
+; ---------------------------------------------------------------- the rungs' tables
+; rg_rf, rg_lf: a rung with a 1..9 and D < 32 (unwrapped), its pixels' lines
+; from tables (the loader's grung), no division.  Pixel j's line, yt + t(j),
+; t(j) = ceil(D (2j - 1) / 2a), steps by q2 = D div a or q2 + 1: t(j + 1) =
+; t(j) + q2 + b(j), b(j) the pattern's bits (RPT, from bit 7), so each pixel
+; after the first is ASL rrem (C = b(j)) / ADC rq2 (no carry out: the line is
+; at most yb) and its store.  RPT, RQF + ((a & 7) << 5 | D) for a 2..9: the
+; pattern, and q2 << 4 | t(1); a = 1: t(1) = ceil(D / 2) at once.  The bodies
+; (rg_rb leaning right, pixels ascending from alloc; rg_lb leaning left,
+; descending to alloc) are entered at step 10 - a (pixel 1's store, then a - 1
+; steps), rg_rb with Y = alloc + a, rg_lb with Y = alloc; both on to rg_ld (the
+; sentinel, alloc + a + 1).  In: X = the rung (tj), dva = a, dvd = D.  Clobbers
+; A, X, Y, rq, rq2, rrem (the pattern).
+        .segment "CODE2"
+rg_rf:  lda dva                    ; a = 1: t(1) at once
+        cmp #1
+        beq @a1
+        jsr rg_tb                  ; rq = t(1), rq2, rrem
+        ldy dva
+        lda rg_rbe-1,y             ; the body's entry for a
+        sta @j+1
+        tya
+        clc
+        adc alloc
+        tay                        ; Y = alloc + a (C clear: within the page)
+        lda rq
+        adc TY,x                   ; pixel 1's line (C clear after)
+@j:     jmp rg_rb                  ; (operand's low byte: the entry)
+@a1:    lda dvd                    ; yt + ceil(D / 2) (C: D odd)
+        lsr a
+        adc TY,x
+        ldy alloc
+        iny
+        jmp rg_rb9
+rg_lf:  lda dva
+        cmp #1
+        beq @a1
+        jsr rg_tb
+        ldy dva
+        lda rg_lbe-1,y
+        sta @j+1
+        ldy alloc
+        lda rq
+        clc
+        adc TY,x
+@j:     jmp rg_lb
+@a1:    lda dvd
+        lsr a
+        adc TY,x
+        ldy alloc
+        jmp rg_lb9
+; rg_tb: rq = t(1), rq2 = q2, rrem = the pattern, from the tables (a 2..9); X =
+; the rung after (tj).
+rg_tb:  lda dva
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        ora dvd
+        tax
+        lda RPT,x
+        sta rrem
+        lda RQF,x
+        tay
+        and #$0F
+        sta rq
+        tya
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta rq2
+        ldx tj
+        rts
+        .macro RB k
+        sta RTBUF-10+k,y
+        asl rrem
+        adc rq2
+        .endmacro
+        .macro LB k
+        sta RTBUF+9-k,y
+        asl rrem
+        adc rq2
+        .endmacro
+rg_rb:  RB 1
+        RB 2
+        RB 3
+        RB 4
+        RB 5
+        RB 6
+        RB 7
+        RB 8
+rg_rb9: sta RTBUF-1,y
+        jmp rg_ld
+rg_lb:  LB 1
+        LB 2
+        LB 3
+        LB 4
+        LB 5
+        LB 6
+        LB 7
+        LB 8
+rg_lb9: sta RTBUF,y
+        jmp rg_ld
+RBS     = rg_lb - rg_rb            ; (7 bytes a step)
+rg_rbe: .repeat 9, i
+        .byte <(rg_rb + (8 - i) * 7)
+        .endrepeat
+rg_lbe: .repeat 9, i
+        .byte <(rg_lb + (8 - i) * 7)
+        .endrepeat
+        .assert >rg_rb = >rg_rb9 && >rg_lb = >rg_lb9, error, "rg_rf, rg_lf: each body in one page"
+        .assert RBS = 8*7 + 6, error, "rg_rb: 7-byte steps"
+        .segment "RUNGT"           ; (made by the loader: grung)
+RPT:    .res 256
+RQF:    .res 256
 ; MAP32 + 32 z + x: corner (x, z)'s height (bits 0-3) and tile (x, z)'s colour
 ; index (bits 4-7: DCE, DCO), b32/tools/gen32.py's.
         .segment "MAPD"

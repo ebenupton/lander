@@ -922,6 +922,13 @@ project:
         .endrepeat
         dex
         bpl @hc
+        ldx #$70                   ; each row's range (proj32's hrng)
+:       jsr hrng
+        txa
+        sec
+        sbc #16
+        tax
+        bcs :-
 @p5:    jsr pcol5                  ; the land strips' box bytes
         jmp prow32                 ; the rows' points (proj32.s)
 

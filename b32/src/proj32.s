@@ -63,6 +63,7 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         lda FACT                   ; row 0: the far clip plane's when FACT
         beq @cor
         ldy #0                     ; heights lerped from rows 0 and 1
+        jsr lrng
         jsr lrow
         ldy #ZFCLIP*16-DI0
         bne @r                     ; (always)
@@ -75,6 +76,7 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         sec
         sbc #16
         tay
+        jsr lrng
         jsr lrow
         ldy #ZCLIP*16-DI0
         bne @r                     ; (always)
@@ -101,6 +103,10 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         sta WH+9
         lda HT+10,x
         sta WH+10
+        lda HT+11,x                ; corners 1..NX-2's range (hrng's)
+        sta HLO
+        lda HT+12,x
+        sta HHI
 @r:     lda R7L,y                  ; r
         sta rl
         lda R7H,y
@@ -115,33 +121,24 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         lda WH
         ldy WH+1
         jsr lerp4
-        sta WH                     ; HLO, HHI: the row's heights' range (A = WH;
-        sta HLO                    ; lerp4 keeps WH, HLO, HHI: it clobbers only
-        sta HHI                    ; A, Y, MT0, MT1, MQB)
-        lda WH+NX-2
-        ldy WH+NX-1
-        jsr lerp4
-        sta WH+NX-1
-        ldy #NX-1                  ; (two heights a pass: NX-1 even)
-@hr:    lda WH,y
-        cmp HLO
-        bcs :+
+        sta WH                     ; HLO, HHI widened to the ends (lerp4 keeps
+        cmp HLO                    ; WH, HLO, HHI: it clobbers only A, Y, MT0,
+        bcs :+                     ; MT1, MQB)
         sta HLO
-        bcc :++                    ; (C clear) a new least is no new greatest
 :       cmp HHI
         bcc :+
         sta HHI
-:       dey
-        lda WH,y
+:       lda WH+NX-2
+        ldy WH+NX-1
+        jsr lerp4
+        sta WH+NX-1
         cmp HLO
-        bcs @h1
+        bcs :+
         sta HLO
-@h1:    cmp HHI
-        bcc @h2
+:       cmp HHI
+        bcc :+
         sta HHI
-@h2:    dey
-        bne @hr
-        .assert (NX-1) & 1 = 0, error, "prow32's @hr: NX-1 even"
+:
         jsr ytab                   ; YT
         lda RK                     ; the y's: YT by height, into PY + 16 k
         sta @py+1                  ; (PY page-aligned: the store's low byte)
@@ -192,6 +189,49 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         .segment "SG1"
 YT:     .res 16                    ; ytab's: line by height
         .code
+
+; lrng: HLO, HHI = the range of corners 1..NX-2 over HT rows Y/16 and Y/16 + 1
+; (hrng's, in each row's columns 11, 12): a lerp between them stays within it.
+; X kept.
+lrng:   lda HT+11,y
+        cmp HT+16+11,y
+        bcc :+
+        lda HT+16+11,y
+:       sta HLO
+        lda HT+12,y
+        cmp HT+16+12,y
+        bcs :+
+        lda HT+16+12,y
+:       sta HHI
+        rts
+; hrng: HT row X/16's corners 1..NX-2: their least into HT+11,x, greatest
+; into HT+12,x (the row's spare columns), for prow32's ranges.  Whenever HT
+; changes: project's reload (every row), hsh (the new row; the others move
+; with their heights).  X kept; clobbers A, Y, MT0, MT1.
+hrng:   txa
+        ora #NX-2                  ; Y: corner NX-2 down to 2
+        tay
+        lda HT+1,x
+        sta MT0
+        sta MT1
+@l:     lda HT,y
+        cmp MT0
+        bcs :+
+        sta MT0
+:       cmp MT1
+        bcc :+
+        sta MT1
+:       dey
+        tya
+        and #15
+        cmp #1
+        bne @l
+        lda MT0
+        sta HT+11,x
+        lda MT1
+        sta HT+12,x
+        rts
+        .assert NX-2 = 9, error, "hrng: corners 1..9, columns 11, 12 spare"
 
 ; lrow: WH = a clip row's heights, HT + Y + i lerped towards HT + Y + 16 + i
 ; by 16 - czs sixteenths (land.lerp(a, b, 256 - fz)), i = 0..NX-1.
@@ -550,7 +590,8 @@ eyrow:  lda rl                     ; r >> 5 = (rl & $E0 | rh) rotated left 3
 ; becomes row j-1's (rows 7 down to 1), row 0 takes HTN; SHF $FF: row j
 ; becomes row j+1's (0 up to 6), row 7 takes HTN.  Out: SHF = 0.  Clobbers A,
 ; X, Y.
-hsh:    ldx #NX-1
+hsh:    ldx #NX+1                  ; (columns NX, NX+1: hrng's range moves with
+                                   ; the row; the new row's made after)
 @c:     lda SHF
         bmi @b
         txa                        ; (X: the column, < 16; Y: 16 j + the column,
@@ -580,6 +621,11 @@ hsh:    ldx #NX-1
         sta HT+$70,x
 @n:     dex
         bpl @c
-        inx                        ; X = $FF here (the dex/bpl fell through): 0
-        stx SHF
+        ldx #0                     ; the new row's range: row 0 (SHF 1) or 7
+        lda SHF
+        bpl :+
+        ldx #$70
+:       jsr hrng
+        lda #0
+        sta SHF
         rts

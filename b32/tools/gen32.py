@@ -212,7 +212,6 @@ def main():
     gametab(out)
     open(os.path.join(out, 'mapgen.inc'), 'w').write(mapgen())
     open(os.path.join(out, 'PANELMAP'), 'wb').write(panel())   # (the tests' reference)
-    open(os.path.join(out, 'GLYPHS'), 'wb').write(glyphs())
     with open(os.path.join(out, 'qrtab.inc'), 'w') as f:
         # (the loader makes the tables: here only their sizes, checked against qrtab(),
         # and the panel's colour byte for each colour index, for its map)

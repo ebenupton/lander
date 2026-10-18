@@ -7,7 +7,7 @@ harness for the flat machine: LAND at $1900, DEV at $8000, no banks.
 SCRIPT as test/gametest.py's: comma-separated N:KEYS parts, N frames with KEYS held
 (L left, R right, F nose down, B nose up, T thrust, H shift, P F's key).  Each line:
 the frame, the keys, the frame's cycles (gstep, project, strips, gpre, ship, gpost,
-readout, flip: everything the main loop runs), then the ship's state.  vcount moves on 4 syncs a frame (FMIN), or with
+flip: everything the main loop runs), then the ship's state.  vcount moves on 4 syncs a frame (FMIN), or with
 GT_VS=real as many as its cycles would take; the game takes one step a frame either
 way, so the state is the same.  Importable: Game().frame(keys, vs) and state().
 """
@@ -97,10 +97,10 @@ class Game:
             vs = max(4, -(-getattr(self, 'last', 0) // 40000))   # on (no interrupts
         elif vs is None:                                         # here): FMIN, or with
             vs = 4                      # GT_VS=real what the last frame's cycles would
-                                        # take; only flip, strips' wait and the readout
+                                        # take; only flip and strips' wait
                                         # read vcount: one step a frame whatever it is
         m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255
-        for r in ('gstep', 'project', 'strips', 'gpre', 'ship', 'gpost', 'readout'):
+        for r in ('gstep', 'project', 'strips', 'gpre', 'ship', 'gpost'):
             if r == 'ship' and not m[GSHV]:
                 continue
             c += self.call(self.lab[r])
@@ -119,7 +119,7 @@ class Game:
         r = self.rd
         return (f"x {s24(r('sx', 3)):7.3f} z {s24(r('sz', 3)):7.3f} y {s24(r('sy', 3)) * 16:6.2f}u "
                 f"v {s16(r('gvx', 2)):6d} {s16(r('gvy', 2)):6d} {s16(r('gvz', 2)):6d} "
-                f"k {r('gk')[0]:2d} p {r('gp')[0]:2d} landed {r('landed')[0]} ctim {r('ctim')[0]:2d} "
+                f"k {r('gk')[0]:2d} p {r('gp')[0]:2d} fuel {r('fuel')[0] | r('fuel', 2)[1] << 8:5d} landed {r('landed')[0]} ctim {r('ctim')[0]:2d} "
                 f"hg {self.mpu.memory[HGV]} came {self.mpu.memory[CAME]} shy {self.mpu.memory[GSHY]}")
 
 

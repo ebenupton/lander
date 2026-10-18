@@ -1,11 +1,10 @@
 ;============================================================================
 ; game.s -- the 32K build's game (b32/src/land.s .includes it): Lander's flight
-; over LAND's landscape, as src/game.s plays it, less the fuel (no tank, no bar,
-; no refuelling: the engines run while the land is in view) and with a 32-tile
-; map.  land.s's main loop calls ginit once, then gstep, gpre and gpost each
+; over LAND's landscape, as src/game.s plays it, on the 64-tile map mapgen.s
+; makes.  land.s's main loop calls ginit once, then gstep, gpre and gpost each
 ; frame around its projection, strips and the ship.  No banks: the game's
-; tables and LAND's share the one memory.  The map (the panel) is drawn at the
-; start; gpost moves the ship's marker on it.
+; tables and LAND's share the one memory.  The panel (the map, FUEL) is drawn
+; at the start; gpost moves the ship's marker on it and redraws the gauge.
 ;============================================================================
 
 GSHK    = $07DB                    ; the ship for bank 6 (B6_KEYS copies these
@@ -59,6 +58,12 @@ SNCR    = $E7                      ; the crash: white noise clocked by tone 2
 PGRAV   = 60                       ; a dot's gravity, 256ths of a unit a step^2
                                    ; (GRAV in the dots' units, 4 times coarser)
 PADX    = PADN/2                   ; the pad's middle tile: the start
+FUELMX  = 5120                     ; Lander's refuel limit (&1400): full
+REFUEL  = 40                       ; a step on the pad (1.25 of Lander's &20)
+BURN    = 5                        ; a step of thrust (1.25 of Lander's 4)
+FBC     = 10                       ; the gauge: the FUEL row's byte columns
+FBL     = 2                        ; FBC..FBC+19 (80 pixels: fuel >> 6), lines
+                                   ; FBL..FBL+3
 
 
 ; ---------------------------------------------------------------- init
@@ -112,6 +117,10 @@ spawn:  lda #0                     ; thr .. gvz+1 (P1's order: thr, landed, ctim
         sta gk
         .assert SPAWNK = PADH, error, "spawn: gk and HGV share SPAWNK's load"
         sta HGV                    ; PADH: the ground under it (hgnd's from then on)
+        lda #<FUELMX               ; the tank full
+        sta fuel
+        lda #>FUELMX
+        sta fuel+1
         lda #1
         sta landed
         sta GSHV
@@ -250,8 +259,7 @@ units:  lda sy+1                   ; su+1 = sy+2 << 4 | sy+1 >> 4
 no:
 .endmacro
 ; keys: gkb from the keyboard: 1 Z or left, 2 X or right, 4 K or up, 8 M or
-; down, 16 SPACE, 32 SHIFT, 64 F; F toggles fpson as it goes down (fkey:
-; its state last time).  Interrupts stay on (irq never touches port A, port
+; down, 16 SPACE, 32 SHIFT.  Interrupts stay on (irq never touches port A, port
 ; B or DDRA, and a late E1 would cost the land a field).  Clobbers A,
 ; X.  DP11_MOUSE: with mdet set, also the mouse: 16 the left button, 128 the
 ; middle; writes mous, gmx, gmy; clobbers Y, gt0..gt3 too.  Called by gstep.
@@ -261,8 +269,8 @@ keys:   lda #0
         sta SVIA_DDRA              ; bit 7 in (pressed)
         lda #3                     ; latch bit 3 low: keyboard auto-scan off
         sta SVIA_ORB
-        ldx #10                    ; the keys from kcode's end down: the same
-@k:     lda kcode,x                ; order as before (Z first, F last)
+        ldx #9                     ; the keys from kcode's end down: the same
+@k:     lda kcode,x                ; order as before (Z first, SHIFT last)
         sta SVIA_ORA_NH
         lda SVIA_ORA_NH
         bpl @n
@@ -273,22 +281,12 @@ keys:   lda #0
         bpl @k
         lda #$0B                   ; auto-scan back on
         sta SVIA_ORB
-        lda gkb
-        and #64
-        cmp fkey
-        beq :+
-        sta fkey
-        tax
-        beq :+
-        lda fpson
-        eor #1
-        sta fpson
-:       rts
+        rts
 ; kcode, kbit: keys' keys (internal numbers, bit 7 clear) and their gkb bits,
 ; scanned from the last entry down: Z, X:19, X, :79, K, :39, M, :29, SPACE,
-; SHIFT, F.
-kcode:  .byte $43, $00, $62, $29, $65, $39, $46, $79, $42, $19, $61
-kbit:   .byte 64, 32, 16, 8, 8, 4, 4, 2, 2, 1, 1
+; SHIFT.
+kcode:  .byte $00, $62, $29, $65, $39, $46, $79, $42, $19, $61
+kbit:   .byte 32, 16, 8, 8, 4, 4, 2, 2, 1, 1
 
 
 ; ---------------------------------------------------------------- sound
@@ -403,6 +401,9 @@ step:   lda landed                 ; on the pad: the attitude held
         beq :+
         lda #1
 :       tay
+        lda fuel                   ; none without fuel
+        ora fuel+1
+        beq @off
         lda sy+2                   ; nor 16 tiles up (su's byte wrapped), nor
         bmi :+                     ; with the land gone from the screen: CAME
         cmp #16                    ; under EOFF means in view; from EOFF up,
@@ -451,9 +452,19 @@ step:   lda landed                 ; on the pad: the attitude held
         cpx #6
         bne @dg
 @th:
-        lda thr                    ; thrust
+        lda thr                    ; thrust: BURN fuel, floor 0
         beq @nt
-        jsr throw                  ; gvx += 1.25 (THX[gp][gk] << THRS), gvz from
+        lda fuel
+        sec
+        sbc #BURN
+        sta fuel
+        bcs :+
+        dec fuel+1
+        bpl :+
+        lda #0
+        sta fuel
+        sta fuel+1
+:       jsr throw                  ; gvx += 1.25 (THX[gp][gk] << THRS), gvz from
         lda tx                     ; THZ, gvy from THY[gp]
         ldx #gvx-gvx
         jsr tadd
@@ -465,8 +476,20 @@ step:   lda landed                 ; on the pad: the attitude held
         ldx #gvy-gvx
         jsr tadd
         jsr emit
-@nt:    lda landed                 ; landed: still
-        beq @mv
+@nt:    lda landed                 ; landed: still, refuelling REFUEL a step up
+        beq @mv                    ; to FUELMX
+        lda fuel
+        clc
+        adc #REFUEL
+        tax
+        lda fuel+1
+        adc #0
+        cmp #>FUELMX
+        bcc :+
+        lda #>FUELMX
+        ldx #<FUELMX
+:       sta fuel+1
+        stx fuel
         lda #0
 @still: ldx #5                     ; (the landing joins here, A = 0)
 :       sta gvx,x
@@ -988,7 +1011,48 @@ gpre:   jsr dset
 gpost:  jsr dset
         lda #$80
         jsr dots
-        jmp marker
+        jsr marker
+        ; falls into status
+; status: the fuel gauge on the FUEL row (FUELR, MODE 1), as the full build's:
+; redrawn when its length differs from what it shows (fdr): fuel >> 6 pixels (80
+; full), yellow, four lines deep (FBL..FBL+3) over byte columns FBC..FBC+19,
+; each byte BARB by the pixels left for it.  Clobbers A, X, Y, gt1.
+status: lda fuel+1                 ; gt1 = fuel >> 6
+        sta gt1
+        lda fuel
+        asl a
+        rol gt1
+        asl a
+        rol gt1
+        lda gt1
+        cmp fdr
+        beq @x
+        sta fdr
+        ldx #FBC*8                 ; X: the column's first byte in the row
+@b:     lda gt1                    ; (pixels left to draw)
+        cmp #4
+        bcc :+
+        lda #4
+:       tay
+        lda BARB,y
+        sta FUELR+FBL,x
+        sta FUELR+FBL+1,x
+        sta FUELR+FBL+2,x
+        sta FUELR+FBL+3,x
+        lda gt1
+        sbc #4                     ; (C: the CMP's; set only for 4 or more)
+        bcs :+
+        lda #0
+:       sta gt1
+        txa
+        clc
+        adc #8
+        tax
+        cpx #(FBC+20)*8
+        bcc @b
+@x:     rts
+        .assert FBC+20 <= FUELW, error, "status: the gauge within the FUEL row"
+BARB:   .byte $00, $88, $CC, $EE, $FF   ; 0..4 pixels lit from the left, colour 3
 ; dset: scrg = the screen being drawn (scrb); tsg, bsg = its TOPS and BOTS
 ; (the set sidx picks for back).  Clobbers A, X, Y.  (gpre computes su.)
 dset:   lda scrb
@@ -1199,7 +1263,7 @@ marker: ldx #$FF                   ; (no dot)
         pla
         sta (g0),y
         rts
-; mkad: (g0),y = the panel's byte for line X & 63, column mkt (0..31): g0 =
+; mkad: (g0),y = the map's byte for line X & 63, column mkt (0..31): g0 =
 ; PANEL + 64 (y >> 3) + 8 (t >> 2) (bits 0-2 clear), Y = y & 7.  Clobbers A.
 mkad:   txa
         and #$38                   ; 64 (y >> 3): the low byte's bits 6-7, the
@@ -1238,7 +1302,8 @@ gvx:    .res 2                     ; velocity, 16-bit, 16384 a tile/Lander step
 gvy:    .res 2                     ; (consecutive: step runs X over them)
 gvz:     .res 2
 su:     .res 2                     ; the ship's height in units, 8.8 (units')
-fkey:   .res 1                    ; (keys': F's bit last time)
+fuel:   .res 2                    ; 0..FUELMX
+fdr:    .res 1                    ; (status's: the gauge's length shown)
 sstp:   .res 1                    ; (snd's: the crash's step)
 dpass:  .res 1                    ; (dots': 0 the far dots, $80 the near)
 tt0:    .res 1                    ; (tadd's)

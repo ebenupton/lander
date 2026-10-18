@@ -21,6 +21,46 @@ IRQ1V   = $0204
         .segment "BOOT"
 start:  lda #119                   ; any EXEC or SPOOL file closed: no filing
         jsr OSBYTE                 ; system call follows
+        ldx #3                     ; FUEL's letters as the full build's glyphs5
+@g:     stx gpx                    ; makes them: OSWORD 10's definition, each
+        lda flab,x                 ; line two MODE 1 bytes (its left and right
+        sta oswb                   ; 4 pixels, colour 3), 16 a letter into glb
+        lda #10
+        ldx #<oswb
+        ldy #>oswb
+        jsr OSWORD
+        lda gpx
+        asl a
+        asl a
+        asl a
+        asl a
+        tax
+        ldy #0
+@l:     lda oswb+1,y
+        and #$F0
+        sta gpc
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora gpc
+        sta glb,x
+        lda oswb+1,y
+        and #$0F
+        sta gpc
+        asl a
+        asl a
+        asl a
+        asl a
+        ora gpc
+        sta glb+8,x
+        inx
+        iny
+        cpy #8
+        bne @l
+        ldx gpx
+        dex
+        bpl @g
         sei                        ; the MOS's interrupts off for good, its
         ldx #$FF                   ; stack ours
         txs
@@ -416,9 +456,11 @@ gq:     .byte 0
 gtp:    .byte 0
 gq2:    .byte 0
 gpat:   .byte 0
-; gpanel: PANEL's map rows: 64 lines of 32 pixels, line y, pixel t the tile x =
+; gpanel: the FUEL row (FUELR): FUEL at columns 0..7 (glb: start's, from the
+; MOS's font), the rest black; the map's rows at PANEL: 64 lines of 32 pixels,
+; line y, pixel t the tile x =
 ; 2t - MAPX, z = MAPZ - y (mod 64): the pad black, the sea (its four corners 0)
-; colour 1, land colour 3; the readout's row cleared.  The corners are mapgen.s's
+; colour 1, land colour 3.  The corners are mapgen.s's
 ; (mcl), a map row at a time into MC: row z at slot 64 (y & 1), row z + 1 the
 ; line before's (MOK stays 0: the first frame makes the window).  Clobbers A,
 ; X, Y, ptr, $8E-$9E.
@@ -427,9 +469,17 @@ gpanel: lda #0
         tax
 @c:     sta PANEL,x
         sta PANEL+$100,x
-        sta PANEL+9*64-$100,x
         inx
         bne @c
+        ldx #FUELW*8-1             ; FUELR: FUEL (glb, start's) at columns 0..7,
+:       lda #0                     ; the rest black
+        cpx #64
+        bcs :+
+        lda glb,x
+:       sta FUELR,x
+        dex
+        cpx #$FF
+        bne :--
         lda #<MGP                  ; (mcl: x on)
         sta mcp+1
         lda #(MAPZ+1) & 63         ; row MAPZ + 1, line -1's, at slot 64
@@ -536,6 +586,10 @@ gpanel: lda #0
         lda #64
         sta MGN
         jmp mcl
+flab:   .byte "FUEL"
+oswb:   .res 9                     ; (start's: OSWORD 10's block)
+glb:    .res 64                    ; FUEL's letters (start's; zero in the tests,
+                                   ; which skip start)
 gpy:    .byte 0                    ; (gpanel's: y, z, row z's slot, a byte, x)
 gpz:    .byte 0
 gpb:    .byte 0

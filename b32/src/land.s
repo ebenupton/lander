@@ -448,8 +448,6 @@ RK:     .res 1                      ; prow32's: the row's 16 k
 DCUR:   .res 1                      ; the row's di as a corner row
 RN16:   .res 1                      ; 16 RN
 rodd:   .res 1                      ; run's: the odd pass's end entry
-fps10:  .res 2                      ; readout's: the rate in tenths
-tcol:   .res 1                      ; putg's column (readout's)
 wn:     .res 1
 WF:     .res 8
 db:     .res 1                      ; DBUF's next byte
@@ -482,8 +480,8 @@ CODEPAD = 0                        ; (b32: the best of 0..15, by the flight)
 ; loop: the main loop, entered from the loader (boot32.s: its start-up done,
 ; the land buffers black, screen 0 the one drawn) with the stack empty.  Each
 ; frame the game's step, the projection, the strips, the dots beyond the ship,
-; the ship (unless crashed), the nearer dots and the map's marker, the readout,
-; flip.  Never returns.
+; the ship (unless crashed), the nearer dots, the map's marker and the fuel
+; gauge, flip.  Never returns.
 loop:   jsr gstep
         jsr project
         jsr strips
@@ -492,40 +490,53 @@ loop:   jsr gstep
         beq :+
         jsr ship
 :       jsr gpost
-        jsr readout
         jsr flip
         jmp loop
 
 ; ---------------------------------------------------------------- the display
-; Two CRTC frames a field (vertical rupture), 39 rows of 8 lines (512us) in all,
+; Three CRTC frames a field (vertical ruptures), 39 rows of 8 lines (512us) in all,
 ; the vertical sync at row 28 as a one-frame MODE 1 has it:
-;   the panel: rows 0..9, R4 9, MODE 5 (the ULA's $C4, the CRTC at 1MHz: R0 63,
-;     R2 45, R3 $24), 8 characters wide (R1 8: 32 pixels), the first 9 rows
-;     displayed (R6 9) from PANEL: the map (rows 0..7: 32 by 64 pixels, a tile a
-;     pixel by 2 lines) and the readout (row 8); row 9 black;
-;   the land: rows 10..38, R4 28, MODE 1 (the ULA's $D8, the CRTC at 2MHz: R0
+;   FUEL: rows 0..1, R4 1, MODE 1 (as the land), row 0 shown (R6 1) from FUELR:
+;     FUELW characters (the land's left 120 pixels), FUEL and the gauge as the
+;     full build draws them; row 1 black (the change to MODE 5 there);
+;   the map: rows 2..10, R4 8, MODE 5 (the ULA's $C4, the CRTC at 1MHz: R0 63,
+;     R3 $24), 8 characters (R1 8: 32 by 64 pixels, two tiles a pixel by a line)
+;     at the right (R2 22: its right edge the land's), rows 0..7
+;     shown (R6 8) from PANEL; row 8 black (the change to MODE 1 there);
+;   the land: rows 11..38, R4 27, MODE 1 (the ULA's $D8, the CRTC at 2MHz: R0
 ;     127, R2 90, R3 $28), 12 rows displayed (R6 12), 64 wide, from the front land
-;     buffer (lfront), its sync at its row 18 (R7 18).
+;     buffer (lfront), its sync at its row 17 (R7 17).
 ; A frame's start address is taken at its start (VCC 0); R4 is compared at
 ; each row's end and R6 at each row's start, so each frame's are written while
 ; it runs, the next's start address too.  The modes change where nothing is
-; displayed: in the sync and in the panel's black row (the line the change
-; lands in is the only one of another length).  Three interrupts (irq):
+; displayed: in the FUEL frame's black row and the map's (the line the change
+; lands in is the only one of another length).  Five interrupts (irq):
 ;   E0, the sync (the system VIA's CA1): vcount, timer 2 restarted (the time
-;     since the sync), MODE 5 and the panel's R1, R6, start; timer 1 for E1;
-;   E1, EV1US later, the panel's row 9 (its display over): MODE 1, R4 9, R7 18,
-;     the land's R1, R6 and start (lfront); timer 1 for E2;
-;   E2, EV2US on, the land's row 0: R4 28.
-PROWS   = 10                       ; the panel frame's rows (9 shown)
-E0WAIT  = 2                        ; E0's wait to the next line (dex loops)
-EV1US   = 11*512 + 9*512 + 59      ; the sync to E1: the panel's row 9 (it
-                                   ; starts 11 rows after the sync).  Its writes
-                                   ; land ~120us into the row (E0 arms timer 1
-                                   ; ~75us after the sync, E1 writes R4 ~45us
-                                   ; after it fires: never before the row, its
-                                   ; readout row's display done), leaving ~360us
-                                   ; before the row's end, R4's deadline, for
-                                   ; interrupt latency (main code never masks
+;     since the sync), the FUEL frame's R1, R6 and start (MODE 1 still);
+;     timer 1 free running for E0b, E0c, E1 (its latch reloaded each time: no
+;     drift between them);
+;   E0b, EV0B later, the FUEL frame's row 1: R4 1, the map frame's start, R1,
+;     R6, MODE 5, then R2 22 (the map at the right);
+;   E0c, EV0C after E0, the map frame's row 0: R4 8 (after the FUEL frame's
+;     end);
+;   E1, EV1US after E0, the map frame's row 8 (its display over): MODE 1, R7
+;     17, the land's R1, R6 and start (lfront); timer 1 one-shot for E2;
+;   E2, EV2US on, the land's row 0: R4 27.
+FROWS   = 2                        ; the FUEL frame's rows (row 0 shown)
+MROWS   = 9                        ; the map frame's rows (8 shown)
+PROWS   = FROWS+MROWS              ; the rows before the land's frame
+FUELW   = 30                       ; the FUEL row's characters (MODE 1)
+E0BW    = 1                        ; E0b's waits (dex loops), measured in jsbeeb
+E0BW2   = 12                       ; (timer 2 at the writes): R2 45 ~11us into
+                                   ; its line (2MHz: short of 45), R2 22 ~9us
+EV0B    = 11*512 + 1*512 + 1*64 + 20 ; the sync to E0b: the FUEL frame's row 1
+                                   ; (it starts 11 rows after the sync), line 1
+EV0C    = 11*512 + 2*512 + 200     ; to E0c: the map frame's row 0
+EV1US   = 11*512 + (PROWS-1)*512 + 59 ; the sync to E1: the map frame's last
+                                   ; row (not shown).  Its writes land ~120us
+                                   ; into the row, leaving ~360us before the
+                                   ; row's end, R4's deadline, for interrupt
+                                   ; latency (main code never masks
                                    ; interrupts: keys, psg)
 EV2US   = 1*512 + 300              ; E1 to E2: the land's row 0 (+ ~420us)
 ULA_CTL = $FE20                    ; the video ULA's control register
@@ -535,6 +546,8 @@ UVIA_T1L = $FE64                   ; the user VIA's timer 1 (low, high: a
 UVIA_T1H = $FE65                   ; one-shot, ACR 0)
 UVIA_IFR = $FE6D
 UVIA_IER = $FE6E
+UVIA_T1LL = $FE66                  ; timer 1's latch alone (no restart)
+UVIA_T1LH = $FE67
 .macro CRW r, v                    ; CRTC register r = A (v blank) or #v
         lda #r
         sta CRTC_IDX
@@ -545,55 +558,59 @@ UVIA_IER = $FE6E
 .endif
         sta CRTC_DAT
 .endmacro
-; irq (IRQ1V: the MOS ROM's entry has stored A in $FC): E0, E1 or E2 above.
+; irq (IRQ1V: the MOS ROM's entry has stored A in $FC): E0 .. E2 above.
 irq:    txa
         pha
         lda #$02                   ; the sync (CA1)?
         bit SVIA_IFR
-        beq @t
-        sta SVIA_IFR               ; (its flag cleared)
+        bne :+
+        jmp @t
+:       sta SVIA_IFR               ; (its flag cleared)
         inc vcount
         lda #$FF
         sta UVIA_T2H               ; the time since the sync
-        lda #<EV1US                ; timer 1 for E1, first: a fixed time after
-        sta UVIA_T1L               ; the sync (EV1US sets E1's place in its line)
-        lda #>EV1US
-        sta UVIA_T1H               ; (timer 1 off for E1; its flag cleared)
-        CRW 1, 8                   ; the panel: 8 wide, 9 rows, PANEL
-        CRW 6, 9
-        CRW 12, >(PANEL/8)
-        CRW 13, <(PANEL/8)
-        ldx #E0WAIT                ; MODE 5, early in the next line (this one is
-@w:     dex                        ; near its end): the CRTC's line first, still
-        bne @w                     ; at 2MHz, the sync to 45 and the end to 63
-        CRW 2, 45                  ; while the count is short of both (or the
-        CRW 0, 63                  ; line gets two syncs, or runs on to 255);
-        CRW 3, $24                 ; then the clock (1MHz).  Measured in jsbeeb
-        lda #$C4                   ; (timer 2 at the writes, the sync ~27us
-        sta ULA_CTL                ; before its restart): R2 ~12us, R0 ~20us in
+        lda #$40                   ; timer 1 free running: E0b at EV0B, first (a
+        sta UVIA_ACR               ; fixed time after the sync: its place in its
+        lda #<EV0B                 ; line), then E0c at EV0C (the latch reloaded
+        sta UVIA_T1L               ; at E0b: the latch + 2 later; E0b sets the
+        lda #>EV0B                 ; next, for E1)
+        sta UVIA_T1H               ; (its flag cleared)
+        lda #<(EV0C-EV0B-2)
+        sta UVIA_T1LL
+        lda #>(EV0C-EV0B-2)
+        sta UVIA_T1LH
+        CRW 1, FUELW               ; the FUEL frame (MODE 1 still): FUELW wide,
+        CRW 6, 1                   ; row 0 shown, from FUELR
+        CRW 12, >(FUELR/8)
+        CRW 13, <(FUELR/8)
         lda #0
         sta evn
         beq @x                     ; (always: A = 0)
-@e2:    CRW 4, CR_TOTAL-PROWS-1    ; E2: the land's 29 rows (falls into @x)
+@e0c:   CRW 4, MROWS-1             ; E0c: the map frame's rows (R4 was 1 for the
+        inc evn                    ; FUEL frame: written once that has ended)
 @x:     pla
         tax
         lda $FC
         rti
-@t:     lda UVIA_IFR               ; timer 1 (E1, E2)?
+@t:     lda UVIA_IFR               ; timer 1 (E0b, E0c, E1, E2)?
         and #$40
         beq @x
         lda UVIA_T1L               ; (its flag cleared)
-        lda evn
+        ldx evn
+        beq @e0b
+        dex
+        beq @e0c
+        dex
         bne @e2
+        stx UVIA_ACR               ; (X = 0: timer 1 one-shot again, for E2)
         CRW 0, 127                 ; E1: MODE 1.  The CRTC's line first, still at
         CRW 2, 90                  ; 1MHz (this blank line runs on to 127), its
         CRW 3, $28                 ; sync moved to 90 while the count is short of
-        lda #$D8                   ; 45 (else the line gets a second sync and the
-        sta ULA_CTL                ; picture a line's jump): these writes come
-                                   ; ~7-20us into the line (measured: R2 ~13us,
-                                   ; EV1US's +59us); then the clock (2MHz)
-        CRW 4, PROWS-1             ; the panel's end; the land's frame
-        CRW 7, CR_VSYNC-PROWS
+        lda #$D8                   ; 22, the map's (else the line gets a second
+        sta ULA_CTL                ; sync and the picture a line's jump): these
+                                   ; writes come early in the line (EV1US's
+                                   ; +59us: R2 ~13us in, short of 22); then the clock (2MHz)
+        CRW 7, CR_VSYNC-PROWS      ; the land's frame
         CRW 1, 64
         CRW 6, 12
         CRW 12
@@ -603,14 +620,39 @@ irq:    txa
         lda #>EV2US
         sta UVIA_T1H
         inc evn
-        jmp @x                     ; (a branch: out of reach)
-evn:    .byte 0                    ; irq's: the next timer event (0 E1, 1 E2)
+        jmp @x
+@e2:    CRW 4, CR_TOTAL-PROWS-1    ; E2: the land's rows
+        jmp @x
+@e0b:   CRW 4, 1                   ; E0b, the FUEL frame's row 1 (not shown): its
+        CRW 12, >(PANEL/8)         ; 2 rows; the map frame's start, R1, R6;
+        CRW 13, <(PANEL/8)         ; timer 1's next period (E0c to E1)
+        CRW 1, 8
+        CRW 6, MROWS-1
+        lda #<(EV1US-EV0C-2)
+        sta UVIA_T1LL
+        lda #>(EV1US-EV0C-2)
+        sta UVIA_T1LH
+        ldx #E0BW                  ; MODE 5, early in the next line: the CRTC's
+:       dex                        ; line first, still at 2MHz, the sync to 45
+        bne :-                     ; and the end to 63 while the count is short
+        CRW 2, 45                  ; of both (or the line gets two syncs, or runs
+        CRW 0, 63                  ; on to 255); then the clock (1MHz)
+        CRW 3, $24
+        lda #$C4
+        sta ULA_CTL
+        ldx #E0BW2                 ; then early in the next line (the count
+:       dex                        ; short of 22) the sync to 22: the map at the
+        bne :-                     ; right (its right edge the land's)
+        CRW 2, 22
+        inc evn
+        jmp @x
+evn:    .byte 0                    ; irq's: the next timer event (0 E0b, 1 E0c,
+                                   ; 2 E1, 3 E2)
 lfront: .byte >(LAND0/8)           ; the land shown (flip's)
         .assert <(LAND0/8) = 0 && <(LAND1/8) = 0, error, "the land buffers' R13 is 0"
 
 ; flip: when FMIN vertical syncs have passed since the last flip, show the
-; screen just drawn (`back`) and make the other the one to draw.  Records the
-; frame's syncs in dvs (the last 8, dvi the next slot) for the readout; vflip,
+; screen just drawn (`back`) and make the other the one to draw: vflip,
 ; vlast = vcount at the flip, then vflip one less if the CRTC has yet to reach
 ; display row 0 (timer 2: the new screen is shown from there, so strips need
 ; not wait).  Falls into setback.  Clobbers A, X.
@@ -627,16 +669,6 @@ flip:   lda vcount                 ; (FMIN = 4: 12.5 frames a second at most)
         sta lfront
         lda vcount
         sta vflip
-        sec
-        sbc vlast                  ; the frame's syncs: dvs[dvi], then dvi =
-                                   ; (dvi + 1) & 7
-        ldx dvi
-        sta dvs,x
-        inx
-        txa
-        and #7
-        sta dvi
-        lda vflip
         sta vlast
         lda UVIA_T2H               ; before row 0: shown from row 0, so the
         cmp #T2ROW0                ; screen to draw is no longer
@@ -669,7 +701,7 @@ rr:     .res 2
 ; init: both screens black ($3000-$7FFF: LANDS with them); the four STABs and
 ; the line tables (ENTL, ENTH; LAH; in bank 4: LAHSB0-3,
 ; ENTB0-3, EXLB, EXHB0-3); TOPS, BOTS to nothing drawn; traceb's fill blocks'
-; JMPs; EINL; pp to dummy; the camera at tile (40, 30), sixteenths 0; dvs.  No
+; JMPs; EINL; pp to dummy; the camera at tile (40, 30), sixteenths 0.  No
 ; OS calls: the tests (test/landsoak.py, test/gametest.py) run it under py65.
 ; Needs bank 4 paged in and writable.  Clobbers A, X, Y, ptr, tmp.
 init:   jsr shtab                  ; the ship's walker's tables
@@ -828,11 +860,6 @@ init:   jsr shtab                  ; the ship's walker's tables
         lda #>RTBUF                ; left-leaning rung's pixels ends on it),
         sta alloc+1                ; alloc's page and rtp's (split's, mktr's)
         sta rtp+1
-        ldx #7                     ; the readout's sync counts
-:       lda #0
-        sta dvs,x
-        dex
-        bpl :-
         rts
 
         .code
@@ -3357,130 +3384,6 @@ sp_zg:  cpx fen_e+1
         ldx mx
         jmp run2
 
-; ---------------------------------------------------------------- readout
-; readout: the frame rate at the top left of the screen being drawn, character
-; row 2 (the game's area), eight characters "TU.t FPS": flip records each
-; frame's vertical syncs in dvs (the last eight frames); their sum s gives
-; (4000 + s / 2) / s, the rate in tenths (eight frames at 50
-; syncs a second), printed as tens (blank when 0), units, '.', tenths, ' ',
-; "FPS".  The
-; sum is held at 255 if it would pass it.  With fpson 0 (game.s's F key) eight
-; blanks are drawn instead.  In: fpson, dvs, scrb.  Clobbers A, X, Y, fps10,
-; tcol, ptr.  Caller: loop (after G_POST, before flip; so dvs is the eight
-; frames before this one).
-G_DOT   = 10                       ; GLY's characters: "0123456789. FPS"'s
-                                   ; index (b32/tools/gen32.py's FONT)
-G_SP    = 11
-G_F     = 12
-
-readout:
-        lda fpson
-        bne @on
-        sta tcol                   ; off: eight blanks from column 0
-        sta rdlast                 ; (0: no s once a flip has run, so on redraws)
-:       lda #G_SP
-        jsr putg
-        cpy #8*8                   ; (putg leaves Y = 8 tcol)
-        bne :-
-@same:  rts
-@on:    ldx #7                     ; s = the sum of dvs, 255 at most
-        lda #0
-        clc
-:       adc dvs,x
-        bcc :+
-        lda #$FF
-        bne :++
-:       dex
-        bpl :--
-:       sta MT0                    ; fps10 = (4000 + s / 2) / s (0 for s 0)
-        cmp rdlast                 ; s as last drawn: PANEL is single-buffered
-        beq @same                  ; and row 8 is only readout's, so it already
-        sta rdlast                 ; shows it (fps10, tcol as a redraw leaves them)
-        lsr a
-        clc
-        adc #<4000
-        sta fps10
-        lda #>4000
-        adc #0
-        sta fps10+1
-        lda MT0
-        beq @f0
-        lda #0                     ; the 16 by 8 division: quotient into fps10,
-        ldy #16                    ; the remainder in A
-@fd:    asl fps10
-        rol fps10+1
-        rol a
-        bcs @fs                    ; (past 255: s > 127)
-        cmp MT0
-        bcc @fn
-@fs:    sbc MT0
-        inc fps10
-@fn:    dey
-        bne @fd
-        tya                        ; A = 0 (Y 0: the loop's end)
-        beq @fz                    ; (always)
-@f0:    sta fps10                  ; (A = MT0 = 0)
-        sta fps10+1
-@fz:    sta tcol                   ; (A = 0 both ways in)
-        tay                        ; fps10's hundreds (tens of frames a second)
-:       lda fps10
-        sec
-        sbc #100
-        tax
-        lda fps10+1
-        sbc #0
-        bcc :+
-        sta fps10+1
-        stx fps10
-        iny
-        bne :-
-:       tya
-        bne :+
-        lda #G_SP                  ; (a leading zero blank)
-:       jsr putg
-        ldy #0                     ; the tens (units of frames a second)
-:       lda fps10
-        sec
-        sbc #10
-        bcc :+
-        sta fps10
-        iny
-        bne :-
-:       tya
-        jsr putg
-        lda #G_DOT
-        jsr putg
-        lda fps10                  ; the rest: tenths
-        .assert G_F = G_SP + 1, error, "readout: G_SP, G_F, G_F+1, G_F+2 consecutive"
-@fp:    jsr putg                   ; the tenths at column 3, then " FPS" at 4..7:
-        lda tcol                   ; character tcol + G_SP - 4 (C clear out of
-        adc #G_SP-4                ; putg: 8 tcol < 256)
-        cmp #G_F+2
-        bne @fp
-                                   ; (falls into putg)
-; putg: character A (GLY's index) at column tcol of the panel's row 8 (MODE 5:
-; a character a byte wide, 4 pixels), tcol then one on: GLY + 8 A's 8 bytes
-; (its lines) to PANEL + 8*64 + 8 tcol.  In: A, tcol.  Clobbers A, X, Y.
-; Callers: readout.
-putg:   asl a
-        asl a
-        asl a
-        tax                        ; X = 8 A
-        lda tcol
-        asl a
-        asl a
-        asl a
-        tay                        ; Y = 8 tcol: the panel's row 8 (64 bytes a
-:       lda GLY,x                  ; row, 8 a character)
-        sta PANEL+8*64,y
-        inx
-        iny
-        tya
-        and #7
-        bne :-
-        inc tcol
-        rts
-GLY:    .incbin "GLYPHS"           ; the readout's 15 characters, 8 bytes each
 
 pkx:    .byte $FF                  ; project's: the cxt and czt + ZB the heights
 pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:
@@ -3488,13 +3391,7 @@ pkz:    .byte $FF                  ; (HT) and boxes (CLE, CLO) are for ($FF:
 SHF:    .byte 0                    ; zsh4's: HT to shift a row on (1) or back
                                    ; ($FF) with HTN; 0 none
         .code
-fpson:  .byte 1                    ; the readout on (game.s's F toggles it)
-rdlast: .byte 1                    ; readout's: the s row 8 shows (1: none; s is
-                                   ; 0 or a sum of dvs each >= FMIN)
         .segment "LDL"
-dvs:    .res 8                     ; flip's: the last eight frames' vertical
-                                   ; syncs (init zeroes them)
-dvi:    .res 1                     ; the next entry
 vlast:  .res 1                     ; vcount at the last flip
 ; the line tables (init's): each at offset $40..$9F of its page (b32.cfg: LDT,
 ; P1T), so that the table less YSKY, indexed by a line YSKY..YGND+1 (OL's to
@@ -3657,13 +3554,17 @@ rg_lbe: .repeat 9, i
         .segment "RUNGT"           ; (made by the loader: grung)
 RPT:    .res 256
 RQF:    .res 256
+; FUELR: the FUEL frame's row 0, MODE 1, FUELW characters: FUEL (the loader's,
+; from the MOS's font as the full build's) and the gauge (game.s's status).
+        .segment "FUELD"
+FUELR:  .res FUELW*8
 ; MC: mapgen.s's window of the map, a ring of 128 slots.
         .segment "MCD"
 MC:     .res 128
 ; PANEL: the panel's 9 MODE 5 rows (64 bytes each): the map (the loader draws
 ; it from MAP32: gpanel), the readout's row (putg's).
         .segment "PANELD"
-PANEL:  .res 9*64                  ; (the loader's: gpanel, from MAP32)
+PANEL:  .res 8*64                  ; (the loader's: gpanel's map)
 QRA:    .res QRAN                  ; div8's table, rows 2..8 (gqr's): here, at a
         .assert >QRA = >(* - 1), error, "QRA: one page"  ; fixed address, in one page
 ; R7L, R7H + di: r, the row's pixels a tile at depth index di (d = 16 (DI0 +

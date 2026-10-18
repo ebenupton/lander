@@ -78,7 +78,10 @@ def orient(k, p):
         if vis[g]:
             br = max(0, ((4096 - ny[g]) >> 9) + neg[g] - 5)
             col = SH.FACES[f]['colour']
-            faces.append((f, SG.RAMPS[SG.HUE[col]][min(15, (col >> 4 & 15) + br)]))
+            if SG.LG.NU.arc():         # (arc: Lander's colour itself, as the 64K build's)
+                faces.append((f, SG.LG.NU.lentry(SG.LG.NU.ARCSHIP[col], min(15, br))))
+            else:
+                faces.append((f, SG.RAMPS[SG.HUE[col]][min(15, (col >> 4 & 15) + br)]))
     return pts, faces
 
 
@@ -170,6 +173,7 @@ def inc(path):
       PSIN, PCOS + p     the pitches' sines and cosines, x 64
       FV0, FV1, FV2 + f  face f's vertices
       FHUE, FGRN + f     its colour's ramp x 16 (0, 16, 32: RAMPE's rows) and green nibble
+                         (arc: its Lander kind's row, 0: Lander's colour, by brightness)
       RAMPE, RAMPO + 16 h + i   ramp h's entry i: its dither's even, odd line bytes
       KTN, BYN, LIM + w  shipspan.s's: for a boundary at w (0..47) the mask of its
                          byte's pixels before it, its byte's offset (8 (w >> 2)), the
@@ -197,9 +201,15 @@ def inc(path):
     emit('PCOS', PCOS)
     for c in range(3):
         emit(f'FV{c}', [SG.FACEV[f][c] for f in range(NF)])
-    emit('FHUE', [16 * hues.index(SG.HUE[SH.FACES[f]['colour']]) for f in range(NF)])
-    emit('FGRN', [SH.FACES[f]['colour'] >> 4 & 15 for f in range(NF)])
-    db = [LG.dither_bytes(SG.RAMPS[h][i]) for h in hues for i in range(16)]
+    if LG.NU.arc():                          # (arc: a row a Lander kind, by brightness)
+        kinds = sorted(set(LG.NU.ARCSHIP[SH.FACES[f]['colour']] for f in range(NF)))
+        emit('FHUE', [16 * kinds.index(LG.NU.ARCSHIP[SH.FACES[f]['colour']]) for f in range(NF)])
+        emit('FGRN', [0] * NF)
+        db = [LG.dither_bytes(LG.NU.lentry(k, i)) for k in kinds for i in range(16)]
+    else:
+        emit('FHUE', [16 * hues.index(SG.HUE[SH.FACES[f]['colour']]) for f in range(NF)])
+        emit('FGRN', [SH.FACES[f]['colour'] >> 4 & 15 for f in range(NF)])
+        db = [LG.dither_bytes(SG.RAMPS[h][i]) for h in hues for i in range(16)]
     emit('RAMPE', [d[0] for d in db])
     emit('RAMPO', [d[1] for d in db])
     rows.append(f'SHIP_TQ = {TQ}')

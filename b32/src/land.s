@@ -328,9 +328,10 @@ ptr:    .res 2                     ; a pointer (init, putg, LANDS)
 tmp:    .res 2                     ; scratch (init, prow7's 16 j, hgnd, slow,
                                    ; slow2, LANDS)
 ; project
-syp:    .res 2                     ; bank 7's: the row's SYT7 line, offset by
-lp:     .res 2                     ; HOFF; a LERPQ7 row (the clip rows' q =
-                                   ; 16 - czs; hgnd's)
+tfe:    .res 1                     ; (t_flo's: the run's end, TNB - n)
+tfn:    .res 1
+RD:     .res 1                     ; (prow32's: the row's di; @f0's scratch)
+ph_e:   .res 1                     ; (phase's: the phase's end)
 rl:     .res 1                     ; the row's r, low and high (R7BP)
 rh:     .res 1
 ; strips
@@ -1471,8 +1472,6 @@ t_fcl:  lda #<t_back               ; the blocks' JMPs back to t_back
         clc                        ; (t_back's ADC)
         lda tyv
 tfj:    jmp $FFFF                  ; (operand: the entry) then t_back
-tfe:    .byte 0                    ; (data, in the code: the run's end, and
-tfn:    .byte 0                    ; TNB - n)
 tfbl:   .byte <TBLK4, <TBLK5
 tfbh:   .byte >TBLK4, >TBLK5
 ; divs: rungs' division.  In: dva = a, ra2 = dvx = 2a (a <= 127), dvd = D.  Out: rq,
@@ -1934,7 +1933,6 @@ ph_en:  stx ph_e                   ; the end (X); c_xe's operand at most 128
         ldx #128
 :       stx c_xe+1
         rts
-ph_e:   .byte 0                    ; the phase's end (data, in the code)
 
 ; c_dbl: from c_split, rung ri+1 starts in the column too (A = x4 | 3 >= its
 ; LO).  Two rungs: s2v (bank 4) when the top is level (V clear, c_coly's), else

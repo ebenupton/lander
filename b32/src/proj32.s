@@ -298,7 +298,6 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
 YT:     .res 16                    ; ytab's: line by height
 ncame:  .res 1                     ; @fn's: the CAME neyv is for (both zeroed at load: EYV 0 for CAME 0)
 neyv:   .res 1
-RD:     .res 1                     ; prow32's: the row's di; @f0's scratch
         .code
 
 ; lrng: HLO, HHI = the range of corners 1..NX-2 over HT rows Y/16 and Y/16 + 1

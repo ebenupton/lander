@@ -128,7 +128,7 @@
 ;
 ; Main RAM (addresses from build/map.txt and labels.txt):
 ;   $0000-$008D   zero page (.zeropage below); $008E-$009F scratch shared
-;                 between the frame's parts (HPZ, bank 7's, BE/BO, game.s's,
+;                 between the frame's parts (mapgen.s's, bank 7's, BE/BO, game.s's,
 ;                 shipb.s's)
 ;   $0400, $0500  ROWA, ROWB: a row's line by pixel x (a strip's top, bottom)
 ;   $0600         RTBUF: the rungs' transition lines
@@ -373,8 +373,8 @@ last:   .res 1                     ; $FF: the near strip (cols tests bit 7);
 lastri: .res 1                     ; the rung BE, BO, rbl, fst_e are made for
                                    ; ($FF: none)
 BE      = $8E                      ; fsplit's rung's bytes by bpos 0..4, even
-HPZ     = $8E                      ; and odd lines; project's 8 map row pointers
-BO      = BE+5                     ; (both in the shared scratch $8E-$9F)
+BO      = BE+5                     ; and odd lines (both in the shared scratch
+                                   ; $8E-$9F)
 ; columns
 x4:     .res 1                     ; the column's first pixel x (a multiple
                                    ; of 4)
@@ -839,8 +839,8 @@ init:   jsr shtab                  ; the ship's walker's tables
 ; ---------------------------------------------------------------- project
 ; project: the block of corners (proto/land.py: project) as rows of points.
 ; Sets ZB, FACT, RN and nr from czs.  If the map columns (cxt) or rows (czt +
-; ZB) differ from last frame's (pkx, pkz): refetches CX and every row's raw
-; height into HT (bank 4's MAP via HPZ), or for a step of one row has zsh4
+; ZB) differ from last frame's (pkx, pkz): refetches every row's raw height
+; into HT (from mapgen.s's window, MC), or for a step of one row has zsh4
 ; fetch the new row alone (HTN, SHF: prow7's hsh shifts HT).  Then, changed
 ; or not, bank 5's pcol5 remakes the strips' box bytes (CLE, CLO) as needed
 ; (the arc build's change with czt, which can change on the same rows: czt +
@@ -881,39 +881,40 @@ project:
 @cx:    sta pkx
         .assert ZBACK-ZSKIP-ZCLIP+1 = 8 && ZFCLIP-ZCLIP+1 = 7, error, "nr 7 or 8"
         .assert XSKIP = 1, error, "project: the columns cxt - 4 .. cxt + 6 (mapgen.s's window)"
-@hl:    lda czt                    ; all 8 rows' heights: pkz = czt + ZB; HPZ +
-        clc                        ; 2j = map row czt + ZB - j's first column
-        adc ZB                     ; (cxt - 4) in MC: slot MWO + 16 (ZB - 5 -
-        sta pkz                    ; j) + 1 (mapgen.s), row 7's first; then
-        lda ZB                     ; HT + 16j + i = (HPZ + 2j) + i's height
-        asl a
+@hl:    lda czt                    ; all 8 rows' heights: pkz = czt + ZB; HT
+        clc                        ; + 16j + i = map row czt + ZB - j's column
+        adc ZB                     ; cxt - 4 + i, MC's slot MWO + 16 (ZB - 5 -
+        sta pkz                    ; j) + 1 + i (mapgen.s): Y the slot, X the
+        lda ZB                     ; HT index, both stepped across the row (Y
+        asl a                      ; wraps with the ring)
         asl a
         asl a
         asl a
         sec                        ; (+ 1)
         adc MWO
         sec
-        sbc #16*12
-        ldy #>MC
-        ldx #14
-@hp:    sta HPZ,x
-        sty HPZ+1,x
+        sbc #16*5
+        tay
+        ldx #0
+@hr:    lda #NX
+        sta z:MGT
+@hc:    lda MC,y
+        and #15
+        sta HT,x
+        iny
+        inx
+        dec z:MGT
+        bne @hc
+        txa                        ; the next row: HT 16 on, the slot 16 back
         clc
-        adc #16
-        dex
-        dex
-        bpl @hp
-        ldy #NX-1
-@hc:    lda (HPZ+14),y             ; row 7
-        and #15
-        sta HT+$70,y
-        .repeat 7, i               ; rows 6..0
-        lda (HPZ+12-2*i),y
-        and #15
-        sta HT+$60-16*i,y
-        .endrepeat
-        dey
-        bpl @hc
+        adc #16-NX
+        tax
+        tya
+        sec
+        sbc #16+NX
+        tay
+        cpx #$80
+        bcc @hr
         ldx #$70                   ; each row's range (proj32's hrng)
 :       jsr hrng
         txa
@@ -3651,9 +3652,9 @@ rg_lbe: .repeat 9, i
         .segment "RUNGT"           ; (made by the loader: grung)
 RPT:    .res 256
 RQF:    .res 256
-; MC: mapgen.s's window of the map, a ring of 256 slots and the 17-byte mirror.
+; MC: mapgen.s's window of the map, a ring of 256 slots.
         .segment "MCD"
-MC:     .res 256+17
+MC:     .res 256
 ; PANEL: the panel's 9 MODE 5 rows (64 bytes each): the map (the loader draws
 ; it from MAP32: gpanel), the readout's row (putg's).
         .segment "PANELD"
@@ -3678,10 +3679,10 @@ R7H:    .res NDI
 ; (SHF 1: each row's heights become the row before's) or -1 (SHF $FF: the row
 ; after's), the one new row's heights are read from the map into HTN: map row
 ; czt + ZB for +1 (the new row 0), czt + ZB - 7 for -1 (the new row 7), masked
-; to the height (bits 0-3) at each column CX; prow7's hsh then shifts HT and
-; takes HTN in.  Out: C set, SHF, HTN, pkz = czt + ZB.  Otherwise C clear
-; (pkz still updated; project reloads every row).  Uses HPZ (zero page, 2
-; bytes) as the map row's pointer.  Clobbers A, X, Y.  Caller: project.
+; to the height (bits 0-3) at columns cxt - 4 .. cxt + 6 (mapgen.s's MC);
+; prow7's hsh then shifts HT and takes HTN in.  Out: C set, SHF, HTN, pkz =
+; czt + ZB.  Otherwise C clear (pkz still updated; project reloads every row).
+; Clobbers A, X, Y.  Caller: project.
 zsh4:   tay
         sec
         sbc pkz                    ; A = new - old
@@ -3695,24 +3696,24 @@ zsh4:   tay
         tay
         lda #$FF
 @ld:    sta SHF
-        tya                        ; HPZ = MC + the row's first column's slot:
-        sec                        ; MWO + 16 (z - WZ0) + 1 (mapgen.s)
-        sbc MWZ
+        tya                        ; Y = the row's first column's slot: MWO +
+        sec                        ; 16 (z - WZ0) + 1 (mapgen.s), stepped (with
+        sbc MWZ                    ; the ring's wrap)
         asl a
         asl a
         asl a
         asl a
         sec
         adc MWO
-        sta HPZ
-        lda #>MC
-        sta HPZ+1
-        ldy #NX-1
-:       lda (HPZ),y
+        tay
+        ldx #0
+:       lda MC,y
         and #15
-        sta HTN,y
-        dey
-        bpl :-
+        sta HTN,x
+        iny
+        inx
+        cpx #NX
+        bne :-
         sec
         rts
 @no:    clc
@@ -3962,10 +3963,13 @@ crow:   stx WM
         asl a
         sec
         adc MWO
-        sta @le+1                  ; (MC's low byte 0)
+        sta z:MGT                  ; (scratch: mapgen.s's, free here)
         ldx #NX-2
-@c:
-@le:    lda MC,x                   ; the tile's colour index: its corner's high
+@c:     txa                        ; slot + X, wrapped in the register
+        clc
+        adc z:MGT
+        tay
+        lda MC,y                   ; the tile's colour index: its corner's high
         lsr a                      ; nibble
         lsr a
         lsr a

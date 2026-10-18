@@ -6,8 +6,9 @@
 ; The ring: corner (x, z) of the window (x WX0 .. WX0+15, z WZ0 .. WZ0+15, map
 ; coordinates mod 64) is at slot MWO + 16 (z - WZ0) + (x - WX0), mod 256: a map
 ; row's 16 corners are 16 consecutive slots (mod 256) and the corner a row on is
-; 16 slots on.  MC + 256 .. MC + 272 mirror slots 0..16, so any 17 consecutive
-; slots read straight through from MC + the first.  A slot holds the corner's
+; 16 slots on.  Every access is LDA/STA MC,X or MC,Y with the whole slot in the
+; index register (MC page-aligned), so the ring wraps as the register does
+; (INY, ADC): never a base past the slot, which would cross the page.  A slot holds the corner's
 ; height (bits 0-3) and its tile's colour index (bits 4-7; tile (x, z) between
 ; corners x, x+1 and z, z+1: kept for x < WX0+15, z < WZ0+15).  The window
 ; follows the camera: WX0 = cxt - 5, WZ0 = czt + 5 (project's columns cxt-4 ..
@@ -191,7 +192,7 @@ mset:   sta MGT
 
 ; mcl: MGN corners from (MGX, MGZ) at slot MGS, each next MGD slots on and x or
 ; z one on (mcp's operand: MGP or MGQ, the phases' steps): each height into its
-; slot (colour 0), and the mirror.  The height: PADH on the pad (x, z <= PADN),
+; slot (colour 0).  The height: PADH on the pad (x, z <= PADN),
 ; else the count of HTL/HTH's thresholds the sum + 2560 reaches, the sum the
 ; six terms' SIN16 + 256 (madd's), the four k = 2 terms' doubled.  Clobbers A,
 ; X, Y.
@@ -260,10 +261,7 @@ mcl_c:  lda MGX                    ; the pad?
 :       tya
 mcl_s:  ldy MGS
         sta MC,y
-        cpy #17
-        bcs :+
-        sta MC+256,y
-:       jsr mnext
+        jsr mnext
         beq mcl_x
         ldx #5                     ; the phases on
 :       lda MGPH,x
@@ -324,8 +322,8 @@ mul64:  sta MGU
         rts
 
 ; mtl: MGN tiles from (MGX, MGZ) at slot MGS on (as mcl): each one's colour
-; index into its slot's high nibble (and the mirror's), from its corners (the
-; slot, + 1, + 16, + 17) and r = RA[(x + RA[z]) & 63] (R1, R2 its nibbles): the
+; index into its slot's high nibble, from its corners (the
+; slot, + 1, + 16, + 17: Y and X, then both stepped) and r = RA[(x + RA[z]) & 63] (R1, R2 its nibbles): the
 ; pad PADI (x, z < PADN); the sea (every corner 0) SEAI[R1 & 3]; land LUT's
 ; entry for qy, ql, the YQT and LQT quantiles TY = 4 R1 + 60 - the corners' sum
 ; and TL = 3 R2 + 7 clamp(6 - slope2, 0, 12) reach (slope2: the left corners'
@@ -347,18 +345,24 @@ mtl:    ldy MGS
         tax
         lda RA,x
         sta MGR
+        tya                        ; X = the slot 16 on (z + 1): Y, X index the
+        clc                        ; ring, so they wrap with it
+        adc #16
+        tax
         lda MC,y                   ; the left corners' sum (MGW), the right's
         and #15                    ; (MGT)
         sta MGT
-        lda MC+16,y
+        lda MC,x
         and #15
         clc
         adc MGT
         sta MGW
-        lda MC+1,y
+        iny                        ; (x + 1)
+        inx
+        lda MC,y
         and #15
         sta MGT
-        lda MC+17,y
+        lda MC,x
         and #15
         clc
         adc MGT
@@ -451,10 +455,7 @@ mtl_s:  asl a                      ; A: the colour index, into the high nibble
         and #15
         ora MGT
         sta MC,y
-        cpy #17
-        bcs :+
-        sta MC+256,y
-:       jsr mnext
+        jsr mnext
         beq :+
         jmp mtl
 :       rts

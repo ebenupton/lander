@@ -1348,30 +1348,7 @@ tx_h:   lda TEN4H,y                ; (operand: the row's table)
         lda tyv
 tx_j:   jmp t_back                 ; (operand: the fill)
 t_flf:  ldy #1                     ; (Y: t_back's count)
-t_flo:  php                        ; a run longer than TNB: tyv over tcnt ..
-        sty tdx2                   ; X-1 by this loop (Y, the count, kept in
-        stx t_fs+1                 ; tdx2; V kept by PHP/PLP), then t_back as
-        stx t_fs2+1                ; from a fill.  The store's base is the
-        ldy bota+1                 ; row's page - 1 + X (bota's low byte 0),
-        dey                        ; Y from tcnt - X up to 0: (bota) + tcnt ..
-        sty t_fs+2                 ; X-1 (X > tcnt, X not 0)
-        sty t_fs2+2
-        txa
-        eor #$FF                   ; (C set: t_flf's, t_fl1's BCS)
-        adc tcnt                   ; tcnt - X
-        tay
-        lsr a                      ; C: Y odd.  Two stores a pass, Y even at
-        lda tyv                    ; the BNE: an odd Y comes in at the second
-        bcs t_fs2                  ; (the run is more than TNB long: Y < 255)
-t_fs:                              ; (operands: page - 1, X; patched above)
-:       sta $FFFF,y
-        iny
-t_fs2:  sta $FFFF,y
-        iny
-        bne :-
-        ldy tdx2
-        plp                        ; (C set again, as on entry)
-t_fx:   clc                        ; (t_back's ADC)
+        jmp t_flo
 t_back:                            ; the fills' JMP target (init plants it): X
 t_inc:  inc tyv                    ; the run's end, Y the steps left, C clear.
         dey                        ; y steps (INC or DEC: t_seg's opcode)
@@ -1440,6 +1417,59 @@ tg_op:  inc tyy                    ; (opcode: INC or DEC zp, t_steep's)
 :                                  ; (kept: the file's anonymous label count)
 
 
+t_flo:  php                        ; a run longer than TNB: tyv over tcnt ..
+        sty tdx2                   ; X-1 by the row's fill block chained (Y,
+        stx tfe                    ; the count, kept in tdx2; V by PHP/PLP):
+        lda bota+1                 ; TNB stores at a time from tcnt, the blocks'
+        and #1                     ; JMPs to t_fch meanwhile, while more than
+        tay                        ; TNB is left; then the JMPs back to t_back
+        lda tfbl,y                 ; and the last stores, ending at X, by the
+        sta tfb+1                  ; entry for what is left: TBLKx + 3 (TNB -
+        lda tfbh,y                 ; n), on to t_back as from a fill
+        sta tfb+2                  ; (tfb: the row's block, TBLK4 for ROWA,
+        lda #<t_fch                ; TBLK5 for ROWB)
+        sta TBLK4+3*TNB+1
+        sta TBLK5+3*TNB+1
+        .assert >t_fch = >t_back, error, "traceb: t_fch, t_back must share a page"
+        ldx tcnt
+t_fch:  txa                        ; X: the stores so far end here
+        clc
+        adc #TNB
+        bcs t_fcl                  ; (past 255: the last)
+        cmp tfe
+        bcs t_fcl                  ; X + TNB reaches the end: the last
+        tax
+        lda tyv
+tfb:    jmp $FFFF                  ; (operand: the row's block) TNB stores,
+                                   ; back to t_fch
+t_fcl:  lda #<t_back               ; the blocks' JMPs back to t_back
+        sta TBLK4+3*TNB+1
+        sta TBLK5+3*TNB+1
+        txa                        ; n = the end - X (1 .. TNB)
+        eor #$FF
+        sec
+        adc tfe
+        eor #$FF                   ; TNB - n = ~n + TNB + 1
+        clc
+        adc #TNB+1
+        sta tfn
+        asl a                      ; 3 (TNB - n) <= 3 TNB - 3: no carry
+        adc tfn
+        adc tfb+1                  ; + the block
+        sta tfj+1
+        lda tfb+2
+        adc #0
+        sta tfj+2
+        ldx tfe
+        ldy tdx2
+        plp                        ; (V as on entry)
+        clc                        ; (t_back's ADC)
+        lda tyv
+tfj:    jmp $FFFF                  ; (operand: the entry) then t_back
+tfe:    .byte 0                    ; (data, in the code: the run's end, and
+tfn:    .byte 0                    ; TNB - n)
+tfbl:   .byte <TBLK4, <TBLK5
+tfbh:   .byte >TBLK4, >TBLK5
 ; divs: rungs' division.  In: dva = a, ra2 = dvx = 2a (a <= 127), dvd = D.  Out: rq,
 ; rrem = D div 2a, D mod 2a (div8); rq2, rr2 = D div a, 2 (D mod a) (dv2, from
 ; them).  Clobbers A, Y, dvx, dvd.  Called by rg_rsl, rg_lsl.

@@ -359,53 +359,74 @@ mul4:   sta MT1
 ; HORIZON is its top byte; it is stepped down by 16 r (Q0) a height.
 ; In: rl, rh = r; HGV; EYV; HLO, HHI.  Clobbers A, X, Y, Y0..Y0+2,
 ; Q0..Q0+2.
-ytab:   lda rh                     ; Q = 4 r, the multiplicand (r < 8192:
-        sta Q0+1                   ; eyrow's assert, so 4 r < 32768)
+ytab:   lda #0                     ; Q = 16 r (r < 8192: 17 bits)
+        sta Q0+2
+        lda rh
+        sta Q0+1
         lda rl
+        .repeat 4
         asl a
         rol Q0+1
-        asl a
-        rol Q0+1
+        rol Q0+2
+        .endrepeat
         sta Q0
-        lda HGV                    ; m = CAMH + hg - HLO
-        clc
-        adc #CAMH
-        sec
-        sbc HLO
-        lsr a                      ; 4 m r + 8192, 8 x 16 from m's bottom bit:
-        sta Y0                     ; the sum's top bytes in A and Y0+1, started
-        lda #0                     ; at 8192 (A = 32), shifted down into Y0 as
-        sta Y0+1                   ; m's bits leave it
-        ldx #8
-        lda #32
-@m:     bcc :+
-        tay
-        lda Y0+1
-        clc
-        adc Q0
-        sta Y0+1
-        tya
-        adc Q0+1
-:       ror a
-        ror Y0+1
-        ror Y0
-        dex
-        bne @m
-:       asl Y0                     ; 4 times: 16 m r + 32768 (4 m r + 8192 <
-        rol Y0+1                   ; 2^22: no bit lost)
-        rol a
-        asl Y0
-        rol Y0+1
+        lda rl                     ; Z at h = hg: 16 CAMH r + 32768 = (6 r <<
+        asl a                      ; 8) + 32768 (6 r < 2^16: r < 8192)
+        sta Y0+1                   ; 2 r
+        lda rh
         rol a
         sta Y0+2
-:       lda #0                     ; Q = 16 r: 4 r shifted twice more
-        asl Q0
-        rol Q0+1
+        lda Y0+1                   ; + 4 r (C clear: 2 r < 2^15)
+        asl a
+        tax
+        lda Y0+2
         rol a
-:       asl Q0
-        rol Q0+1
-        rol a
-        sta Q0+2
+        tay
+        txa
+        adc Y0+1
+        sta Y0+1
+        tya
+        adc Y0+2
+        sta Y0+2
+        lda Y0+1                   ; + 32768
+        eor #$80
+        sta Y0+1
+        bmi :+
+        inc Y0+2                   ; (bit 7 was set: the carry)
+:       lda #0
+        sta Y0
+        ldy HGV                    ; then to h = HLO: 16 r more a height down,
+        cpy HLO                    ; less a height up
+        beq @go
+        bcc @up
+@dn:    lda Y0
+        clc
+        adc Q0
+        sta Y0
+        lda Y0+1
+        adc Q0+1
+        sta Y0+1
+        lda Y0+2
+        adc Q0+2
+        sta Y0+2
+        dey
+        cpy HLO
+        bne @dn
+        beq @go                    ; (always)
+@up:    lda Y0
+        sec
+        sbc Q0
+        sta Y0
+        lda Y0+1
+        sbc Q0+1
+        sta Y0+1
+        lda Y0+2
+        sbc Q0+2
+        sta Y0+2
+        iny
+        cpy HLO
+        bne @up
+@go:
         ldy HLO
 @h:     lda Y0+2                   ; the line less HORIZON, + EYV + HORIZON
         clc                        ; (-16), held at 254

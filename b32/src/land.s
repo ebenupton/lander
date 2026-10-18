@@ -853,7 +853,6 @@ init:   jsr shtab                  ; the ship's walker's tables
 ; Clobbers A, X, Y, tmp, rl, rh, syp, lp, MT0, MT1, $8E-$9E.  Called by the
 ; main loop.
 project:
-        jsr mwin                   ; the map's window to the camera (mapgen.s)
         lda czs                    ; FACT = (czs != 0): ZB the far clip's row, a
         cmp #1                     ; corner row (ZB = ZFCLIP, FACT 0) at czs 0,
         lda #0                     ; else between rows ZFCLIP and ZFCLIP+1 (ZB
@@ -867,6 +866,7 @@ project:
         tay
         iny
         sty nr
+        jsr mwin                   ; the map's window to the camera (mapgen.s)
         lda cxt                    ; the same columns and map rows as last frame
         cmp pkx                    ; (pkx, pkz): HT stands, pcol5 and prow7 only
         bne @cx
@@ -883,17 +883,12 @@ project:
         .assert XSKIP = 1, error, "project: the columns cxt - 4 .. cxt + 6 (mapgen.s's window)"
 @hl:    lda czt                    ; all 8 rows' heights: pkz = czt + ZB; HT
         clc                        ; + 16j + i = map row czt + ZB - j's column
-        adc ZB                     ; cxt - 4 + i, MC's slot MWO + 16 (ZB - 5 -
-        sta pkz                    ; j) + 1 + i (mapgen.s): Y the slot, X the
-        lda ZB                     ; HT index, both stepped across the row (Y
-        asl a                      ; wraps with the ring)
-        asl a
-        asl a
-        asl a
-        sec                        ; (+ 1)
-        adc MWO
-        sec
-        sbc #16*5
+        adc ZB                     ; cxt - 4 + i, MC's slot MWO + 16 (7 - j) +
+        sta pkz                    ; 1 + i, mod 128 (mapgen.s): Y the slot, X
+        lda MWO                    ; the HT index, both stepped across the row
+        clc
+        adc #16*7+1
+        and #$7F
         tay
         ldx #0
 @hr:    lda #NX
@@ -901,7 +896,11 @@ project:
 @hc:    lda MC,y
         and #15
         sta HT,x
-        iny
+        tya
+        clc
+        adc #1
+        and #$7F
+        tay
         inx
         dec z:MGT
         bne @hc
@@ -912,6 +911,7 @@ project:
         tya
         sec
         sbc #16+NX
+        and #$7F
         tay
         cpx #$80
         bcc @hr
@@ -1430,7 +1430,9 @@ t_flo:  php                        ; a run longer than TNB: tyv over tcnt ..
         lda #<t_fch                ; TBLK5 for ROWB)
         sta TBLK4+3*TNB+1
         sta TBLK5+3*TNB+1
-        .assert >t_fch = >t_back, error, "traceb: t_fch, t_back must share a page"
+        lda #>t_fch
+        sta TBLK4+3*TNB+2
+        sta TBLK5+3*TNB+2
         ldx tcnt
 t_fch:  txa                        ; X: the stores so far end here
         clc
@@ -1445,6 +1447,9 @@ tfb:    jmp $FFFF                  ; (operand: the row's block) TNB stores,
 t_fcl:  lda #<t_back               ; the blocks' JMPs back to t_back
         sta TBLK4+3*TNB+1
         sta TBLK5+3*TNB+1
+        lda #>t_back
+        sta TBLK4+3*TNB+2
+        sta TBLK5+3*TNB+2
         txa                        ; n = the end - X (1 .. TNB)
         eor #$FF
         sec
@@ -3652,9 +3657,9 @@ rg_lbe: .repeat 9, i
         .segment "RUNGT"           ; (made by the loader: grung)
 RPT:    .res 256
 RQF:    .res 256
-; MC: mapgen.s's window of the map, a ring of 256 slots.
+; MC: mapgen.s's window of the map, a ring of 128 slots.
         .segment "MCD"
-MC:     .res 256
+MC:     .res 128
 ; PANEL: the panel's 9 MODE 5 rows (64 bytes each): the map (the loader draws
 ; it from MAP32: gpanel), the readout's row (putg's).
         .segment "PANELD"
@@ -3697,20 +3702,25 @@ zsh4:   tay
         lda #$FF
 @ld:    sta SHF
         tya                        ; Y = the row's first column's slot: MWO +
-        sec                        ; 16 (z - WZ0) + 1 (mapgen.s), stepped (with
-        sbc MWZ                    ; the ring's wrap)
+        sec                        ; 16 (z - WZ0) + 1 (mapgen.s), stepped, each
+        sbc MWZ                    ; mod 128
         asl a
         asl a
         asl a
         asl a
         sec
         adc MWO
+        and #$7F
         tay
         ldx #0
 :       lda MC,y
         and #15
         sta HTN,x
-        iny
+        tya
+        clc
+        adc #1
+        and #$7F
+        tay
         inx
         cpx #NX
         bne :-
@@ -3932,7 +3942,7 @@ pcol5:  lda cxt
         stx VHI
         lda #1
 :       bne @o                     ; (always: A = 1)
-        .assert <MC = 0, error, "MC page-aligned"
+        .assert (<MC & $7F) = 0, error, "MC 128-aligned (a slot never crosses its page)"
         .assert <CLE = 0 && <CLO + 48 < $100, error, "crow: CLE page-aligned (@se's operand is 16 m); CLO + 48 in its page"
 ; crow: window row X (m, 0..9): map row (WK - m) & 63, entries 0..NX-2 by CX,
 ; into CLE + 16 m and CLO + 16 m (self-modifying: @le/@lo's operands the map
@@ -3965,9 +3975,10 @@ crow:   stx WM
         adc MWO
         sta z:MGT                  ; (scratch: mapgen.s's, free here)
         ldx #NX-2
-@c:     txa                        ; slot + X, wrapped in the register
+@c:     txa                        ; slot + X, mod 128
         clc
         adc z:MGT
+        and #$7F
         tay
         lda MC,y                   ; the tile's colour index: its corner's high
         lsr a                      ; nibble

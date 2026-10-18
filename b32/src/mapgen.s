@@ -1,19 +1,20 @@
 ; ============================================================================
-; mapgen.s -- the 64-tile map made on the fly (.included by land.s): a 16 x 16
-; window of it kept in MC, one page used as a ring, the generator making the
+; mapgen.s -- the 64-tile map made on the fly (.included by land.s): a 16 x 8
+; window of it kept in MC, 128 bytes used as a ring, the generator making the
 ; column or row the camera brings into it (proto/mapgen.py's map, exactly).
 ;
-; The ring: corner (x, z) of the window (x WX0 .. WX0+15, z WZ0 .. WZ0+15, map
-; coordinates mod 64) is at slot MWO + 16 (z - WZ0) + (x - WX0), mod 256: a map
-; row's 16 corners are 16 consecutive slots (mod 256) and the corner a row on is
+; The ring: corner (x, z) of the window (x WX0 .. WX0+15, z WZ0 .. WZ0+7, map
+; coordinates mod 64) is at slot MWO + 16 (z - WZ0) + (x - WX0), mod 128: a map
+; row's 16 corners are 16 consecutive slots (mod 128) and the corner a row on is
 ; 16 slots on.  Every access is LDA/STA MC,X or MC,Y with the whole slot in the
-; index register (MC page-aligned), so the ring wraps as the register does
-; (INY, ADC): never a base past the slot, which would cross the page.  A slot holds the corner's
+; index register, each slot made AND $7F (never a base past MC: a slot past 127
+; is not the ring's).  A slot holds the corner's
 ; height (bits 0-3) and its tile's colour index (bits 4-7; tile (x, z) between
-; corners x, x+1 and z, z+1: kept for x < WX0+15, z < WZ0+15).  The window
-; follows the camera: WX0 = cxt - 5, WZ0 = czt + 5 (project's columns cxt-4 ..
-; cxt+6 and map rows czt+7 .. czt+18 inside it), so a reader's slot for map row
-; czt + 5 + r, column cxt - 4 is MWO + 16 r + 1.
+; corners x, x+1 and z, z+1: kept for x < WX0+15, z < WZ0+7).  The window
+; follows the camera: WX0 = cxt - 5, WZ0 = czt + ZB - 7 (project's columns cxt-4
+; .. cxt+6 and its 8 corner rows, czt + ZB - 7 .. czt + ZB, whose 7 rows of
+; tiles are the strips'), so a reader's slot for map row WZ0 + r, column cxt - 4
+; is MWO + 16 r + 1.
 ; ============================================================================
 
 MGPH    = $8E                      ; mcl's phases (6): p x + q z mod 64 a term
@@ -29,9 +30,9 @@ MGU     = $9C
 MGW     = $9D
 MGR     = $9E                      ; mtl's random byte
 
-; mwin: the window to the camera (cxt, czt): stepped a column or row at a time
-; while within 8, else made anew (and the first time: MOK 0).  Clobbers A, X,
-; Y, $8E-$9E.  Caller: project.
+; mwin: the window to the camera (cxt, czt + ZB): stepped a column or row at a
+; time while within 8 columns or 7 rows, else made anew (and the first time:
+; MOK 0).  Clobbers A, X, Y, $8E-$9E.  Caller: project (after ZB).
 mwin:   lda MOK
         beq @full
 @xs:    lda cxt                    ; x: cxt - 5 - WX0
@@ -49,16 +50,18 @@ mwin:   lda MOK
         jmp @xs
 @xp:    jsr mxp
         jmp @xs
-@zs:    lda czt                    ; z: czt + 5 - WZ0
+@zs:    lda czt                    ; z: czt + ZB - 7 - WZ0
         clc
-        adc #5
+        adc ZB
+        sec
+        sbc #7
         sec
         sbc MWZ
         and #63
         beq @x
-        cmp #9
+        cmp #8
         bcc @zp
-        cmp #64-8
+        cmp #64-7
         bcc @full
         jsr mzm
         jmp @zs
@@ -72,7 +75,9 @@ mwin:   lda MOK
         sta MWX
         lda czt
         clc
-        adc #5
+        adc ZB
+        sec
+        sbc #7
         and #63
         sta MWZ
         lda #0
@@ -85,11 +90,11 @@ mwin:   lda MOK
         jsr mcl
         inc MWK
         lda MWK
-        cmp #16
+        cmp #8
         bne @fc
         lda #0
         sta MWK
-@ft:    lda #0                     ; rows 0..14's tiles
+@ft:    lda #0                     ; rows 0..6's tiles
         ldy MWK
         jsr mset
         jsr mxl
@@ -97,7 +102,7 @@ mwin:   lda MOK
         jsr mtl
         inc MWK
         lda MWK
-        cmp #15
+        cmp #7
         bne @ft
         lda #1
         sta MOK
@@ -106,36 +111,41 @@ mwin:   lda MOK
 ; mxp, mxm, mzp, mzm: the window a column right, left, a row on, back: the new
 ; line's corners, then the tiles they complete.
 mxp:    inc MWX
-        inc MWO
+        lda #1
+        jsr mwo
         lda #15
         jsr mzc
         lda #14
         bne mzt                    ; (always)
 mxm:    dec MWX
-        dec MWO
+        lda #$7F                   ; (- 1)
+        jsr mwo
         lda #0
         jsr mzc
         lda #0
         beq mzt                    ; (always)
 mzp:    inc MWZ
-        lda MWO
-        clc
-        adc #16
-        sta MWO
-        ldy #15
+        lda #16
+        jsr mwo
+        ldy #7
         jsr mxc
-        ldy #14
+        ldy #6
         bne mxt                    ; (always)
 mzm:    dec MWZ
-        lda MWO
-        sec
-        sbc #16
-        sta MWO
+        lda #$70                   ; (- 16)
+        jsr mwo
         ldy #0
         jsr mxc
         ldy #0
         beq mxt                    ; (always)
-; mzc, mzt: column A's corners, tiles (z on); mxc, mxt: row Y's (x on)
+; mwo: MWO + A, mod 128.  Clobbers A.
+mwo:    clc
+        adc MWO
+        and #$7F
+        sta MWO
+        rts
+; mzc, mzt: column A's corners (8), tiles (7) (z on); mxc, mxt: row Y's (16,
+; 15: x on)
 mzc:    ldy #0
         jsr mset
         jsr mzl
@@ -156,18 +166,19 @@ mxt:    lda #0
         jmp mtl
 mxl:    lda #1                     ; x on, 16
         ldx #<MGP
+        ldy #16
         bne :+                     ; (always)
-mzl:    lda #16                    ; z on, 16
+mzl:    lda #16                    ; z on, 8
         ldx #<MGQ
+        ldy #8
 :       sta MGD
         stx mcp+1                  ; (mcl's phase steps: p or q)
-        lda #16
-        sta MGN
+        sty MGN
         rts
         .assert >MGP = >MGQ, error, "mxl, mzl: MGP, MGQ in one page"
 
 ; mset: MGX, MGZ, MGS for the window's corner A across, Y down (each 0..15):
-; x = WX0 + A, z = WZ0 + Y (mod 64), slot MWO + 16 Y + A.  Clobbers A.
+; x = WX0 + A, z = WZ0 + Y (mod 64), slot MWO + 16 Y + A (mod 128).  Clobbers A.
 mset:   sta MGT
         clc
         adc MWX
@@ -187,6 +198,7 @@ mset:   sta MGT
         adc MGT
         clc
         adc MWO
+        and #$7F
         sta MGS
         rts
 
@@ -291,6 +303,7 @@ mnext:  dec MGN
         lda MGS
         clc
         adc MGD
+        and #$7F
         sta MGS
         ldx #0                     ; (MGZ = MGX + 1)
         lda MGD
@@ -323,7 +336,7 @@ mul64:  sta MGU
 
 ; mtl: MGN tiles from (MGX, MGZ) at slot MGS on (as mcl): each one's colour
 ; index into its slot's high nibble, from its corners (the
-; slot, + 1, + 16, + 17: Y and X, then both stepped) and r = RA[(x + RA[z]) & 63] (R1, R2 its nibbles): the
+; slot, + 1, + 16, + 17, each mod 128) and r = RA[(x + RA[z]) & 63] (R1, R2 its nibbles): the
 ; pad PADI (x, z < PADN); the sea (every corner 0) SEAI[R1 & 3]; land LUT's
 ; entry for qy, ql, the YQT and LQT quantiles TY = 4 R1 + 60 - the corners' sum
 ; and TL = 3 R2 + 7 clamp(6 - slope2, 0, 12) reach (slope2: the left corners'
@@ -345,9 +358,10 @@ mtl:    ldy MGS
         tax
         lda RA,x
         sta MGR
-        tya                        ; X = the slot 16 on (z + 1): Y, X index the
-        clc                        ; ring, so they wrap with it
+        tya                        ; X = the slot 16 on (z + 1)
+        clc
         adc #16
+        and #$7F
         tax
         lda MC,y                   ; the left corners' sum (MGW), the right's
         and #15                    ; (MGT)
@@ -357,8 +371,14 @@ mtl:    ldy MGS
         clc
         adc MGT
         sta MGW
-        iny                        ; (x + 1)
-        inx
+        lda MGS                    ; Y, X: the slots 1 on (x + 1)
+        clc
+        adc #1
+        and #$7F
+        tay
+        adc #16                    ; (C clear: the slot < 128)
+        and #$7F
+        tax
         lda MC,y
         and #15
         sta MGT

@@ -18,7 +18,7 @@ on=true;
 await s.runFor(40_000*2);
 on=false;
 // print one field's worth: from a write of R1=64 (E0) on
-let i=log.findIndex(e=>e[0]==1&&e[1]==64&&e[2]>0);
+let i=Math.max(0, log.findIndex(e=>e[0]==6&&e[1]==8)-1);
 for (const e of log.slice(i, i+20)) console.log(`R${e[0]}=${e[1]}  row ${e[2]} line ${e[3]} C0 ${e[4]}`);
 s.destroy?.();
 process.exit(0);

@@ -495,43 +495,41 @@ loop:   jsr gstep
 
 ; ---------------------------------------------------------------- the display
 ; Two CRTC frames a field (vertical rupture), 39 rows of 8 lines (512us) in all,
-; MODE 1 throughout (the ULA's $D8, the CRTC at 2MHz: R0 127, R3 $28), the
-; vertical sync at row 28 as a one-frame MODE 1 has it -- the full build's
-; screen top as it is (src/game.s):
-;   the top: rows 0..7, R4 7, all shown (R6 8), from TOP: row 0 64 characters
-;     (R1 64, R2 90: the land's place), FUEL and the gauge (columns 0..29) and
-;     the map's first 8 lines (48..63); rows 1..7 16 characters (R1 16) at the
-;     right (R2 42), the rest of the map: so the map, MAP = TOP + 384, is 64 by
-;     64 pixels, 128 bytes a row, at the land's columns 48..63;
-;   the land: rows 8..38, R4 30, 12 rows displayed (R6 12), 64 wide (R1 64, R2
-;     90), from the front land buffer (lfront), its sync at its row 20 (R7 20).
+; the vertical sync at row 28 as a one-frame MODE 1 has it; the full build's
+; screen top's layout (src/game.s), in MODE 5:
+;   the top: rows 0..7, R4 7, all shown (R6 8), MODE 5 (the ULA's $C4, the CRTC
+;     at 1MHz: R0 63, R3 $24), from TOP: row 0 32 characters (R1 32, R2 45: the
+;     land's place), FUEL and the gauge (columns 0..23) and the map's first 8
+;     lines (24..31); rows 1..7 8 characters (R1 8) at the right (R2 21), the
+;     rest of the map: so the map, MAP = TOP + 192, is 32 by 64 pixels (two
+;     tiles a pixel by a line), 64 bytes a row, at the land's right quarter;
+;   the land: rows 8..38, R4 30, MODE 1 (the ULA's $D8, the CRTC at 2MHz: R0
+;     127, R2 90, R3 $28), 12 rows displayed (R6 12), 64 wide, from the front
+;     land buffer (lfront), its sync at its row 20 (R7 20).
 ; A frame's start address is taken at its start (VCC 0); R4 is compared at
 ; each row's end and R6 at each row's start, so each frame's are written while
-; it runs, the next's start address too.  The map's place moves at two lines,
-; each one whose length makes up the move: top row 0's last line is 176
-; characters long (its sync at 90 as ever, the next 128 later at the new 42),
-; the map's last line 80 (its sync at 42, the land's first line's at 90 128
-; later), so the syncs keep their 64us and the lines between are whole.  Four
-; interrupts (irq):
+; it runs, the next's start address too.  The map moves right at top row 0's
+; last line, 88 characters long (its sync at 45 as ever, the next 64us later at
+; the new 21), so the syncs keep their 64us and no line is lost.  The modes
+; change in the sync (E0) and in the land's first line (black: the sky above
+; YSKY), the line the change lands in the only one of another length.  Four
+; interrupts (irq), each write placed by jsbeeb's own CRTC counters
+; (tools/crtcprobe.mjs):
 ;   E0, the sync (the system VIA's CA1): vcount, timer 2 restarted (the time
-;     since the sync), the top frame's R1 (64), R6 and start; timer 1 free
-;     running for Ea, then Eb (its latch reloaded: no drift between them);
-;   Ea, EVA later, top row 0's last line: R0 175, the top frame's R4, the
-;     land's R7 and start; past the line's sync R1 16, R2 42; next line R0 127;
-;   Eb, EVB after E0, the map's last line: R0 79, the land's R1 and R6; past the
-;     sync R2 90; the land's first line R0 127; timer 1 one-shot for E2;
+;     since the sync), the top frame's R1 (32), R6 and start, MODE 5; timer 1
+;     free running for Ea, then Eb (its latch reloaded: no drift between them);
+;   Ea, EVA later, top row 0's last line: R0 87, the top frame's R4, the
+;     land's R7 and start; past the line's sync R1 8, R2 21; next line R0 63;
+;   Eb, EVB after E0, the land's first line: MODE 1, the land's R1 and R6;
+;     timer 1 one-shot for E2;
 ;   E2, EV2US on, the land's row 0: R4 30.
 PROWS   = 8                        ; the top frame's rows (all shown)
-EAW     = 6                        ; Ea's, Eb's waits (dex loops).  Measured in
-EAW2    = 6                        ; jsbeeb (its CRTC's counters at each write):
-EBW     = 1                        ; Ea's R0 175 at row 0 line 7 C0 32, R1 144, R2
-EBW2    = 1                        ; 160, R0 127 at line 8 C0 30; Eb's R0 79 at the
-                                   ; map's last line C0 18, R1 34, R2 76, R0 127 at
-                                   ; the land's first line C0 18 (E0's first write
-                                   ; lands 2 lines after the sync starts)
-EVA     = 11*512 + 3*64 + 58       ; the sync to Ea: top row 0's line 7 (the
+E0WAIT  = 18                       ; E0's wait to the next line (dex loops)
+EAW     = 2                        ; Ea's waits (dex loops), placed by jsbeeb's
+EAW2    = 14                       ; CRTC counters (tools/crtcprobe.mjs)
+EVA     = 11*512 + 3*64 + 26       ; the sync to Ea: top row 0's line 7 (the
                                    ; frame starts 11 rows after the sync)
-EVB     = 11*512 + 60*64 + 10      ; to Eb: top row 7's line 7, the map's last
+EVB     = 11*512 + 61*64 - 22      ; to Eb: the land's first line
 EV2US   = 1*512 + 300              ; E1 to E2: the land's row 0 (+ ~420us)
 ULA_CTL = $FE20                    ; the video ULA's control register
 SVIA_IFR = $FE4D
@@ -573,13 +571,21 @@ irq:    txa
         sta UVIA_T1LL
         lda #>(EVB-EVA-2)
         sta UVIA_T1LH
-        CRW 1, 64                  ; the top frame: row 0 64 wide (FUEL, the
+        CRW 1, 32                  ; the top frame: row 0 32 wide (FUEL, the
         CRW 6, PROWS               ; map's first 8 lines), 8 rows shown, TOP
         CRW 12, >(TOP/8)
         CRW 13, <(TOP/8)
+        ldx #E0WAIT                ; MODE 5, early in the next line (this one is
+:       dex                        ; near its end): the CRTC's line first, still
+        bne :-                     ; at 2MHz, the sync to 45 and the end to 63
+        CRW 2, 45                  ; while the count is short of both (or the
+        CRW 0, 63                  ; line gets two syncs, or runs on to 255);
+        CRW 3, $24                 ; then the clock (1MHz)
+        lda #$C4
+        sta ULA_CTL
         lda #0
         sta evn
-        jmp @x
+        beq @x                     ; (always)
 @e2:    CRW 4, CR_TOTAL-PROWS-1    ; E2: the land's rows
 @x:     pla
         tax
@@ -593,17 +599,13 @@ irq:    txa
         beq @ea
         dex
         bne @e2
-        CRW 0, 79                  ; Eb, the map's last line (top row 7's line
-        CRW 1, 64                  ; 7): 80 characters, so the land's first line
-        CRW 6, 12                  ; starts 48 characters on from the map's
-        ldx #EBW                   ; (back at the land's place: its sync, 90, 128
-:       dex                        ; after the map's, 42); past the display, R1
-        bne :-                     ; and R6 for the land; past the sync, R2 90;
-        CRW 2, 90                  ; then early in the land's first line R0 127
-        ldx #EBW2
-:       dex
-        bne :-
-        CRW 0, 127
+        CRW 0, 127                 ; Eb, the land's first line (black: the sky
+        CRW 2, 90                  ; above YSKY): MODE 1, the CRTC's line first,
+        CRW 3, $28                 ; still at 1MHz, its sync to 90 while the count
+        lda #$D8                   ; is short of the map's 21 (else a second sync),
+        sta ULA_CTL                ; then the clock (2MHz) before the count's 90;
+        CRW 1, 64                  ; the land's R1 and R6 (this line black)
+        CRW 6, 12
         stx UVIA_ACR               ; (X = 0: timer 1 one-shot, for E2)
         lda #<EV2US
         sta UVIA_T1L
@@ -611,20 +613,20 @@ irq:    txa
         sta UVIA_T1H
         inc evn
         jmp @x
-@ea:    CRW 0, 175                 ; Ea, top row 0's last line: 176 characters,
-        CRW 4, PROWS-1             ; so the next line starts 48 characters on
-        CRW 7, CR_VSYNC-PROWS      ; (rows 1..7: the map alone, at the right; its
-        CRW 12                     ; sync, 42, 128 after this line's, 90); the
-        CRW 13, 0                  ; top frame's end, the land's sync row and
-        ldx #EAW                   ; start; past this line's sync, rows 1..7 16
-:       dex                        ; wide with their sync at 42; then early in
-        bne :-                     ; the next line R0 127
-        CRW 1, 16
-        CRW 2, 42
+@ea:    CRW 0, 87                  ; Ea, top row 0's last line: 88 characters, so
+        CRW 4, PROWS-1             ; the next line starts 24 on (rows 1..7: the
+        CRW 7, CR_VSYNC-PROWS      ; map alone, at the right; its sync, 21, 64us
+        CRW 12                     ; after this line's, 45); the top frame's end,
+        CRW 13, 0                  ; the land's sync row and start; past this
+        ldx #EAW                   ; line's sync, rows 1..7 8 wide with their
+:       dex                        ; sync at 21; then early in the next line R0
+        bne :-                     ; 63
+        CRW 1, 8
+        CRW 2, 21
         ldx #EAW2
 :       dex
         bne :-
-        CRW 0, 127
+        CRW 0, 63
         inc evn
         jmp @x
 evn:    .byte 0                    ; irq's: the next timer event (0 Ea, 1 Eb, 2
@@ -1503,8 +1505,9 @@ divs:   jsr div8                   ; A = rem, dvd = q
         sta rr2                    ; rem 0 path relies on C clear)
         rts
 ; div8: dvd = dvd div dvx, A = dvd mod dvx (8-bit, dvx 2 or more).  Small
-; ones at once: dvd < dvx (0, dvd); dvd < 32 and dvx 16..31 (1, dvd - dvx); the
-; rest by shifts and subtractions.  X kept; clobbers Y.  Callers: t_flo (dvx =
+; ones at once: dvd < dvx (0, dvd); dvd < 32 and dvx 16..31 (1, dvd - dvx), or
+; 2..8 from QRA (gqr's: (q << 4) | r, QOA + dvx its row's offset less dvx);
+; the rest by shifts and subtractions.  X kept; clobbers Y.  Callers: t_flo (dvx =
 ; |dy| >= 2), divs (dvx = 2a).
 div8:   cmp dvx                    ; (A = dvd: every caller's STA dvd)
         bcc @lt                    ; dvd < dvx: q 0, r dvd
@@ -1512,8 +1515,22 @@ div8:   cmp dvx                    ; (A = dvd: every caller's STA dvd)
         bcs @sl                    ; (dvd 32 on: the loop)
         ldy dvx
         cpy #16
-        bcc @sl                    ; dvx 16..31: q 1
-        sbc dvx                    ; (C set) r = dvd - dvx
+        bcs @one                   ; dvx 16..31: q 1
+        cpy #9
+        bcs @sl                    ; (dvx 9..15: the loop)
+        adc QOA-2,y                ; (C clear) rows 2..8: QRA
+        tay
+        lda QRA,y
+        tay                        ; q = the high nibble, r the low
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta dvd
+        tya
+        and #$0F
+        rts
+@one:   sbc dvx                    ; (C set) r = dvd - dvx
         ldy #1
         sty dvd
         rts
@@ -3383,6 +3400,9 @@ TEN4L:  .res TNB+1
 TEN5L:  .res TNB+1
 TEN4H:  .res TNB+1                 ; (the H tables adjacent: one page)
 TEN5H:  .res TNB+1
+QRA:    .res QRAN                  ; div8's table, rows 2..8 (gqr's), in one page
+        .assert >QRA = >(QRA+QRAN-1), error, "QRA: one page"
+QOA:    .res 7                     ; its rows' offsets
         .code
 tenl:   .byte <TEN4L, <TEN5L, >TEN4L, >TEN5L, <(TEN4L+1), <(TEN5L+1), >(TEN4L+1), >(TEN5L+1)
 tenh:   .byte <TEN4H, <TEN5H, <(TEN4H+1), <(TEN5H+1)
@@ -3516,13 +3536,13 @@ RQF:    .res 256
 ; MC: mapgen.s's window of the map, a ring of 128 slots.
         .segment "MCD"
 MC:     .res 128
-; TOP: the top frame: row 0's columns 0..47 (FUEL: the loader's, from the
-; MOS's font as the full build's; the gauge: game.s's status), then MAP, the
-; map (gpanel's, the marker's), 64 lines of 16 bytes, 128 a character row (row
-; 0's columns 48..63, then rows 1..7's 16 characters).
+; TOP: the top frame (MODE 5): row 0's columns 0..23 (FUEL: the loader's, from
+; the MOS's font as the full build's; the gauge: game.s's status), then MAP,
+; the map (gpanel's, the marker's), 64 lines of 8 bytes (32 pixels), 64 a
+; character row (row 0's columns 24..31, then rows 1..7's 8 characters).
         .segment "TOPD"
-TOP:    .res 48*8
-MAP:    .res 1024
+TOP:    .res 24*8
+MAP:    .res 512
         .assert <MAP = 0, error, "MAP page-aligned (mkad, gpanel)"
 ; R7L, R7H + di: r, the row's pixels a tile at depth index di (d = 16 (DI0 +
 ; di)): land.recip(d) = (2^21 + k) div 2k, k = DI0 + di; init's.

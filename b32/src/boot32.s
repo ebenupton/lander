@@ -194,6 +194,7 @@ takeover:
         tax
         bcs @tc
         jsr gfill
+        jsr gqr
         jsr grung
         jsr gpanel
         jsr init
@@ -406,32 +407,68 @@ gq:     .byte 0
 gtp:    .byte 0
 gq2:    .byte 0
 gpat:   .byte 0
-; gpanel: the top frame as the full build's screen top: row 0's columns 0..47
-; (TOP) FUEL at columns 0..7 (glb: start's, from the MOS's font), the rest
-; black; the map (MAP, as gamegen's MAPI: 64 lines of 64 pixels, line y, pixel
-; px the tile x = px - MAPX, z = MAPZ - y, mod 64): the pad PADG's grey (by
-; the pixel's parity), the sea (its four corners 0) colour 1, land colour 3.
-; The corners are mapgen.s's (mcl), a map row at a time into MC: row z at slot
-; 64 (y & 1), row z + 1 the line before's (MOK stays 0: the first frame makes
-; the window).  Clobbers A, X, Y, ptr, $8E-$9E.
+; gqr: div8's table: QRA rows d 2..8, each D d..31 in turn: (D div d) << 4 |
+; D mod d; QOA + d - 2: row d's index less d.  Clobbers A, X, Y, ptr,
+; z:gt0..z:gt2.
+gqr:    ldx #2                     ; d
+@d:     cpx #2
+        bne @o
+        lda #<QRA                  ; (row 2: QRA from its start)
+        ldy #>QRA
+@p:     sta ptr
+        sty ptr+1
+        lda #0
+        sta z:gt0                    ; (the index)
+@o:     stx z:gt1
+        lda z:gt0                  ; the offset: index - d
+        sec
+        sbc z:gt1
+        sta QOA-2,x
+        lda #32                    ; the row's entries, 32 - d
+        sec
+        sbc z:gt1
+        sta z:gt2
+        lda #$10                   ; D = d: q 1, r 0
+@D:     ldy z:gt0
+        sta (ptr),y
+        inc z:gt0
+        clc                        ; D + 1: r + 1, or r 0 and q + 1 at d
+        adc #1
+        tay
+        and #$0F
+        cmp z:gt1
+        tya
+        bcc @k
+        sbc z:gt1                    ; (C set) q << 4
+        adc #$0F                   ; (C set: + $10)
+@k:     dec z:gt2
+        bne @D
+        inx
+        cpx #9
+        bne @d
+        rts
+        .assert QRAN = 189, error, "gqr: the table's size"
+
+; gpanel: the top frame: row 0's columns 0..23 (TOP) FUEL at columns 0..7
+; (glb: start's, from the MOS's font), the rest black; the map (MAP, MODE 5: 64
+; lines of 32 pixels, 64 bytes a character row; line y, pixel t the tile x = 2t
+; - MAPX, z = MAPZ - y, mod 64): the pad black, the sea (its four corners 0)
+; colour 1, land colour 3.  The corners are mapgen.s's (mcl), a map row at a
+; time into MC: row z at slot 64 (y & 1), row z + 1 the line before's (MOK
+; stays 0: the first frame makes the window).  Clobbers A, X, Y, ptr, $8E-$9E.
+        .assert TOP+24*8 = MAP && <MAP = 0, error, "gpanel: TOP then MAP, page-aligned"
 gpanel: ldx #0
 @c:     lda #0
         sta MAP,x
         sta MAP+$100,x
-        sta MAP+$200,x
-        sta MAP+$300,x
-        cpx #48*8-$100
+        cpx #24*8
         bcs :+
-        sta TOP+$100,x
-:       cpx #64
-        bcc :+
-        sta TOP,x
-        bcs :++
-:       lda glb,x                  ; FUEL
-        sta TOP,x
+        cpx #64
+        bcs @z
+        lda glb,x                  ; FUEL
+@z:     sta TOP,x
 :       inx
         bne @c
-        .assert 48*8 > $100 && 48*8 <= $200, error, "gpanel: TOP 1..2 pages"
         lda #(MAPZ+1) & 63         ; row MAPZ + 1, line -1's, at slot 64
         ldx #64
         jsr @row
@@ -450,47 +487,33 @@ gpanel: ldx #0
         sta gpz
         ldx gpb
         jsr @row
-        lda gpy                    ; MAP + 128 (y >> 3) + (y & 7)
-        and #8
-        asl a
+        lda gpy                    ; MAP + 64 (y >> 3) + (y & 7)
+        and #$38
         asl a
         asl a
         asl a
         sta ptr
+        lda #>MAP
+        adc #0
+        sta ptr+1
         lda gpy
         and #7
         ora ptr
         sta ptr
-        lda gpy
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>MAP
-        sta ptr+1
-        ldx #63                    ; px
-@t:     txa                        ; x = px - MAPX
+        ldx #31                    ; t
+@t:     txa                        ; x = 2t - MAPX
+        asl a
         sec
         sbc #MAPX
         and #63
         sta gpx
-        cmp #PADN                  ; the pad: PADG's grey
-        bcs @nb
+        cmp #PADN                  ; the pad: black
+        bcs :+
         lda gpz
         cmp #PADN
-        bcs @nb
-        lda gpy
-        and #1
-        asl a
-        sta gpc
-        txa
-        and #1
-        ora gpc
-        tay
-        lda PADG,y
-        jmp @k
-@nb:    lda gpx                    ; the four corners: row z at gpb, z + 1 at
+        lda #$00
+        bcc @k
+:       lda gpx                    ; the four corners: row z at gpb, z + 1 at
         ora gpb                    ; gpb ^ 64
         tay
         lda MC,y
@@ -516,38 +539,26 @@ gpanel: ldx #0
         lda MC,y
         ora gpc                    ; (heights only: mcl's colour nibbles 0)
         beq :+
-        lda #3                     ; land
+        lda #$FF                   ; land
         bne @k
-:       lda #1                     ; the sea
-@k:     sta gpc                    ; colour c into pixel px & 3: c's high bit at
-        txa                        ; bit 7 - p, low at 3 - p
+:       lda #$0F                   ; the sea
+@k:     sta gpc
+        txa
         and #3
         tay
-        lda gpc
-        lsr a                      ; (C: low bit)
-        lda #0
-        bcc :+
         lda PIXM,y
-        and #$0F
-:       sta gpb+1                  ; (scratch: gpx is free now)
-        lda gpc
-        and #2
-        beq :+
-        lda PIXM,y
-        and #$F0
-:       ora gpb+1
+        and gpc
         sta gpc
-        txa                        ; byte 8 (px >> 2)
-        and #$3C
+        txa
+        and #$1C
         asl a
         tay
         lda (ptr),y
         ora gpc
         sta (ptr),y
         dex
-        bmi :+
-        jmp @t
-:       inc gpy
+        bpl @t
+        inc gpy
         lda gpy
         cmp #64
         beq :+

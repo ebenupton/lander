@@ -105,14 +105,20 @@ def mapgen():
 
 
 def panel():
-    """The map as the top frame shows it (MAP): gamegen's MAPI (64 lines of 16 bytes,
-    the generated map's tiles) laid out 128 bytes a character row: line y's byte j at
-    128 (y >> 3) + 8 j + (y & 7)."""
-    m = MAPIMG()
-    img = bytearray(1024)
+    """The panel's map: its first 8 rows, MODE 5 (64 bytes a row of 8 characters, 4
+    pixels a byte), the 64 x 64 tiles two across a pixel, one a line (square): line
+    y, pixel t the tile x = 2t - MAPX, z = MAPZ - y (mod 64); sea colour 1, land 3,
+    the pad black.  Line y, pixel t's byte: 64 (y >> 3) + 8 (t >>
+    2) + (y & 7), its bits $88 >> (t & 3) (as MODE 1's)."""
+    mapx, mapz = GG.MAPX, GG.MAPZ
+    img = bytearray(8 * 64)
     for y in range(64):
-        for j in range(16):
-            img[128 * (y >> 3) + 8 * j + (y & 7)] = m[16 * y + j]
+        for t in range(32):
+            e = MG.colour((2 * t - mapx) & 63, (mapz - y) & 63)
+            v = 0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF
+            mask = 0x88 >> (t & 3)
+            o = 64 * (y >> 3) + 8 * (t >> 2) + (y & 7)
+            img[o] = img[o] & ~mask & 255 | v & mask
     return img
 
 
@@ -236,7 +242,7 @@ def main():
         addr.update(LAND0=LAND0, LAND1=LAND1)
         for k, v in addr.items():
             f.write(f'{k:8s}= ${v:04X}\n')
-        consts = dict(TNB=32, HMAX=L.HMAX, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, NZ=L.NZ,
+        consts = dict(TNB=64, HMAX=L.HMAX, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, NZ=L.NZ,
                       ZBACK=L.ZBACK, ZSKIP=L.ZSKIP, ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=G.DI0,
                       NCLP=G.NCLP, XL=L.XL, XR=L.XR, LQOFF=G.LQOFF, ZSHIP=L.ZSHIP, CAMH=L.CAMH,
                       EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON, YSKY=G.YSKY,

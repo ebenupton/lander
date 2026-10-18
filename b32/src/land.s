@@ -924,7 +924,12 @@ project:
 ; topa, bota.
 ; Clobbers A, X, Y and the strips', trace's, rungs' and columns' zero page.
 ; Called by loop.
-strips: ldx back                   ; the screen's set (sidx): tsp, bsp (gone's)
+strips: ldx #0                     ; run's RTS put back, none kept (its rl, rh:
+        lda #OP_STAY               ; the projection's scratch too)
+        sta (pp,x)
+        dex
+        stx pp
+        ldx back                   ; the screen's set (sidx): tsp, bsp (gone's)
         ldy sidx,x                 ; and the TOPS reads (pT5, pT5c: record,
         lda setTl,y                ; recordc; pT6: gone) and BOTS reads
         sta tsp                    ; (pB5, pB6, pB8: nearpost)
@@ -3173,9 +3178,10 @@ LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF)
 ; odd (from OL,X: a JMP, A = vo, Y = coff + 1; its RTS returns to run's
 ; caller).  For Y odd the even pass's own end, OL+1,Y, is one entry on: the
 ; even pass stops one short and run stores line Y-1 itself through the STA the
-; RTS covers (its operand).  pp keeps the planted RTS, so a run ending where the
-; last did (the same Y, on the same page: sethalf makes pp's low byte $FF)
-; plants nothing.  In: X, Y, ve, vo, coff; r_e, r_o's pages (sethalf's).
+; RTS covers (its operand: rl, rh, read when it is planted).  pp keeps the
+; planted RTS, so a run ending where the last did (the same Y, on the same
+; page: sethalf and strips make pp's low byte $FF) plants nothing.  In: X,
+; Y, ve, vo, coff; r_e, r_o's pages (sethalf's).
 ; Clobbers A, X, Y, rodd, rl, rh.  Called by rc_r, np_r, split2, gn_d and run2.
 run:    lda OL+1,x                 ; the passes' first entries
         sta r_e+1
@@ -3192,25 +3198,22 @@ run:    lda OL+1,x                 ; the passes' first entries
         sta (pp,x)
         pla
         sta pp
+        ldy #1                     ; rl, rh = that STA's operand (pp + 1, + 2):
+        lda (pp),y                 ; for Y odd line Y-1's address, the even
+        sta rl                     ; pass's last line (kept while pp is: Y
+        iny                        ; even's pp is Y+1's too)
+        lda (pp),y
+        sta rh
         lda #OP_RTS
         sta (pp,x)
 @k:     lda ve
         ldy coff
-r_e:    jsr $FF00                  ; (operand: the even entry, the page)
-        lda rodd                   ; Y odd: the even pass stopped one short, at
-        cmp pp                     ; the RTS: line Y-1's byte by hand, through
-        beq @o                     ; that STA's operand (pp + 1, + 2)
-        ldy #1
-        lda (pp),y
-        sta rl
-        iny
-        lda (pp),y
-        sta rh
-        ldy coff
-        lda ve
+r_e:    jsr $FF00                  ; (operand: the even entry, the page; the
+        ldx rodd                   ; stores keep A = ve, Y = coff)
+        cpx pp                     ; Y odd: the even pass stopped one short, at
+        beq @o                     ; the RTS: line Y-1's byte by hand
         sta (rl),y
 @o:     lda vo
-        ldy coff
         iny
 r_o:    jmp $FF00                  ; (operand: the odd entry, the page)
 

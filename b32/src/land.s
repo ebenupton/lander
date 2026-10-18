@@ -1766,7 +1766,7 @@ rg_lw:    tax
 ; ...).  LAYPAD puts the code from here on at the page phase that satisfies
 ; them all (the smallest value that links); change it when code before this
 ; point grows or shrinks.
-LAYPAD  = 0
+LAYPAD  = 2
         .res LAYPAD
 
 ; ---------------------------------------------------------------- columns

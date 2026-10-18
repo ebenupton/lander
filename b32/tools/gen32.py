@@ -68,14 +68,11 @@ def arc_class(i, j):
 
 
 def arc_tables():
-    """b32tab.inc's arc tables: NI by class, 16 + kind * 9 + slope (the table row of
-    brightness 4 + slope; crow adds m - ZB); CTE, CTO by kind * 9 + (brightness - 4), 0..8: the even and
-    odd line bytes of proto/nula.py's colour (kind, brightness); crow adds the window
-    row's own brightness less 4 (m - 1, for the strips' rows 1..7)."""
-    ni = [16 + (5 if n == ARCSEA else 4 if n == ARCPAD else n >> 2) * 9 + (0 if n in (ARCSEA, ARCPAD) else n & 3)
-          for n in range(16)]
+    """b32tab.inc's arc tables: CTE, CTO by kind * 9 + (brightness - 4), 0..8: the even
+    and odd line bytes of proto/nula.py's colour (kind, brightness).  A box holds kind * 9
+    + slope (crow), setup adds the strip's brightness less 4, 7 - nr + ns (su_l)."""
     bs = [G.dither_bytes(G.NU.lentry(k, 4 + t)) for k in range(6) for t in range(9)]
-    return ni, [b[0] for b in bs], [b[1] for b in bs]
+    return [b[0] for b in bs] + [0] * 7, [b[1] for b in bs] + [0] * 7   # (54 + brightness: black)
 
 
 def colours():
@@ -299,8 +296,7 @@ def main():
     with open(os.path.join(out, 'b32tab.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py: a colour index\'s dither bytes, even and odd lines\n')
         if G.NU.arc():
-            ni, ce, co = arc_tables()
-            f.write('NI:     .byte ' + ', '.join(f'{v}' for v in ni) + '\n')
+            ce, co = arc_tables()
             f.write('CTE:    .byte ' + ', '.join(f'${v:02X}' for v in ce) + '\n')
             f.write('CTO:    .byte ' + ', '.join(f'${v:02X}' for v in co) + '\n')
         else:

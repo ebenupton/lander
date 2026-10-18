@@ -207,7 +207,7 @@ takeover:
         sta pal2,x
         dex
         bpl :-
-        .assert 97 = MRING+MMIR && 97+20 <= 128, error, "pal2: in MC's tail"
+        .assert MRING+MMIR+20 <= 128, error, "pal2: in MC's tail"
         jmp pal5                   ; the top's
 .else
         ldx #15                    ; the palette (MODE 1: logical colour c's
@@ -498,6 +498,11 @@ gpanel: ldx #0
         and #63
         cmp #PADN
         bcc @nx
+.ifdef ARC
+@np:    lda MC,x                   ; (arc) the corners x, x + 1 at z: heights
+        ora MC+64,x
+        and #15
+.else
 @np:    lda MC,x                   ; the four corners
         ora MC+64,x
         sta gpc
@@ -509,6 +514,7 @@ gpanel: ldx #0
         lda MC,y
         ora MC+64,y
         ora gpc                    ; (heights only: mcl's colour nibbles 0)
+.endif
         beq :+
         lda #$FF                   ; land
         bne @cl

@@ -650,7 +650,7 @@ irq:    txa
 ; the loader's (boot32.s's palr), copied to the ring's free tail, MC + MRING + MMIR
 ; (the image has no room): LDX #31, BIT abs (skips pal5's LDX), pal5: LDX #15, LDA
 ; PALT,X, STA $FE21, DEX, TXA, AND #15, CMP #15, BNE, RTS.
-pal2    = MC+97
+pal2    = MC+MRING+MMIR
 pal5    = pal2+3
 .endif
 evn:    .byte 0                    ; irq's: the next timer event (0 Ea, 1 Eb, 2
@@ -711,7 +711,21 @@ rr:     .res 2
 ; JMPs; EINL; pp to dummy; the camera at tile (40, 30), sixteenths 0.  No
 ; OS calls: the tests (test/landsoak.py, test/gametest.py) run it under py65.
 ; Needs bank 4 paged in and writable.  Clobbers A, X, Y, ptr, tmp.
-init:   lda #$40                   ; c_v1: BIT's V
+init:
+.ifdef ARC
+        ldx #9                     ; the window's entry NX-1 in each row (never
+:       txa                        ; made: box NX, black) at 6 * 9: CTE, CTO's zeros
+        asl a
+        asl a
+        asl a
+        asl a
+        tay
+        lda #6*9
+        sta CLE+10,y
+        dex
+        bpl :-
+.endif
+        lda #$40                   ; c_v1: BIT's V
         sta c_v1
         jsr shtab                  ; the ship's walker's tables
         lda #<DI0                  ; R7L, R7H: (2^21 + k) div 2k, k = DI0 + di
@@ -1063,7 +1077,16 @@ setBh:  .byte >BOTS, >(BOTS+64), >CURB
 ; CE, CO (0 .. NX); xl, xr, BCL, last ($FF for the near strip, ns = nr-1),
 ; (bota).  Clobbers A, X, Y and traceb's (bank 7 paged for su_l7 and bank 4
 ; back: pw7s, pw4s are wpatch's).  Called by strips.
-setup:  ldx #0                     ; (A is free: lda ns below reloads it)
+setup:
+.ifdef ARC
+        lda ns                     ; the strip's brightness less 4 and its slope's:
+        sec                        ; 7 - nr + ns (Lander's: 10 - strips + row; the
+        sbc nr                     ; strips' count nr - 1, the row ns), su_jr's
+        clc                        ; operand
+        adc #7
+        sta su_jr+1
+.endif
+        ldx #0                     ; (A is free: lda ns below reloads it)
         stx BCL
         ldy ns
         iny
@@ -1090,10 +1113,25 @@ su_l:   lda PX,y                   ; (TX, TY) and ns (BX, BY), BCL counting
         sta TY+1,x
         lda PX+16,y
         sta BX+1,x
+.ifdef ARC
+        tya                        ; (arc: the box's value kind * 9 + slope at CLE
+        pha                        ; + 16 (ns - 1) + 16 o + b - 1, the strip's
+su_ce:  lda CLE,y                  ; brightness (su_jr's operand) added: its dither
+        clc                        ; bytes CTE, CTO)
+su_jr:  adc #0
+        tay
+        lda CTE,y
+        sta CE+1,x
+        lda CTO,y
+        sta CO+1,x
+        pla
+        tay
+.else
 su_ce:  lda CLE,y                  ; and boxes NX-1 .. 1: CLE, CLO + 16 (ns - 1)
         sta CE+1,x                 ; + 16 o + b - 1 (operands pcol5's: CLE,
 su_co:  lda CLO,y                  ; CLO + 16 o).  X = NX-1 stores CE+NX,
         sta CO+1,x                 ; CO+NX: su_m zeroes them after
+.endif
         lda PY+16,y
         sta BY+1,x
         cmp #YGND+1
@@ -3824,11 +3862,6 @@ PIXM:   .byte PM($88), PM($44), PM($22), PM($11)
 pcol5:  lda cxt
         cmp WX
         bne @fx                    ; (new columns: all anew; A = cxt)
-.ifdef ARC
-        lda czt                    ; (arc: the rows' brightness is by czt: a new
-        cmp WZ                     ; one, all anew)
-        bne @f
-.endif
 :
         lda WK                     ; o = WK - czt - ZB + 1
         clc
@@ -3837,13 +3870,8 @@ pcol5:  lda cxt
         sbc ZB
         clc
         adc #2
-.ifdef ARC
-        cmp #1                     ; (arc: the rows' brightness is by the row m (crow:
-        bne @f                     ; o 1 only: all anew when it is not)
-.else
         cmp #4
         bcs @f                     ; (o outside 0..3: all anew; @f loads cxt)
-.endif
 :
 @o:     sta WO
         tax                        ; rows o .. VLO-1
@@ -3877,14 +3905,13 @@ pcol5:  lda cxt
         asl a
         sta su_ce+1                ; (<CLE = 0)
         adc #<CLO                  ; (C clear: o <= 3; CLO + 48 in its page)
+.ifndef ARC
         sta su_co+1
+.endif
         rts
 @f:     lda cxt
 @fx:    sta WX                     ; (A = cxt) WK = czt + ZB; rows 1..7; o 1
         lda czt
-.ifdef ARC
-        sta WZ
-.endif
         clc
         adc ZB
         sta WK
@@ -3908,12 +3935,14 @@ crow:   stx WM
         asl a
         asl a
         sta @se+1                  ; CLE + 16 m (CLE's low byte 0)
+.ifndef ARC
         clc
         adc #<CLO                  ; CLO + 16 m (with the carry into its page)
         sta @so+1
         lda #>CLO
         adc #0
         sta @so+2
+.endif
         lda WK                     ; z = WK - m, r = z - WZ0: column i's slot
         sec                        ; MCB + i + r (mapgen.s), read at MC + r
         sbc WM                     ; (@le's operand: under the mirror's end)
@@ -3923,11 +3952,51 @@ crow:   stx WM
         ora #<MC
         sta @le+1
 .ifdef ARC
-        lda WM                     ; (arc) the row's brightness less 4 is m + 16 -
-        sec                        ; ZB (Lander's: 20 - the row's distance from czt:
-        sbc ZB                     ; row m is map row czt + ZB - m, o 1; 0..6 for
-        sta @jr+1                  ; the strips' rows), NI's 16 aside
-.endif
+        clc                        ; (+ 8: the corner a column on's: @l2)
+        adc #8
+        sta @l2+1
+        ldx #NX-2
+@c:     ldy MCB,x
+@l2:    lda MC,y                   ; (arc) the tile's: its corner (i + 1)'s byte:
+        sta z:MGT                    ; height, kind (bits 4, 5), the pad's tile (6)
+        and #15
+        sta z:MGU
+@le:    lda MC,y                   ; its corner i's height
+        and #15
+        sta z:MGW
+        ora z:MGU
+        bne @l
+        lda #5*9                   ; the sea: both at 0 (kind 5)
+        bne @se
+@l:     lda z:MGT
+        and #$70
+        cmp #$40
+        bcc :+
+        lda #4*9                   ; the pad (kind 4)
+        bne @se
+:       lsr a                      ; 9 kind: 8 kind + kind (kind << 4 first)
+        sta z:MGT
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc z:MGT
+        sta z:MGT
+        lda z:MGU                    ; + the slope, in thirds held at 2
+        sec
+        sbc z:MGW
+        bcc @k
+        cmp #3
+        bcc @k
+        inc z:MGT
+        cmp #6
+        bcc @k
+        inc z:MGT
+@k:     lda z:MGT                    ; (setup adds the strip's brightness: su_jr)
+@se:    sta CLE,x
+        dex
+        bpl @c
+.else
         ldx #NX-2
 @c:     ldy MCB,x
 @le:    lda MC,y                   ; the tile's colour index: its corner's high
@@ -3936,24 +4005,13 @@ crow:   stx WM
         lsr a
         lsr a
         tay
-.ifdef ARC
-        lda NI,y                   ; (arc) the table row of its kind, slope
-        clc
-@jr:    adc #0                     ; (operand: m - ZB)
-        tay
-        lda CTE,y
-.else
         lda DCE,y
-.endif
 @se:    sta CLE,x
-.ifdef ARC
-        lda CTO,y
-.else
         lda DCO,y
-.endif
 @so:    sta CLO,x
         dex
         bpl @c
+.endif
         ldx WM                     ; X kept: = m (both callers TXA first)
         rts
 WX:     .byte $FF                  ; the window's cxt ($FF: none made yet)
@@ -3964,8 +4022,5 @@ VLO:    .byte 0                    ; the rows made: VLO..VHI
 VHI:    .byte 0
 WE:     .byte 0                    ; o + 7
 WM:     .byte 0                    ; crow's m
-.ifdef ARC
-WZ:     .byte $FF                  ; (arc) the window's czt
-.endif
 
 

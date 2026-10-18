@@ -31,8 +31,11 @@ MGW     = $9D
 MGR     = $9E                      ; mtl's random byte
 MWK     = $9F                      ; mwin's row
 MRING   = 88                       ; the ring's slots: 11 columns of 8
+.ifdef ARC
+MMIR    = 15                       ; (arc: crow's corner a column on, a row r up: + 8 + 6)
+.else
 MMIR    = 9                        ; MC + MRING .. + 96: slots 0..8 again, so a
-                                   ; column (8) and a tile's corners (+ 9) read
+.endif                             ; column (8) and a tile's corners (+ 9) read
                                    ; straight through
 
 ; mwin: the window to the camera (cxt, czt + ZB): stepped a column or row at a
@@ -91,6 +94,7 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
         lda MWK
         cmp #8
         bne @fc
+.ifndef ARC                        ; (arc: no tiles: the readers take their corners')
         lda #0
         sta MWK
 @ft:    lda #0                     ; rows 0..6's tiles (10 each)
@@ -103,6 +107,7 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
         lda MWK
         cmp #7
         bne @ft
+.endif
         lda #1
         sta MOK
         ; falls into mcolb
@@ -147,6 +152,7 @@ mstep:  stx MWK
         jsr mset
         jsr mdir
         jsr mcl
+.ifndef ARC
         ldx MWK
         lda STX0,x
         ldy STY0,x
@@ -154,6 +160,7 @@ mstep:  stx MWK
         jsr mdir
         dec MGN
         jsr mtl
+.endif
         jmp mcolb
 mdir:   ldx MWK                    ; the line's way: z on (a column) for steps 0,
         cpx #2                     ; 1, x on (a row) for 2, 3
@@ -163,8 +170,10 @@ SDL:    .byte 1, 63, 1, 63         ; (the step's: WX0, WZ0 + 1 or - 1)
 SWO:    .byte 8, MRING-8, 1, MRING-1
 SCA:    .byte 10, 0, 0, 0          ; the new corners' line
 SCY:    .byte 0, 0, 7, 0
+.ifndef ARC
 STX0:   .byte 9, 0, 0, 0           ; the tiles' line
 STY0:   .byte 0, 0, 6, 0
+.endif
 MWT:    .byte 0, 0                 ; (mwin's targets: WX0, WZ0)
 mxl:    lda #8                     ; x on, 11
         ldy #11
@@ -285,7 +294,9 @@ mcl:    lda MGX                    ; the phases, p x + q z (mod 64), by sums of
         sbc MGZ
         and #63
         sta MGPH+5
-mcl_c:  lda MGX                    ; the pad?
+mcl_c:
+.ifndef ARC
+        lda MGX                    ; the pad?
         cmp #PADN+1
         bcs :+
         lda MGZ
@@ -293,7 +304,9 @@ mcl_c:  lda MGX                    ; the pad?
         bcs :+
         lda #PADH
         jmp mcl_s
-:       ldx #0                     ; the sum: terms 0..3 (k = 2) doubled, then
+:
+.endif
+        ldx #0                     ; the sum: terms 0..3 (k = 2) doubled, then
         txa                        ; terms 4, 5 (A its low byte, X its high):
         MADD 0                     ; each SL's byte, 256 more for i <= 32
         MADD 1
@@ -338,6 +351,29 @@ mcl_c:  lda MGX                    ; the pad?
         bcc :+
         iny
 :       tya
+.ifdef ARC
+        sta z:MGT                  ; (arc) the corner's byte: height | kind << 4 (the
+        ldx MGZ                    ; sum's bits 2, 3: Lander's altitude bits) | $40
+        cpx #PADN+1                ; for the pad's tile (x - 1 and z both under
+        bcs @k                     ; PADN: the corner a tile on's); the pad's own
+        lda MGX                    ; corners (x, z <= PADN) at PADH, their kind
+        cmp #PADN+1                ; the sum's still
+        bcs @k
+        lda #PADH
+        sta z:MGT
+        cpx #PADN
+        bcs @k
+        lda MGX
+        beq @k
+        lda #$40
+        ora z:MGT
+        sta z:MGT
+@k:     lda MGA
+        and #12
+        asl a
+        asl a
+        ora z:MGT
+.endif
 mcl_s:  ldy MGS
         sta MC,y
         cpy #MMIR                  ; (slots 0..8: the mirror's too)
@@ -389,6 +425,7 @@ mnext_x: rts
 ; entry for qy, ql, the YQT and LQT quantiles TY = 4 R1 + 60 - the corners' sum
 ; and TL = 3 R2 + 7 clamp(6 - slope2, 0, 12) reach (slope2: the left corners'
 ; sum less the right's).  Clobbers A, X, Y.
+.ifndef ARC
 mtl:    ldy MGS
         lda MGX                    ; the pad?
         cmp #PADN
@@ -547,6 +584,7 @@ mtl_s:  asl a                      ; A: the colour index, into the high nibble
         jmp mtl
 :       rts
 
+.endif
 MWX:    .byte 0                    ; the window: WX0, WZ0, MWO (its slot), MOK
 MWZ:    .byte 0                    ; (0: none made yet)
 MWO:    .byte 0

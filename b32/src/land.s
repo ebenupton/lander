@@ -1906,11 +1906,15 @@ c_dbl:  bvs :+                     ; a level top: mn and each pixel's top
         sta ys+2
         sta ys+3
         tya
-:       cmp LO+2,x                 ; rung ri+2 in the column too: slow
+:       ldy mn                     ; no lines (mn >= flr1): nothing to draw
+        cpy flr1
+        bcs c_dn
+        cmp LO+2,x                 ; rung ri+2 in the column too: slow
         bcs c_d3
         jsr split2
         jmp c_next
 c_d3:   jmp slow                   ; (slow2 jumps on to c_next)
+c_dn:   jmp c_np
 
 ; record: a one-box column the land covers for the first time this frame
 ; (o_rec's and ob_rj's target in a recording phase; recordc is c_rec's).

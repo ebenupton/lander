@@ -44,7 +44,10 @@
 ;
 ; The MODE 2 builds (-D MODE2; proto/nula.py; sh b32/build32.sh cpc | nula): CPC
 ; (-D CPC), the 27 colours of 1 x 2 dithers of MODE 2's eight, as checkerboards;
-; NULA (-D NULA), the VideoNULA's sixteen colours, flat.  The land is MODE 2
+; NULA (-D NULA), the VideoNULA's sixteen colours, flat; arc (-D NULA -D ARC),
+; Lander's own colours (a tile's kind, R1 & 3, and slope, its row's brightness
+; added: mapgen.s's arc mtl, crow's NI, CTE, CTO) as checkerboards of the
+; NULA's sixteen.  The land is MODE 2
 ; (ULAL), the top still MODE 5 (a map in MODE 2 would be twice the bytes), so the
 ; ULA's palette is rewritten at each switch (irq: pal5 at the sync, pal2 on the
 ; land's first, black line: MODE 5's logical colour is four palette entries, MODE
@@ -3821,6 +3824,11 @@ PIXM:   .byte PM($88), PM($44), PM($22), PM($11)
 pcol5:  lda cxt
         cmp WX
         bne @fx                    ; (new columns: all anew; A = cxt)
+.ifdef ARC
+        lda czt                    ; (arc: the rows' brightness is by czt: a new
+        cmp WZ                     ; one, all anew)
+        bne @f
+.endif
 :
         lda WK                     ; o = WK - czt - ZB + 1
         clc
@@ -3829,8 +3837,13 @@ pcol5:  lda cxt
         sbc ZB
         clc
         adc #2
+.ifdef ARC
+        cmp #1                     ; (arc: the rows' brightness is by the row m (crow:
+        bne @f                     ; o 1 only: all anew when it is not)
+.else
         cmp #4
         bcs @f                     ; (o outside 0..3: all anew; @f loads cxt)
+.endif
 :
 @o:     sta WO
         tax                        ; rows o .. VLO-1
@@ -3869,6 +3882,9 @@ pcol5:  lda cxt
 @f:     lda cxt
 @fx:    sta WX                     ; (A = cxt) WK = czt + ZB; rows 1..7; o 1
         lda czt
+.ifdef ARC
+        sta WZ
+.endif
         clc
         adc ZB
         sta WK
@@ -3906,6 +3922,12 @@ crow:   stx WM
         and #63
         ora #<MC
         sta @le+1
+.ifdef ARC
+        lda WM                     ; (arc) the row's brightness less 4 is m + 16 -
+        sec                        ; ZB (Lander's: 20 - the row's distance from czt:
+        sbc ZB                     ; row m is map row czt + ZB - m, o 1; 0..6 for
+        sta @jr+1                  ; the strips' rows), NI's 16 aside
+.endif
         ldx #NX-2
 @c:     ldy MCB,x
 @le:    lda MC,y                   ; the tile's colour index: its corner's high
@@ -3914,9 +3936,21 @@ crow:   stx WM
         lsr a
         lsr a
         tay
+.ifdef ARC
+        lda NI,y                   ; (arc) the table row of its kind, slope
+        clc
+@jr:    adc #0                     ; (operand: m - ZB)
+        tay
+        lda CTE,y
+.else
         lda DCE,y
+.endif
 @se:    sta CLE,x
+.ifdef ARC
+        lda CTO,y
+.else
         lda DCO,y
+.endif
 @so:    sta CLO,x
         dex
         bpl @c
@@ -3930,5 +3964,8 @@ VLO:    .byte 0                    ; the rows made: VLO..VHI
 VHI:    .byte 0
 WE:     .byte 0                    ; o + 7
 WM:     .byte 0                    ; crow's m
+.ifdef ARC
+WZ:     .byte $FF                  ; (arc) the window's czt
+.endif
 
 

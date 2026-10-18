@@ -406,6 +406,34 @@ mtl:    ldy MGS
         tax
         lda RA,x
         sta MGR
+.ifdef ARC
+        lda MC,y                   ; (arc) the corners (x, z), (x + 1, z): MGT, MGW
+        and #15
+        sta MGT
+        lda MC+8,y
+        and #15
+        sta MGW
+        ora MGT
+        bne @l
+        lda #SEAN                  ; the sea (both at SEA)
+        bne mtl_s                  ; (always)
+@l:     lda MGR                    ; X: kind (R1 & 3) << 2, then + the slope in
+        and #3                     ; thirds, held at 2
+        asl a
+        asl a
+        tax
+        lda MGW
+        sec
+        sbc MGT
+        bcc @k
+        cmp #3
+        bcc @k
+        inx
+        cmp #6
+        bcc @k
+        inx
+@k:     txa
+.else
         lda MC,y                   ; the left corners' sum (MGW), the right's
         and #15                    ; (MGT): the slot, + 1 (z + 1), + 8 (x + 1),
         sta MGT                    ; + 9, straight on (the mirror, MC + MRING,
@@ -500,6 +528,7 @@ mtl:    ldy MGS
         lsr a
         lsr a
 :       and #15
+.endif
 mtl_s:  asl a                      ; A: the colour index, into the high nibble
         asl a
         asl a

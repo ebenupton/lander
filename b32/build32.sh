@@ -6,7 +6,8 @@
 # MOS and starts.  Needs ca65, ld65, Python 3 with numpy and scipy.
 #   sh b32/build32.sh [VERSION]   mode1 (the default), cpc (MODE 2, the 27 CPC colours as
 #                        dithers: a plain Model B) or nula (MODE 2, the VideoNULA's
-#                        sixteen colours): proto/nula.py.  The land is MODE 2, the top
+#                        sixteen colours) or arc (MODE 2, Lander's own colours as
+#                        checkerboards of the NULA's sixteen): proto/nula.py.  The land is MODE 2, the top
 #                        (FUEL, the map) still MODE 5, the palette rewritten at each
 #                        switch (irq).  build32/variant says which was built; the tests
 #                        need CPC=1 or NULA=1 in the environment to match.
@@ -23,8 +24,9 @@ V=${1:-mode1}
 case $V in
     cpc) export NULA=0 CPC=1 ARC=0; CA="-D MODE2 -D CPC"; DISK=lander32-cpc ;;
     nula) export NULA=1 CPC=0 ARC=0; CA="-D MODE2 -D NULA"; DISK=lander32-nula ;;
+    arc) export NULA=0 CPC=0 ARC=1; CA="-D MODE2 -D NULA -D ARC"; DISK=lander32-arc ;;
     mode1) export NULA=0 CPC=0 ARC=0; CA=; DISK=lander32 ;;
-    *) echo "build32.sh: no version $V (mode1, cpc, nula)" >&2; exit 1 ;;
+    *) echo "build32.sh: no version $V (mode1, cpc, nula, arc)" >&2; exit 1 ;;
 esac
 echo $V > $B/variant
 python3 b32/tools/gen32.py $B

@@ -94,6 +94,23 @@ def axes(i, j):
     return land, ty, tl, r1
 
 
+def arc_tile(i, j):
+    """(kind, slope) of tile (i, j) for the arc build (proto/nula.py: Lander's colours
+    by kind and brightness): the pad (4) on the landing pad, the sea (5) if the corners
+    (i, j) and (i + 1, j) are both at SEA, else a land kind 0..3 (Lander's altitude
+    bits: here R1 & 3, as random) and the slope: how far the corner (i + 1, j) stands
+    above (i, j), in thirds, held at 2."""
+    i &= MAP - 1
+    j &= MAP - 1
+    if i < PADN and j < PADN:
+        return 4, 0
+    hp, hc = height(i, j), height(i + 1, j)
+    if hp == SEA and hc == SEA:
+        return 5, 0
+    d = hc - hp
+    return rnd(i, j)[0] & 3, 0 if d < 3 else 1 if d < 6 else 2
+
+
 def _quantiles():
     ys, ls = [], []
     for j in range(MAP):

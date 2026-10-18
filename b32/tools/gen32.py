@@ -58,6 +58,26 @@ def bank7():
     return img
 
 
+ARCSEA, ARCPAD = 3, 7           # the arc build's tile classes (kind << 2 | slope, slope 0..2)
+
+
+def arc_class(i, j):
+    """Tile (i, j)'s class in the arc build (mapgen.s's mtl)."""
+    k, s = MG.arc_tile(i, j)
+    return ARCPAD if k == 4 else ARCSEA if k == 5 else k << 2 | s
+
+
+def arc_tables():
+    """b32tab.inc's arc tables: NI by class, 16 + kind * 9 + slope (the table row of
+    brightness 4 + slope; crow adds m - ZB); CTE, CTO by kind * 9 + (brightness - 4), 0..8: the even and
+    odd line bytes of proto/nula.py's colour (kind, brightness); crow adds the window
+    row's own brightness less 4 (m - 1, for the strips' rows 1..7)."""
+    ni = [16 + (5 if n == ARCSEA else 4 if n == ARCPAD else n >> 2) * 9 + (0 if n in (ARCSEA, ARCPAD) else n & 3)
+          for n in range(16)]
+    bs = [G.dither_bytes(G.NU.lentry(k, 4 + t)) for k in range(6) for t in range(9)]
+    return ni, [b[0] for b in bs], [b[1] for b in bs]
+
+
 def colours():
     """The palette entries the map's tiles use (L.colour's), in order: a tile's colour
     index (its corner's MAP32 byte's high nibble) is its entry's place here."""
@@ -73,24 +93,27 @@ def mapgen():
     quantiles; LUT: the colour index by (qy, ql), two a byte (qy << 3 | ql >> 1, the
     odd ql's in the high nibble); RA; SEAI: the sea's colour indices by R1 & 3; PADI
     the pad's."""
-    cols = colours()
+    if G.NU.arc():      # (no quantile tables: a tile's class is its kind << 2 | slope; sea 3, pad 7)
+        cols = None
+    else:
+        cols = colours()
     assert MG.TERMS == [(2, 1, -2), (2, 4, 3), (2, -5, 3), (2, 7, 5), (1, 5, 11), (1, 10, 7)], \
         "mapgen.s's mcl sums the phases for these terms"
-    lut = MG._lut()
+    lut = MG._lut() if cols else None
     lb = []
     for qy in range(8):
         for ql in range(0, 8, 2):
-            lb.append(cols.index(lut[qy][ql]) | cols.index(lut[qy][ql + 1]) << 4)
+            lb.append(cols.index(lut[qy][ql]) | cols.index(lut[qy][ql + 1]) << 4 if cols else 0)
     ht = [t + 2560 for t in MG.HT16]
     assert all(0 < t < 65536 for t in ht)
     code = [('SL', [(v + 256) & 255 for v in MG.SIN16]), ('RA', MG.RA)]
     # (the rest the loader copies to holes: mapgen.s's .res for each, these as _S)
     held = [('MGQ', [q & 63 for _, _, q in MG.TERMS] + [0]),
             ('MGP', [p & 63 for _, p, _ in MG.TERMS]), ('YQT', MG.YQ),
-            ('LQT', MG.LQ), ('SEAI', [cols.index(L.SEAC[i % len(L.SEAC)]) for i in range(4)]),
+            ('LQT', MG.LQ), ('SEAI', [cols.index(L.SEAC[i % len(L.SEAC)]) if cols else 0 for i in range(4)]),
             ('HTL', [t & 255 for t in ht]), ('HTH', [t >> 8 for t in ht]), ('LUT', lb)]
     out = ['; b32/tools/gen32.py: proto/mapgen.py\'s tables (b32/src/mapgen.s)',
-           f'PADI    = {cols.index(L.PADC)}']
+           f'PADI    = {cols.index(L.PADC) if cols else ARCPAD}', f'SEAN    = {ARCSEA}']
     for name, v in code:
         assert all(0 <= b < 256 for b in v), name
         out.append(f'{name + ":":8s}.byte ' + ', '.join(f'${b:02X}' for b in v))
@@ -119,8 +142,12 @@ def panel():
     img = bytearray(8 * 64)
     for y in range(64):
         for t in range(32):
-            e = MG.colour((2 * t - mapx) & 63, (mapz - y) & 63)
-            v = 0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF
+            if G.NU.arc():
+                c = arc_class((2 * t - mapx) & 63, (mapz - y) & 63)
+                v = 0x00 if c == ARCPAD else 0x0F if c == ARCSEA else 0xFF
+            else:
+                e = MG.colour((2 * t - mapx) & 63, (mapz - y) & 63)
+                v = 0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF
             mask = 0x88 >> (t & 3)
             o = 64 * (y >> 3) + 8 * (t >> 2) + (y & 7)
             img[o] = img[o] & ~mask & 255 | v & mask
@@ -226,7 +253,11 @@ def palettes():
     at bit 1; the land MODE 2, entry e colour e (CPC: e & 7: the steady colours; NULA:
     the sixteen).  P5PAL, P2PAL: 16 bytes each; NULAPAL: the VideoNULA's palette."""
     NU = G.NU
-    if NU.nula():
+    if NU.arc():                                     # ARCPAL: the sea's nearest of the sixteen
+        sea = min(range(16), key=lambda c: NU.dist2(NU.ARCPAL[c], NU.lrgb(NU.lentry(5, 7))))
+        top = [0, sea, NU.ARCORA, NU.ARCYEL]
+        land = list(range(16))
+    elif NU.nula():
         top = [0, NU.colour(NU.MAPSEA), NU.MAGENTA, NU.YELLOW]
         land = list(range(16))
     else:                                            # the nearest of MODE 2's eight to the sea
@@ -239,7 +270,7 @@ def palettes():
            f'YELB    = ${NU.yelb():02X}', f'MAGB    = ${NU.magb():02X}',
            '.macro P5PAL', '        .byte ' + ', '.join(f'${b:02X}' for b in p5), '.endmacro',
            '.macro P2PAL', '        .byte ' + ', '.join(f'${b:02X}' for b in p2), '.endmacro']
-    if NU.nula():
+    if NU.nula() or NU.arc():
         out.append('.macro NULAPAL')
         for c, (r, g, b) in enumerate(NU.PAL):
             out.append(f'        .byte ${c << 4 | r:02X}, ${g << 4 | b:02X}')
@@ -260,13 +291,22 @@ def main():
         qa, qb = qrtab()['QRA'][0], qrtab()['QRB'][0]
         f.write('; b32/tools/gen32.py: the loader-made tables\' sizes, the panel map\'s colours\n')
         f.write(f'QRAN = {len(qa)}\nQRBN = {len(qb)}\n')
-        cls = [0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF for e in colours()]
+        if G.NU.arc():
+            cls = [0x00 if n == ARCPAD else 0x0F if n == ARCSEA else 0xFF for n in range(16)]
+        else:
+            cls = [0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF for e in colours()]
         f.write('.macro MAPCLS_DATA\n        .byte ' + ', '.join(f'${v:02X}' for v in cls + [0] * (16 - len(cls))) + '\n.endmacro\n')
     with open(os.path.join(out, 'b32tab.inc'), 'w') as f:
         f.write('; b32/tools/gen32.py: a colour index\'s dither bytes, even and odd lines\n')
-        bs = [G.dither_bytes(e) for e in colours()]
-        f.write('DCE:    .byte ' + ', '.join(f'${b[0]:02X}' for b in bs) + '\n')
-        f.write('DCO:    .byte ' + ', '.join(f'${b[1]:02X}' for b in bs) + '\n')
+        if G.NU.arc():
+            ni, ce, co = arc_tables()
+            f.write('NI:     .byte ' + ', '.join(f'{v}' for v in ni) + '\n')
+            f.write('CTE:    .byte ' + ', '.join(f'${v:02X}' for v in ce) + '\n')
+            f.write('CTO:    .byte ' + ', '.join(f'${v:02X}' for v in co) + '\n')
+        else:
+            bs = [G.dither_bytes(e) for e in colours()]
+            f.write('DCE:    .byte ' + ', '.join(f'${b[0]:02X}' for b in bs) + '\n')
+            f.write('DCO:    .byte ' + ', '.join(f'${b[1]:02X}' for b in bs) + '\n')
         assert all(L.recip((G.DI0 + di) * 16) == (2 ** 21 + G.DI0 + di) // (2 * (G.DI0 + di))
                    for di in range(G.NDI))           # (init's R7L, R7H)
     with open(os.path.join(out, 'neartab.inc'), 'w') as f:

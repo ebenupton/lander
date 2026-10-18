@@ -363,7 +363,11 @@ def colour(hm, i, j, row, nrows):
     corners at SEA) the SEAC entry picked by TILERND; for a land tile the LAND entry
     nearest its _targets point in the plane of LANDAX."""
     if NU.arc():
-        k, s = arc_tile(hm, i, j)
+        if GEN:
+            import mapgen
+            k, s = mapgen.arc_tile(i, j)
+        else:
+            k, s = arc_tile(hm, i, j)
         return NU.lentry(k, 10 - nrows + row + s)
     if GEN:
         import mapgen

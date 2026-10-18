@@ -157,6 +157,33 @@ def gametab(out):
     open(path, 'w').write('\n'.join(lines) + '\n')
 
 
+def neartab():
+    """proj32's near clip row (di = ZCLIP*16 - DI0, its r a constant): TN + 15 + v, the
+    line less EYV for a corner v = h - hg above the ship's ground (ytab's: HORIZON +
+    ((CAMH - v) r + 2048) >> 12); B1N + 2 cxs, corner 1's 8.8 x (xrow's B1); NXL, NXR
+    the ends (xrow's)."""
+    di = L.ZCLIP * 16 - G.DI0
+    k = G.DI0 + di
+    r = (2 ** 21 + k) // (2 * k)
+    tn = [((16 * (L.CAMH - v) * r + 32768) >> 16) + L.HORIZON for v in range(-15, 16)]
+    assert all(0 <= t < 256 for t in tn)
+    q = 1152 * r
+    nxr = (128 + ((q + 32768) >> 16)) & 255
+    nxl = (128 - ((q + 32767) >> 16)) & 255
+    b1 = []
+    for cxs in range(16):
+        m = (1152 + 16 * cxs) * r
+        b = (32768 + ((32768 - m) >> 8) + r) & 0xFFFF
+        assert b + 8 * r < 65536, 'no carry out over the corners'
+        b1.append(b)
+    out = ['; b32/tools/gen32.py: proj32\'s near clip row (di %d, r %d)' % (di, r),
+           f'NDIN    = {di}', f'NRL     = {r & 255}', f'NRH     = {r >> 8}',
+           f'NXL     = {nxl}', f'NXR     = {nxr}',
+           'TN:     .byte ' + ', '.join(f'{t}' for t in tn),
+           'B1N:    .word ' + ', '.join(f'${b:04X}' for b in b1)]
+    return '\n'.join(out) + '\n'
+
+
 def main():
     out = sys.argv[1]
     gametab(out)
@@ -178,6 +205,8 @@ def main():
         f.write('DCO:    .byte ' + ', '.join(f'${b[1]:02X}' for b in bs) + '\n')
         assert all(L.recip((G.DI0 + di) * 16) == (2 ** 21 + G.DI0 + di) // (2 * (G.DI0 + di))
                    for di in range(G.NDI))           # (init's R7L, R7H)
+    with open(os.path.join(out, 'neartab.inc'), 'w') as f:
+        f.write(neartab())
     EYS = 255 - max(L.HORIZON + (((L.CAMH + L.HMAX) * L.recip((G.DI0 + di) * 16) + L.HSCALE * 128)
                                   // (L.HSCALE * 256)) for di in range(G.NDI))
     with open(os.path.join(out, 'tables.inc'), 'w') as f:

@@ -135,6 +135,9 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         ldx RK                     ; row 0: the far clip plane's (r 4096 exactly)
         bne :+
         jmp @f0
+:       cpx RN16                   ; row RN: the near clip plane's (r 6554)
+        bne :+
+        jmp @fn
 :       lda R7L,y                  ; r
         sta rl
         lda R7H,y
@@ -222,10 +225,79 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         cpx #NX-2
         bne :-
         jmp @nx
+; row RN, di NDIN (ZCLIP*16 - DI0, both ways): r a constant, so y = TN + 15 +
+; h - hg (gen32's: ytab's line less EYV) + EYV, held at 254; EYV itself kept
+; while CAME stands (ncame, neyv); x: the ends NXL, NXR, corner 1 B1N + 2 cxs's
+; high byte (xrow's B1), each next r more.
+@fn:    lda CAME
+        cmp ncame
+        beq @fe
+        sta ncame
+        lda #NRL
+        sta rl
+        lda #NRH
+        sta rh
+        jsr eyrow
+        lda EYV
+        sta neyv
+@fe:    lda neyv
+        sta EYV
+        lda RK                     ; the stores' row (PY page-aligned)
+        sta @pn+1
+        lda #15                    ; TN's index less h: 15 - hg
+        sec
+        sbc HGV
+        sta RD
+        ldy #NX-1
+@nl:    lda WH,y
+        clc
+        adc RD
+        tax
+        lda TN,x
+        clc
+        adc EYV
+        bcs @nh
+        cmp #255
+        bcc @pn
+@nh:    lda #254
+@pn:    sta PY,y                   ; (operand low byte: RK)
+        dey
+        bpl @nl
+        ldx RK
+        lda #NXL
+        sta PX,x
+        lda #NXR
+        sta PX+NX-1,x
+        lda cxs
+        asl a
+        tay
+        lda B1N,y
+        sta Y0+1
+        lda B1N+1,y
+        tay
+        sta PX+1,x
+        .repeat NX-3, I            ; corners 2..NX-2: r more each
+        lda Y0+1
+        clc
+        adc #NRL
+        .if I < NX-4
+        sta Y0+1
+        .endif
+        tya
+        adc #NRH
+        .if I < NX-4
+        tay
+        .endif
+        sta PX+2+I,x
+        .endrepeat
+        jmp @nx
+        .assert ZCLIP*16-DI0 = NDIN, error, "prow32's @fn: the near row's di"
         .assert ZFCLIP*16-DI0 = 111 && HORIZON+CAMH+15+EMAX <= 254, error, "prow32's @f0: row 0's di 111, y never held"
         .assert <PY = 0, error, "PY page-aligned"
         .segment "SG1"
 YT:     .res 16                    ; ytab's: line by height
+ncame:  .res 1                     ; @fn's: the CAME neyv is for (both zeroed at load: EYV 0 for CAME 0)
+neyv:   .res 1
 RD:     .res 1                     ; prow32's: the row's di; @f0's scratch
         .code
 
@@ -271,6 +343,8 @@ hrng:   txa
         sta HT+12,x
         rts
         .assert NX-2 = 9, error, "hrng: corners 1..9, columns 11, 12 spare"
+
+        .include "neartab.inc"     ; TN, B1N (gen32's)
 
 ; lrow: WH = a clip row's heights, HT + Y + i lerped towards HT + Y + 16 + i
 ; by 16 - czs sixteenths (land.lerp(a, b, 256 - fz)), i = 0..NX-1.

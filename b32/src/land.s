@@ -3308,33 +3308,58 @@ gn_d:   stx tj
 ; of whose points is past, so the clamp runs from the point before the first
 ; past one to the point after the last (the page's end when that is a row
 ; end: the row is widened level with its ends); the page's other entries are
-; at most YGND+1 already (every row is).
+; at most YGND+1 already (every row is).  A segment both of whose points are
+; past (a straight line) is past throughout: YGND+1 stored without the test.
 ; In: BX, BY, bota.  Clobbers A, X, Y.  Called by strips, only when BCL is
 ; neither 0 nor NX (all past: the row at YGND+1, traceb's): strips tests it.
-bclip:  ldx #0                     ; the first past point, from the left: Y the
-        ldy #0                     ; clamp's start, x of the point before it
-:       inx                        ; (0 for point 1: the widening left of it)
+bclip:  ldx #NX+1                  ; L, the last past point (from the right)
+:       dex
         lda BY,x
         cmp #YGND+1
-        bcs :+
-        ldy BX,x
-        bcc :-                     ; (always)
-:       ldx #NX+1                  ; the last, from the right: its end bc_e,
-        lda #0                     ; x of the point after it (0: the page's
-:       sta bc_e+1                 ; end, for point NX)
-        dex
+        bcc :-
+        stx bcl+1
+        ldx #0                     ; the first past point, from the left
+:       inx
         lda BY,x
         cmp #YGND+1
+        bcc :-
+        dex                        ; segments from the point before it to the
+        ldy #0                     ; one after L: X the segment's first point,
+        txa                        ; Y its first x (point 0's: the page's start)
+        beq bc_s
+bc_n:     ldy BX,x
+bc_s:     inx                        ; X: its last point; the end, BX,x, or the
+        lda #0                     ; page's end past point NX
+        cpx #NX+1
         bcs :+
         lda BX,x
-        bcc :-                     ; (always)
-:       lda #YGND+1
+:       sta bc_e+1
+        sta bc_f+1
+        cpy bc_e+1                 ; (no width: nothing)
+        beq bc_nx
+        lda BY-1,x                 ; both points past (the margins level with
+        cmp #YGND+1                ; the ends): every pixel between, a straight
+        bcc bc_c                   ; line, is: YGND+1 straight in
+        lda BY,x
+        cmp #YGND+1
+        bcc bc_c
+        lda #YGND+1
+:       sta (bota),y
+        iny
+bc_f:   cpy #0                     ; (operand: the end, exclusive; 0 the page's)
+        bne :-
+        beq bc_nx                    ; (always)
+bc_c:   lda #YGND+1                ; else each pixel at most YGND+1
 :       cmp (bota),y
         bcs :+                     ; (at most YGND+1 already: kept)
         sta (bota),y
 :       iny
 bc_e:   cpy #0                     ; (operand: the end, exclusive; 0 the page's)
         bne :--
+bc_nx:    dex                        ; the next segment, while its first point is
+bcl:    cpx #0                     ; at most L (operand: L)
+        inx
+        bcc bc_n
 bc_x:   rts
 
 ; sp_zg: split's way into the walker (fs_w) from mx at bpos X, unless the

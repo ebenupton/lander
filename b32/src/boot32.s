@@ -29,9 +29,9 @@ start:  lda #119                   ; any EXEC or SPOOL file closed: no filing
         sta back
         jsr setback
         jsr ginit
-        ldx #clre-clr-1            ; clr to the free block, then to it: it
-@cs:    lda clr,x                  ; clears the loader's pages and enters the
-        sta __IMG_LAST__+1,x       ; main loop
+        ldx #clre-clr-1            ; clr to $1400 (the gap before TOP), then to
+@cs:    lda clr,x                  ; it: it clears the loader's pages and
+        sta __IMG_START__,x        ; enters the main loop
         dex
         bpl @cs
         lda #$82                   ; the sync (CA1) and timer 1 on
@@ -39,8 +39,8 @@ start:  lda #119                   ; any EXEC or SPOOL file closed: no filing
         lda #$C0
         sta UVIA_IER
         cli
-        jmp __IMG_LAST__+1
-; clr: run from the free block (relative branches only): the loader's pages to
+        jmp __IMG_START__
+; clr: run from $1400 (relative branches only): the loader's pages to
 ; $7FFF black (takeover cleared the rest of the land buffers), then loop.
 clr:    lda #0
         sta ptr
@@ -54,7 +54,7 @@ clr:    lda #0
         bpl @p                     ; (to $7FFF)
         jmp loop
 clre:
-        .assert >start >= >__IMG_LAST__+2 && __IMG_LAST__+1+clre-clr <= start && __IMG_LAST__+1+clre-clr <= __TOP_START__, error, "clr: in the free block below the loader, a page clear between"
+        .assert >start >= >__IMG_LAST__+2 && __IMG_START__+clre-clr <= TOP, error, "clr: in the gap before TOP; the loader above the program, a page clear between"
 
 ; takeover: the machine taken from the MOS (interrupts off, the stack at $01FF):
 ; the picture black (the palette, MODE 1's ULA); the VIAs, IRQ1V; the program

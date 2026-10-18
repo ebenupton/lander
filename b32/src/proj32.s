@@ -34,7 +34,21 @@ LQ      = $9F                      ; lerp4's q (sixteenths)
 ; In: HT (and SHF: hsh first), cxs, czs, ZB, RN, FACT, CAME.  Out: PX, PY rows
 ; 0..RN; np = NX; HGV; EYV.  Clobbers A, X, Y, rl, rh, tmp, lp, MT0, MT1,
 ; $8E-$9F, YT.  Caller: project.
-prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
+prow32: lda CAME                   ; the corner rows' EYV as last frame's (HT+13)
+        cmp ECAME                  ; when CAME and czs (so every row's di) are:
+        bne :+                     ; EHIT bit 7
+        lda czs
+        cmp ECZS
+        bne :+
+        lda #$80
+        bne :++                    ; (always)
+:       lda CAME
+        sta ECAME
+        lda czs
+        sta ECZS
+        lda #0
+:       sta EHIT
+        lda SHF                    ; (zsh4 stepped the map: shift HT first)
         beq :+
         jsr hsh
 :       jsr hgnd                   ; HGV
@@ -143,11 +157,18 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         lda R7H,y
         sta rh
         lda CAME                   ; EYV: 0, or eyrow's with the camera raised
-        bne @ey
+        bne @ey                    ; (kept by the row: EYC + k, while EHIT)
         sta EYV                    ; (A = 0)
-        beq :+                     ; (always)
-@ey:    jsr eyrow
-:
+        beq @ye                    ; (always)
+@ey:    bit EHIT                   ; (X = RK: HT + 13 + 16 k, row k's spare
+        bpl @ec                    ; column, keeps its EYV)
+        lda HT+13,x
+        sta EYV
+        jmp @ye
+@ec:    jsr eyrow                  ; (X kept)
+        lda EYV
+        sta HT+13,x
+@ye:
         jsr ytab                   ; YT
         lda RK                     ; the y's: YT by height, into PY + 16 k
         sta @py+1                  ; (PY page-aligned: the store's low byte)
@@ -343,6 +364,12 @@ hrng:   txa
         rts
         .assert NX-2 = 9, error, "hrng: corners 1..9, columns 11, 12 spare"
 
+        .segment "LDL"             ; (prow32's: the CAME and czs the rows' kept
+ECAME:  .res 1                     ; EYV are for; EHIT bit 7: this frame's the
+                                   ; same)
+ECZS:   .res 1
+EHIT:   .res 1
+        .code
         .include "neartab.inc"     ; TN, B1N's sources (gen32's: the loader
         .segment "P1H"             ; copies them into these holes)
 TN:     .res 31

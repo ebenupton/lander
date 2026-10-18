@@ -1079,12 +1079,15 @@ setBh:  .byte >BOTS, >(BOTS+64), >CURB
 ; back: pw7s, pw4s are wpatch's).  Called by strips.
 setup:
 .ifdef ARC
-        lda ns                     ; the strip's brightness less 4 and its slope's:
-        sec                        ; 7 - nr + ns (Lander's: 10 - strips + row; the
-        sbc nr                     ; strips' count nr - 1, the row ns), su_jr's
-        clc                        ; operand
-        adc #7
-        sta su_jr+1
+        lda ns                     ; the strip's brightness less 4: 7 - nr + ns
+        clc                        ; (Lander's: 10 - strips + row; the strips'
+        adc #<CTE+7                ; count nr - 1, the row ns), into su_te, su_to's
+        sec                        ; operands: CTE, CTO + it
+        sbc nr
+        sta su_te+1
+        adc #CTO-CTE-1             ; (C set: no borrow)
+        sta su_to+1
+        .assert CTO = CTE+61 && <CTE+13 <= 255 && <CTO+13 <= 255, error, "su_te, su_to: the tables' rows + 0..6 within their pages"
 .endif
         ldx #0                     ; (A is free: lda ns below reloads it)
         stx BCL
@@ -1114,18 +1117,14 @@ su_l:   lda PX,y                   ; (TX, TY) and ns (BX, BY), BCL counting
         lda PX+16,y
         sta BX+1,x
 .ifdef ARC
-        tya                        ; (arc: the box's value kind * 9 + slope at CLE
-        pha                        ; + 16 (ns - 1) + 16 o + b - 1, the strip's
-su_ce:  lda CLE,y                  ; brightness (su_jr's operand) added: its dither
-        clc                        ; bytes CTE, CTO)
-su_jr:  adc #0
-        tay
-        lda CTE,y
+su_ce:  lda CLE,y                  ; (arc: the box's value kind * 9 + slope at CLE
+        sty su_ry+1                ; + 16 (ns - 1) + 16 o + b - 1; its dither bytes
+        tay                        ; at CTE, CTO + the strip's brightness less 4:
+su_te:  lda CTE,y                  ; su_te, su_to's operands, setup's)
         sta CE+1,x
-        lda CTO,y
+su_to:  lda CTO,y
         sta CO+1,x
-        pla
-        tay
+su_ry:  ldy #0                     ; (operand: Y)
 .else
 su_ce:  lda CLE,y                  ; and boxes NX-1 .. 1: CLE, CLO + 16 (ns - 1)
         sta CE+1,x                 ; + 16 o + b - 1 (operands pcol5's: CLE,

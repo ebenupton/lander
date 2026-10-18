@@ -3,7 +3,13 @@
 # sideways RAM.  SHIFT+BREAK: !BOOT (an EXEC file) sets MODE 1 with every colour black
 # and the cursor off, then *RUN L32: the loader (b32/src/boot32.s, $7000), which loads
 # L32M ($1900-$4FFF: the program, its tables, the map), hands the machine over from the
-# MOS and starts.  Needs ca65, ld65, Python 3 with numpy.
+# MOS and starts.  Needs ca65, ld65, Python 3 with numpy and scipy.
+#   sh b32/build32.sh [VERSION]   mode1 (the default), cpc (MODE 2, the 27 CPC colours as
+#                        dithers: a plain Model B) or nula (MODE 2, the VideoNULA's
+#                        sixteen colours): proto/nula.py.  The land is MODE 2, the top
+#                        (FUEL, the map) still MODE 5, the palette rewritten at each
+#                        switch (irq).  build32/variant says which was built; the tests
+#                        need CPC=1 or NULA=1 in the environment to match.
 #   b32/tools/gen32.py   the renderer's and the game's tables (tables.inc, b32tab.inc,
 #                        gametab.inc, MAP32)
 #   b32/tools/ship32.py  the ship's model data (ship32.inc)
@@ -13,12 +19,20 @@ set -e
 cd "$(dirname "$0")/.."
 B=build32
 mkdir -p $B
+V=${1:-mode1}
+case $V in
+    cpc) export NULA=0 CPC=1 ARC=0; CA="-D MODE2 -D CPC"; DISK=lander32-cpc ;;
+    nula) export NULA=1 CPC=0 ARC=0; CA="-D MODE2 -D NULA"; DISK=lander32-nula ;;
+    mode1) export NULA=0 CPC=0 ARC=0; CA=; DISK=lander32 ;;
+    *) echo "build32.sh: no version $V (mode1, cpc, nula)" >&2; exit 1 ;;
+esac
+echo $V > $B/variant
 python3 b32/tools/gen32.py $B
 python3 b32/tools/ship32.py $B
-ca65 -g --cpu 6502 ${CODEPAD:+-D CODEPAD=$CODEPAD} -I b32/src -I $B --bin-include-dir $B -o $B/land.o b32/src/land.s -l $B/land.lst
+ca65 -g --cpu 6502 $CA ${CODEPAD:+-D CODEPAD=$CODEPAD} -I b32/src -I $B --bin-include-dir $B -o $B/land.o b32/src/land.s -l $B/land.lst
 ld65 -C b32/src/b32.cfg -o $B/x.bin $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/game.dbg
 EXEC=$(awk '$3 == ".start" {print $2}' $B/labels.txt | sed 's/^00//')
 printf '*RUN LANDER\r' > $B/BOOT    # (the test disc's convenience: not the program's)
-python3 tools/mkdfs.py build $B/lander32.ssd LANDER32 "!BOOT:$B/BOOT:0000:FFFF" \
+python3 tools/mkdfs.py build $B/$DISK.ssd LANDER32 "!BOOT:$B/BOOT:0000:FFFF" \
     "LANDER:$B/LANDER:2000:$EXEC"
-echo "LANDER $(wc -c < $B/LANDER | tr -d ' ') bytes ($(( ($(wc -c < $B/LANDER) + 255) / 256 )) sectors), exec \$$EXEC; $B/lander32.ssd"
+echo "LANDER $(wc -c < $B/LANDER | tr -d ' ') bytes ($(( ($(wc -c < $B/LANDER) + 255) / 256 )) sectors), exec \$$EXEC; $B/$DISK.ssd"

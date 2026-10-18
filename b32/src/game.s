@@ -1174,9 +1174,15 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         sta gt4                    ; the byte with gt4's bits set to V ($FF
         ldy plife,x                ; yellow, $F0 magenta): b ^ ((b ^ V) & gt4)
         cpy #6
+.ifdef MODE2
+        lda #YELB                  ; (the colours' bytes in the pixel)
+        bcs :+
+        lda #MAGB
+.else
         lda #$FF
         bcs :+
         lda #$F0
+.endif
 :
         ldy #0
         eor (g0),y
@@ -1238,7 +1244,11 @@ marker: ldx #$FF                   ; (no dot)
         sta mkt
         and #3
         tay
+.ifdef MODE2
+        lda PIX5,y                 ; (the top is MODE 5 still)
+.else
         lda PIXM,y
+.endif
         sta gt2                    ; (the pixel's bits)
         and #$F0
         sta gt3                    ; (its magenta)

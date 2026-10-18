@@ -1186,4 +1186,4 @@ shtab:  lda #$FF                   ; (rast's kept points: none)
         dex
         bpl :-
         rts
-ktv:    .byte $00, $88, $CC, $EE
+ktv:    .byte PM($00), PM($88), PM($CC), PM($EE)

@@ -7,11 +7,15 @@
 #   gametest32  the game: profile32.py's flight, every frame's state, against
 #               build32/gate_base.txt (made by `gate32.sh base` from a known-good build)
 # Prints GATE PASS and the flight's cycles a frame, or GATE FAIL <step>.
-#   b32/test/gate32.sh [base] [SHIPSTEP]
+#   [VERSION=cpc|nula] b32/test/gate32.sh [base] [SHIPSTEP]
+# VERSION builds and tests a MODE 2 build (proto/nula.py; default mode1): the land and
+# ship against the reference in its colours, the game's state against the same baseline
+# (the game does not depend on the colours).
 cd "$(dirname "$0")/../.."
 B=build32
 fail() { echo "GATE FAIL $1"; exit 1; }
-sh b32/build32.sh > $B/gate_build.log 2>&1 || fail build
+case ${VERSION:-mode1} in cpc) export CPC=1 NULA=0 ;; nula) export NULA=1 CPC=0 ;; *) export CPC=0 NULA=0 ;; esac
+sh b32/build32.sh ${VERSION:-mode1} > $B/gate_build.log 2>&1 || fail build
 grep -qi 'error' $B/gate_build.log && fail build
 python3 b32/tools/stackdepth.py loop > $B/gate_stack.txt 2>&1 || fail stackdepth
 grep -q '^loop: \([0-9]\|1[0-2]\) bytes' $B/gate_stack.txt || fail "stack: the loop needs more than 12 bytes (b32.cfg's 19-byte stack)"

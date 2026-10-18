@@ -42,16 +42,18 @@
 ; second, so a byte column is addressed by its half (scrh: $30, $31, $58, $59)
 ; and coff = (8 * column) & 255.
 ;
-; The MODE 2 builds (-D MODE2; proto/nula.py): NULA (build.sh nula, -D NULA),
-; the VideoNULA's sixteen colours, flat; CPC (build.sh cpc, -D CPC), the 27
-; colours of 1 x 2 dithers of MODE 2's eight, as checkerboards; arc (build.sh
-; arc, -D NULA -D ARC), Lander's own colours, the row's brightness added
-; (pcol5), as checkerboards of the VideoNULA's sixteen.  Everything
-; here works in MODE 1's pixels, 256 across and four a byte; a MODE 2
-; byte is two pixels, each showing the even one of the pair it covers, so only
-; the masks (PM) and the colour bytes (bank 5's, landgen's) differ, with the
-; letters (nfont, gbyte) and the palette (palette).  game.s's dots and map
-; follow (.ifdef MODE2).
+; The MODE 2 builds (-D MODE2; proto/nula.py; sh b32/build32.sh cpc | nula): CPC
+; (-D CPC), the 27 colours of 1 x 2 dithers of MODE 2's eight, as checkerboards;
+; NULA (-D NULA), the VideoNULA's sixteen colours, flat.  The land is MODE 2
+; (ULAL), the top still MODE 5 (a map in MODE 2 would be twice the bytes), so the
+; ULA's palette is rewritten at each switch (irq: pal5 at the sync, pal2 on the
+; land's first, black line: MODE 5's logical colour is four palette entries, MODE
+; 2's sixteen of their own).  Everything here works in MODE 1's pixels, 256 across
+; and four a byte; a MODE 2 byte is two pixels, each showing the even one of the
+; pair it covers, so only the masks (PM) and the colour bytes (gen32.py's, from
+; landgen) differ, with the dots' bytes (YELB, MAGB) and the top's pixel masks
+; (PIX5: the marker's).  The palettes (PALT, PIX5, the 20 bytes of pal2/pal5) are
+; the loader's, kept in holes (the image has no room): $1418-$143B, MC's tail.
 ;
 ; Projection (project).  The camera is at tile (cxt, czt) plus sixteenths
 ; (cxs, czs), CAMH height units above the ground under the ship (hgnd) and
@@ -185,7 +187,19 @@
 ; two pixels, each showing the even one of the two of LAND's it covers) make
 ; it the left pixel's bits ($AA) if m has pixel 0, the right's ($55) if pixel 2
 ; (proto/nula.py's mask); MODE 1: m itself.
+.ifdef MODE2
+        .include "pal.inc"         ; YELB, MAGB, P5PAL, P2PAL, NULAPAL
+        .assert .defined(CPC) .xor .defined(NULA), error, "MODE2: CPC or NULA"
+.define PM(m) ((((m) >> 3) & 1) * $AA | (((m) >> 1) & 1) * $55)
+ULAL    = $F4                      ; the land's ULA control: MODE 2's
+PALT    = $1418                    ; irq's palettes (P5PAL, P2PAL: pal5, pal2), then
+PIX5    = PALT+32                  ; the top's pixel masks (MODE 5: the loader's
+                                   ; copies, in the free $1418-$143B: the clr stub's
+                                   ; $1400-$1413 is done by then)
+.else
 .define PM(m) (m)
+ULAL    = $D8                      ; MODE 1's
+.endif
 
 OSWRCH  = $FFEE
 OSWORD  = $FFF1
@@ -574,6 +588,9 @@ irq:    txa
         CRW 3, $24                 ; then the clock (1MHz)
         lda #$C4
         sta ULA_CTL
+.ifdef MODE2
+        jsr pal5                   ; the top's palette (the sync: the top is 11 rows on)
+.endif
         lda #0
         sta evn
         beq @x                     ; (always)
@@ -593,7 +610,7 @@ irq:    txa
         CRW 0, 127                 ; Eb, the land's first line (black: the sky
         CRW 2, 90                  ; above YSKY): MODE 1, the CRTC's line first,
         CRW 3, $28                 ; still at 1MHz, its sync to 90 while the count
-        lda #$D8                   ; is short of the map's 21 (else a second sync),
+        lda #ULAL                  ; is short of the map's 21 (else a second sync),
         sta ULA_CTL                ; then the clock (2MHz) before the count's 90;
         CRW 1, 64                  ; the land's R1 and R6 (this line black)
         CRW 6, 12
@@ -602,6 +619,9 @@ irq:    txa
         sta UVIA_T1L
         lda #>EV2US
         sta UVIA_T1H
+.ifdef MODE2
+        jsr pal2                   ; the land's palette (the sky is black in both)
+.endif
         inc evn
         jmp @x
 @ea:    CRW 0, 87                  ; Ea, top row 0's last line: 88 characters, so
@@ -620,6 +640,16 @@ irq:    txa
         CRW 0, 63
         inc evn
         jmp @x
+.ifdef MODE2
+; pal2, pal5: the ULA's palette made the land's (PALT + 16 on) or the top's (PALT),
+; 16 writes (the MODE 2 builds: MODE 5's logical colours are four entries each, MODE
+; 2's sixteen of their own: gen32.py's palettes).  Clobbers A, X.  The 20 bytes are
+; the loader's (boot32.s's palr), copied to the ring's free tail, MC + MRING + MMIR
+; (the image has no room): LDX #31, BIT abs (skips pal5's LDX), pal5: LDX #15, LDA
+; PALT,X, STA $FE21, DEX, TXA, AND #15, CMP #15, BNE, RTS.
+pal2    = MC+97
+pal5    = pal2+3
+.endif
 evn:    .byte 0                    ; irq's: the next timer event (0 Ea, 1 Eb, 2
                                    ; E2)
 lfront: .byte >(LAND0/8)           ; the land shown (flip's)

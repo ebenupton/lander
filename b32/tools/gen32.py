@@ -87,7 +87,7 @@ def mapgen():
     # (the rest the loader copies to holes: mapgen.s's .res for each, these as _S)
     held = [('MGQ', [q & 63 for _, _, q in MG.TERMS] + [0]),
             ('MGP', [p & 63 for _, p, _ in MG.TERMS]), ('YQT', MG.YQ),
-            ('LQT', MG.LQ), ('SEAI', [cols.index(e) for e in L.SEAC]),
+            ('LQT', MG.LQ), ('SEAI', [cols.index(L.SEAC[i % len(L.SEAC)]) for i in range(4)]),
             ('HTL', [t & 255 for t in ht]), ('HTH', [t >> 8 for t in ht]), ('LUT', lb)]
     out = ['; b32/tools/gen32.py: proto/mapgen.py\'s tables (b32/src/mapgen.s)',
            f'PADI    = {cols.index(L.PADC)}']
@@ -217,8 +217,40 @@ def neartab():
     return '\n'.join(out) + '\n'
 
 
+def palettes():
+    """pal.inc (the MODE 2 builds': proto/nula.py): YELB, MAGB, the dots' bytes, and the
+    ULA's palette writes for the two modes the screen alternates between, (entry << 4) |
+    (colour ^ 7), colour bit 3 (VideoNULA: its sixteenth) kept.  The top is MODE 5, its
+    logical colour c (0 black, 1 the sea, 2 the marker's magenta, 3 yellow: the land,
+    the letters, the gauge) in the four entries with c's high bit at bit 3 and its low
+    at bit 1; the land MODE 2, entry e colour e (CPC: e & 7: the steady colours; NULA:
+    the sixteen).  P5PAL, P2PAL: 16 bytes each; NULAPAL: the VideoNULA's palette."""
+    NU = G.NU
+    if NU.nula():
+        top = [0, NU.colour(NU.MAPSEA), NU.MAGENTA, NU.YELLOW]
+        land = list(range(16))
+    else:                                            # the nearest of MODE 2's eight to the sea
+        sea = min(range(8), key=lambda c: NU.dist2(NU.avg(NU.MAPSEA), tuple(255 * (c >> i & 1) for i in range(3))))
+        top = [0, sea, 5, 3]
+        land = [e & 7 for e in range(16)]
+    p5 = [e << 4 | (top[(e >> 3 & 1) * 2 + (e >> 1 & 1)] ^ 7) for e in range(16)]
+    p2 = [e << 4 | (land[e] ^ 7) for e in range(16)]
+    out = ['; b32/tools/gen32.py: the MODE 2 build\'s colours (proto/nula.py)',
+           f'YELB    = ${NU.yelb():02X}', f'MAGB    = ${NU.magb():02X}',
+           '.macro P5PAL', '        .byte ' + ', '.join(f'${b:02X}' for b in p5), '.endmacro',
+           '.macro P2PAL', '        .byte ' + ', '.join(f'${b:02X}' for b in p2), '.endmacro']
+    if NU.nula():
+        out.append('.macro NULAPAL')
+        for c, (r, g, b) in enumerate(NU.PAL):
+            out.append(f'        .byte ${c << 4 | r:02X}, ${g << 4 | b:02X}')
+        out.append('.endmacro')
+    return '\n'.join(out) + '\n'
+
+
 def main():
     out = sys.argv[1]
+    if G.NU.enabled():
+        open(os.path.join(out, 'pal.inc'), 'w').write(palettes())
     gametab(out)
     open(os.path.join(out, 'mapgen.inc'), 'w').write(mapgen())
     open(os.path.join(out, 'PANELMAP'), 'wb').write(panel())   # (the tests' reference)

@@ -141,7 +141,7 @@ def colour(i, j):
         return L.PADC
     land, ty, tl, r1 = axes(i, j)
     if not land:
-        return L.SEAC[r1 & 3]
+        return L.SEAC[(r1 & 3) % len(L.SEAC)]    # (NULA's three seas: r1 & 3 = 3 as 0)
     qy = sum(ty >= t for t in YQ)
     ql = sum(tl >= t for t in LQ)
     return _LUT[qy][ql]

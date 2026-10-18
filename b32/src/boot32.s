@@ -67,6 +67,18 @@ clre:
 ; 1 frame) and the palette.  (The tests call it in place of the loader, with
 ; the file at its load address.)  Clobbers A, X, Y.
 takeover:
+.ifdef MODE2
+        lda #$40                   ; the VideoNULA, if any: register 4, reset (palette
+        sta $FE22                  ; mode 0: the ULA's palette, its 4 bits (bit 3:
+.ifdef NULA                        ; colours 8-15) the NULA colour, as irq's palettes
+        ldx #0                     ; write it); its 16 colours (NULAPAL: (colour <<
+:       lda nulapal,x              ; 4 | red), (green << 4 | blue)).  On a plain
+        sta $FE23                  ; Model B these write the ULA's mirrors ($FE22,
+        inx                        ; $FE23): undone by the control and palette
+        cpx #32                    ; writes that follow
+        bne :-
+.endif
+.endif
         ldx #15                    ; every colour black, MODE 1's ULA (the
 @pk:    txa                        ; screen's leftovers unseen)
         asl a
@@ -184,12 +196,27 @@ takeover:
         inx
         cpx #crtc_end-crtc_regs
         bne @cr
+.ifdef MODE2
+        ldx #35                    ; PALT: irq's palettes, the top's and the land's
+:       lda palt,x                 ; (and PIX5)
+        sta PALT,x
+        dex
+        bpl :-
+        ldx #19                    ; pal2, pal5 (land.s) in the ring's free tail
+:       lda palr,x
+        sta pal2,x
+        dex
+        bpl :-
+        .assert 97 = MRING+MMIR && 97+20 <= 128, error, "pal2: in MC's tail"
+        jmp pal5                   ; the top's
+.else
         ldx #15                    ; the palette (MODE 1: logical colour c's
 @pl:    lda palv,x                 ; four entries; black, cyan, magenta,
         sta $FE21                  ; yellow)
         dex
         bpl @pl
         rts
+.endif
 ; (copy: Y pages from (ptr) to X:A, ascending.  Clobbers A, X, Y, ptr, g0.)
 @copy:  sta z:g0
         stx z:g0+1
@@ -451,7 +478,11 @@ gpanel: ldx #0
         lda gpt                    ; the pixel's bits, its byte's column
         and #3
         tay
+.ifdef MODE2
+        lda palt+32,y              ; (PIX5: MODE 5's pixels)
+.else
         lda PIXM,y
+.endif
         sta gpm
         lda gpt
         and #$1C
@@ -562,9 +593,20 @@ crtc_regs:                         ; (register, value) pairs: MODE 1's, but
 crtc_end:
 ; palv: the ULA's palette writes, (entry << 4) | (colour ^ 7), MODE 1's
 ; logical colour c in the entries with c's high bit at bit 3, its low at 1
+.ifdef MODE2
+palt:   P5PAL                      ; (the MODE 2 builds': gen32.py's, copied to PALT)
+        P2PAL
+        .byte $88, $44, $22, $11   ; PIX5: the top's pixels (MODE 5: four a byte)
+palr:   .byte $A2, 31, $2C, $A2, 15, $BD, <PALT, >PALT, $8D, $21, $FE   ; pal2, pal5
+        .byte $CA, $8A, $29, 15, $C9, 15, $D0, $F2, $60
+.ifdef NULA
+nulapal: NULAPAL
+.endif
+.else
 palv:   .repeat 16, e
         .byte e << 4 | ((($3560 >> (4 * (((e >> 3) & 1) * 2 + ((e >> 1) & 1)))) & 7) ^ 7)
         .endrepeat
+.endif
         .import __P1H_START__, __P1H_SIZE__
         .import __IMG_START__, __IMG_LAST__
         .import __MAPD_LOAD__, __MAPD_RUN__, __CODE_LOAD__, __CODE_RUN__, __SHIP_RUN__, __SHIP_SIZE__, __CODE2_RUN__, __CODE2_SIZE__, __CODE2_LOAD__, __SHIP_LOAD__, __TOP_START__, __TOP_SIZE__

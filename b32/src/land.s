@@ -893,38 +893,28 @@ project:
         .assert XSKIP = 1, error, "project: the columns cxt - 4 .. cxt + 6 (mapgen.s's window)"
 @hl:    lda czt                    ; all 8 rows' heights: pkz = czt + ZB; HT
         clc                        ; + 16j + i = map row czt + ZB - j's column
-        adc ZB                     ; cxt - 4 + i, MC's slot MWO + 16 (7 - j) +
-        sta pkz                    ; 1 + i, mod 128 (mapgen.s): Y the slot, X
-        lda MWO                    ; the HT index, both stepped across the row
-        clc
-        adc #16*7+1
-        and #$7F
-        tay
-        ldx #0
-@hr:    lda #NX
-        sta z:MGT
-@hc:    lda MC,y
+        adc ZB                     ; cxt - 4 + i, MC's slot MWO + 8 i + 7 - j
+        sta pkz                    ; (mapgen.s): a column at a time, its 8
+        ldy MWO                    ; slots in turn (Y, wrapped at MRING), HT
+        lda #$70                   ; rows 7 .. 0 (X from $70 + i down by 16)
+        sta z:MGU
+@hc:    ldx z:MGU
+@hr:    lda MC,y
         and #15
         sta HT,x
-        tya
-        clc
-        adc #1
-        and #$7F
-        tay
-        inx
-        dec z:MGT
-        bne @hc
-        txa                        ; the next row: HT 16 on, the slot 16 back
-        clc
-        adc #16-NX
-        tax
-        tya
+        iny
+        cpy #MRING
+        bne :+
+        ldy #0
+:       txa
         sec
-        sbc #16+NX
-        and #$7F
-        tay
-        cpx #$80
-        bcc @hr
+        sbc #16
+        tax
+        bcs @hr
+        inc z:MGU
+        lda z:MGU
+        cmp #$70+NX
+        bne @hc
         ldx #$70                   ; each row's range (proj32's hrng)
 :       jsr hrng
         txa
@@ -3533,7 +3523,8 @@ rg_lbe: .repeat 9, i
         .segment "RUNGT"           ; (made by the loader: grung)
 RPT:    .res 256
 RQF:    .res 256
-; MC: mapgen.s's window of the map, a ring of 128 slots.
+; MC: mapgen.s's window of the map, a ring of MRING (88) slots, column-major
+; (the loader's gpanel uses all 128 for two map columns at a time).
         .segment "MCD"
 MC:     .res 128
 ; TOP: the top frame (MODE 5): row 0's columns 0..23 (FUEL: the loader's, from
@@ -3580,28 +3571,29 @@ zsh4:   tay
         lda #$FF
 @ld:    sta SHF
         tya                        ; Y = the row's first column's slot: MWO +
-        sec                        ; 16 (z - WZ0) + 1 (mapgen.s), stepped, each
-        sbc MWZ                    ; mod 128
-        asl a
-        asl a
-        asl a
-        asl a
-        sec
+        sec                        ; (z - WZ0) (mapgen.s), then 8 on a column,
+        sbc MWZ                    ; each mod MRING
+        and #63
+        clc
         adc MWO
-        and #$7F
-        tay
+        cmp #MRING
+        bcc :+
+        sbc #MRING
+:       tay
         ldx #0
-:       lda MC,y
+@zn:    lda MC,y
         and #15
         sta HTN,x
         tya
         clc
-        adc #1
-        and #$7F
-        tay
+        adc #8
+        cmp #MRING
+        bcc :+
+        sbc #MRING
+:       tay
         inx
         cpx #NX
-        bne :-
+        bne @zn
         sec
         rts
 @no:    clc
@@ -3840,24 +3832,28 @@ crow:   stx WM
         lda #>CLO
         adc #0
         sta @so+2
-        lda WK                     ; z = WK - m: its first column's slot, MWO +
-        sec                        ; 16 (z - WZ0) + 1 (mapgen.s)
-        sbc WM
+        lda WK                     ; z = WK - m: column NX-2's slot, MWO + (z -
+        sec                        ; WZ0) + 8 (NX-2) (mapgen.s; under 2 MRING),
+        sbc WM                     ; then 8 back a column, each mod MRING
         sec
         sbc MWZ
-        asl a
-        asl a
-        asl a
-        asl a
-        sec
-        adc MWO
-        sta z:MGT                  ; (scratch: mapgen.s's, free here)
-        ldx #NX-2
-@c:     txa                        ; slot + X, mod 128
+        and #63
         clc
-        adc z:MGT
-        and #$7F
-        tay
+        adc MWO
+        clc
+        adc #8*(NX-2)
+        cmp #MRING
+        bcc :+
+        sbc #MRING
+:       sta z:MGT                  ; (scratch: mapgen.s's, free here)
+        ldx #NX-2
+@c:     ldy z:MGT
+        lda z:MGT
+        sec
+        sbc #8
+        bcs :+
+        adc #MRING
+:       sta z:MGT
         lda MC,y                   ; the tile's colour index: its corner's high
         lsr a                      ; nibble
         lsr a

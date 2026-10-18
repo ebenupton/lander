@@ -453,9 +453,9 @@ gqr:    ldx #2                     ; d
 ; (glb: start's, from the MOS's font), the rest black; the map (MAP, MODE 5: 64
 ; lines of 32 pixels, 64 bytes a character row; line y, pixel t the tile x = 2t
 ; - MAPX, z = MAPZ - y, mod 64): the pad black, the sea (its four corners 0)
-; colour 1, land colour 3.  The corners are mapgen.s's (mcl), a map row at a
-; time into MC: row z at slot 64 (y & 1), row z + 1 the line before's (MOK
-; stays 0: the first frame makes the window).  Clobbers A, X, Y, ptr, $8E-$9E.
+; colour 1, land colour 3.  The corners are mapgen.s's (mcl), two map columns
+; at a time into MC (128 slots meanwhile: MOK stays 0, so the first frame makes
+; the window).  Clobbers A, X, Y, ptr, $8E-$9E.
         .assert TOP+24*8 = MAP && <MAP = 0, error, "gpanel: TOP then MAP, page-aligned"
 gpanel: ldx #0
 @c:     lda #0
@@ -469,25 +469,64 @@ gpanel: ldx #0
 @z:     sta TOP,x
 :       inx
         bne @c
-        lda #(MAPZ+1) & 63         ; row MAPZ + 1, line -1's, at slot 64
-        ldx #64
-        jsr @row
+        lda #128                   ; (mcl's ring: 128 slots meanwhile)
+        sta mnm1+1
+        sta mnm2+1
         lda #0
-        sta gpy
-@y:     lda gpy                    ; row z = MAPZ - y at slot 64 (y & 1)
-        and #1
-        lsr a
-        ror a
-        lsr a
-        sta gpb
-        lda #MAPZ
-        sec
-        sbc gpy
+        sta gpt
+@t:     lda gpt                    ; pixel t: map columns x = 2t - MAPX and x + 1,
+        asl a                      ; z0 .. z0 + 63 (z0 = MAPZ - 63: all 64, so
+        sec                        ; z + 1 wraps with the map), at slots 0, 64
+        sbc #MAPX
         and #63
-        sta gpz
-        ldx gpb
-        jsr @row
-        lda gpy                    ; MAP + 64 (y >> 3) + (y & 7)
+        sta gpx
+        ldx #0
+        jsr @col
+        lda gpx
+        clc
+        adc #1
+        and #63
+        ldx #64
+        jsr @col
+        lda gpt                    ; the pixel's bits, its byte's column
+        and #3
+        tay
+        lda PIXM,y
+        sta gpm
+        lda gpt
+        and #$1C
+        asl a
+        sta gpo
+        ldx #63                    ; X = k: line y = 63 - k, z = z0 + k
+@k:     lda gpx                    ; the pad: black (nothing to store)
+        cmp #PADN
+        bcs @np
+        txa
+        clc
+        adc #(MAPZ-63) & 63
+        and #63
+        cmp #PADN
+        bcc @nx
+@np:    lda MC,x                   ; the four corners
+        ora MC+64,x
+        sta gpc
+        txa
+        clc
+        adc #1
+        and #63
+        tay
+        lda MC,y
+        ora MC+64,y
+        ora gpc                    ; (heights only: mcl's colour nibbles 0)
+        beq :+
+        lda #$FF                   ; land
+        bne @cl
+:       lda #$0F                   ; the sea
+@cl:    and gpm
+        sta gpc
+        txa                        ; line y = 63 - k: MAP + 64 (y >> 3) + 8 (t
+        eor #63                    ; >> 2) + (y & 7)
+        tay
         and #$38
         asl a
         asl a
@@ -496,83 +535,36 @@ gpanel: ldx #0
         lda #>MAP
         adc #0
         sta ptr+1
-        lda gpy
+        tya
         and #7
-        ora ptr
-        sta ptr
-        ldx #31                    ; t
-@t:     txa                        ; x = 2t - MAPX
-        asl a
-        sec
-        sbc #MAPX
-        and #63
-        sta gpx
-        cmp #PADN                  ; the pad: black
-        bcs :+
-        lda gpz
-        cmp #PADN
-        lda #$00
-        bcc @k
-:       lda gpx                    ; the four corners: row z at gpb, z + 1 at
-        ora gpb                    ; gpb ^ 64
-        tay
-        lda MC,y
-        sta gpc
-        tya
-        eor #64
-        tay
-        lda MC,y
-        ora gpc
-        sta gpc
-        lda gpx
-        clc
-        adc #1
-        and #63
-        ora gpb
-        tay
-        lda MC,y
-        ora gpc
-        sta gpc
-        tya
-        eor #64
-        tay
-        lda MC,y
-        ora gpc                    ; (heights only: mcl's colour nibbles 0)
-        beq :+
-        lda #$FF                   ; land
-        bne @k
-:       lda #$0F                   ; the sea
-@k:     sta gpc
-        txa
-        and #3
-        tay
-        lda PIXM,y
-        and gpc
-        sta gpc
-        txa
-        and #$1C
-        asl a
+        ora gpo
         tay
         lda (ptr),y
         ora gpc
         sta (ptr),y
-        dex
-        bpl @t
-        inc gpy
-        lda gpy
-        cmp #64
+@nx:    dex
+        bpl @k
+        inc gpt
+        lda gpt
+        cmp #32
         beq :+
-        jmp @y
-:       rts
-@row:   sta MGZ                    ; map row A's 64 corners at slot X
+        jmp @t
+:       lda #MRING                 ; (the ring's own modulus back)
+        sta mnm1+1
+        sta mnm2+1
+        rts
+@col:   sta MGX                    ; map column A's 64 corners from z0 at slot X
         stx MGS
-        lda #0
-        sta MGX
+        lda #(MAPZ-63) & 63
+        sta MGZ
         lda #1
         sta MGD
         lda #64
         sta MGN
         jmp mcl
+gpt:    .byte 0                    ; (gpanel's: t, the pixel's bits, its column)
+gpm:    .byte 0
+gpo:    .byte 0
 flab:   .byte "FUEL"
 oswb:   .res 9                     ; (start's: OSWORD 10's block)
 glb:    .res 64                    ; FUEL's letters (start's; zero in the tests,
@@ -583,8 +575,8 @@ gpb:    .byte 0, 0
 gpc:    .byte 0
 gpx:    .byte 0
 
-mtc:    .word MGP_S, MGP
-        .byte 32
+mtc:    .word MGQ_S, MGQ
+        .byte 31
         .word HTL_S, HTL
         .byte 30
         .word LUT_S, LUT
@@ -594,8 +586,8 @@ mtc:    .word MGP_S, MGP
         .word B1N_S, B1N
         .byte 32
 mtce:
-        .assert YQT = MGP+6 && MGQ = YQT+9 && LQT = MGQ+6 && SEAI = LQT+7 && HTH = HTL+15, error, "mtc: the holes' tables in order"
-        .assert YQT_S = MGP_S+6 && MGQ_S = YQT_S+9 && LQT_S = MGQ_S+6 && SEAI_S = LQT_S+7 && HTH_S = HTL_S+15, error, "mtc: the sources in order"
+        .assert MGP = MGQ+7 && YQT = MGP+6 && LQT = YQT+7 && SEAI = LQT+7 && HTH = HTL+15, error, "mtc: the holes' tables in order"
+        .assert MGP_S = MGQ_S+7 && YQT_S = MGP_S+6 && LQT_S = YQT_S+7 && SEAI_S = LQT_S+7 && HTH_S = HTL_S+15, error, "mtc: the sources in order"
 
 crtc_regs:                         ; (register, value) pairs: MODE 1's, but
         .byte 0, 127               ; 64 characters displayed

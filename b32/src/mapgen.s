@@ -35,52 +35,46 @@ MRING   = 88                       ; the ring's slots: 11 columns of 8
 ; mwin: the window to the camera (cxt, czt + ZB): stepped a column or row at a
 ; time while within 8 columns or 7 rows, else made anew, a row at a time (and
 ; the first time: MOK 0).  Clobbers A, X, Y, $8E-$9E.  Caller: project (after ZB).
-mwin:   lda MOK
-        beq @full
-@xs:    lda cxt                    ; x: cxt - 4 - WX0
-        sec
-        sbc #4
-        sec
-        sbc MWX
-        and #63
-        beq @zs
-        cmp #9
-        bcc @xp
-        cmp #64-8
-        bcc @full
-        jsr mxm
-        jmp @xs
-@xp:    jsr mxp
-        jmp @xs
-@zs:    lda czt                    ; z: czt + ZB - 7 - WZ0
-        clc
-        adc ZB
-        sec
-        sbc #7
-        sec
-        sbc MWZ
-        and #63
-        beq @x
-        cmp #8
-        bcc @zp
-        cmp #64-7
-        bcc @full
-        jsr mzm
-        jmp @zs
-@zp:    jsr mzp
-        jmp @zs
-@x:     rts
-@full:  lda cxt                    ; anew: every row's corners, then tiles
-        sec
+mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
+        sec                        ; ZB - 7 (MWT, MWT+1)
         sbc #4
         and #63
-        sta MWX
+        sta MWT
         lda czt
         clc
         adc ZB
         sec
         sbc #7
         and #63
+        sta MWT+1
+        lda MOK
+        beq @full
+        ldy #0                     ; each axis (Y: 0 x, 1 z): a step on or back
+@ax:    lda MWT,y                  ; while within 7, else anew
+        sec
+        sbc MWX,y
+        and #63
+        beq @nx
+        cmp #8
+        bcc :+                     ; (C clear: on)
+        cmp #64-7
+        bcc @full                  ; (C set: back)
+:       tya                        ; X = 2 Y + C: mstep's step
+        rol a
+        tax
+        tya
+        pha
+        jsr mstep
+        pla
+        tay
+        bpl @ax                    ; (always)
+@nx:    iny
+        cpy #2
+        bne @ax
+        rts
+@full:  lda MWT                    ; anew: every row's corners, then tiles
+        sta MWX
+        lda MWT+1
         sta MWZ
         lda #0
         sta MWO
@@ -109,65 +103,51 @@ mwin:   lda MOK
         lda #1
         sta MOK
         rts
+        .assert MWZ = MWX+1, error, "mwin: MWZ after MWX"
 
-; mxp, mxm, mzp, mzm: the window a column right, left, a row on, back: the new
-; line's corners, then the tiles they complete.
-mxp:    inc MWX
-        lda #8
-        jsr mwo
-        lda #10
-        jsr mzc
-        lda #9
-        bne mzt                    ; (always)
-mxm:    dec MWX
-        lda #MRING-8               ; (- 8)
-        jsr mwo
-        lda #0
-        jsr mzc
-        lda #0
-        beq mzt                    ; (always)
-mzp:    inc MWZ
-        lda #1
-        jsr mwo
-        ldy #7
-        jsr mxc
-        ldy #6
-        bne mxt                    ; (always)
-mzm:    dec MWZ
-        lda #MRING-1               ; (- 1)
-        jsr mwo
-        ldy #0
-        jsr mxc
-        ldy #0
-        beq mxt                    ; (always)
-; mwo: MWO + A (A < MRING), mod MRING.  Clobbers A.
-mwo:    clc
-        adc MWO
+; mstep: the window a step, X: 0 a column right, 1 left, 2 a row on, 3 back:
+; WX0 or WZ0 one on or back, MWO with it (SWO), then the new line's corners
+; (from the window's corner SCA across, SCY down; a column, z on, for 0 and 1,
+; a row, x on, for 2 and 3: mdir) and the tiles they complete (STX0, STY0).
+mstep:  stx MWK
+        txa
+        lsr a
+        tay                        ; (Y: the axis)
+        lda MWX,y
+        clc
+        adc SDL,x
+        and #63
+        sta MWX,y
+        lda MWO
+        clc
+        adc SWO,x
         cmp #MRING
         bcc :+
         sbc #MRING
 :       sta MWO
-        rts
-; mzc, mzt: column A's corners (8), tiles (7) (z on); mxc, mxt: row Y's (11,
-; 10: x on)
-mzc:    ldy #0
+        lda SCA,x
+        ldy SCY,x
         jsr mset
-        jsr mzl
-        jmp mcl
-mzt:    ldy #0
+        jsr mdir
+        jsr mcl
+        ldx MWK
+        lda STX0,x
+        ldy STY0,x
         jsr mset
-        jsr mzl
+        jsr mdir
         dec MGN
         jmp mtl
-mxc:    lda #0
-        jsr mset
-        jsr mxl
-        jmp mcl
-mxt:    lda #0
-        jsr mset
-        jsr mxl
-        dec MGN
-        jmp mtl
+mdir:   ldx MWK                    ; the line's way: z on (a column) for steps 0,
+        cpx #2                     ; 1, x on (a row) for 2, 3
+        bcs mxl
+        bcc mzl                    ; (always)
+SDL:    .byte 1, 63, 1, 63         ; (the step's: WX0, WZ0 + 1 or - 1)
+SWO:    .byte 8, MRING-8, 1, MRING-1
+SCA:    .byte 10, 0, 0, 0          ; the new corners' line
+SCY:    .byte 0, 0, 7, 0
+STX0:   .byte 9, 0, 0, 0           ; the tiles' line
+STY0:   .byte 0, 0, 6, 0
+MWT:    .byte 0, 0                 ; (mwin's targets: WX0, WZ0)
 mxl:    lda #8                     ; x on, 11
         ldy #11
         bne :+                     ; (always)

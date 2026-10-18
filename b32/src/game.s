@@ -73,7 +73,7 @@ FBL     = 2                        ; FBC..FBC+19 (80 pixels: fuel >> 6), lines
 ; gt2..gt4, su, scrg.
         .segment "BOOT"
 ginit:  lda #$FF                   ; (the map's dot: none yet)
-        sta mky
+        sta mkl
         lda #$5A                   ; (the LFSR's seed: never 0)
         sta rnd
         ldx #NPART-1
@@ -1013,7 +1013,7 @@ gpost:  jsr dset
         jsr dots
         jsr marker
         ; falls into status
-; status: the fuel gauge on the FUEL row (FUELR, MODE 1), as the full build's:
+; status: the fuel gauge on the top frame's row 0 (TOP), as the full build's:
 ; redrawn when its length differs from what it shows (fdr): fuel >> 6 pixels (80
 ; full), yellow, four lines deep (FBL..FBL+3) over byte columns FBC..FBC+19,
 ; each byte BARB by the pixels left for it.  Clobbers A, X, Y, gt1.
@@ -1035,10 +1035,10 @@ status: lda fuel+1                 ; gt1 = fuel >> 6
         lda #4
 :       tay
         lda BARB,y
-        sta FUELR+FBL,x
-        sta FUELR+FBL+1,x
-        sta FUELR+FBL+2,x
-        sta FUELR+FBL+3,x
+        sta TOP+FBL,x
+        sta TOP+FBL+1,x
+        sta TOP+FBL+2,x
+        sta TOP+FBL+3,x
         lda gt1
         sbc #4                     ; (C: the CMP's; set only for 4 or more)
         bcs :+
@@ -1051,7 +1051,7 @@ status: lda fuel+1                 ; gt1 = fuel >> 6
         cpx #(FBC+20)*8
         bcc @b
 @x:     rts
-        .assert FBC+20 <= FUELW, error, "status: the gauge within the FUEL row"
+        .assert FBC+20 <= 48, error, "status: the gauge left of the map"
 BARB:   .byte $00, $88, $CC, $EE, $FF   ; 0..4 pixels lit from the left, colour 3
 ; dset: scrg = the screen being drawn (scrb); tsg, bsg = its TOPS and BOTS
 ; (the set sidx picks for back).  Clobbers A, X, Y.  (gpre computes su.)
@@ -1197,92 +1197,106 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
         sta (bsg),y
 @o:     rts
 
-; marker: the ship's dot on the map (the panel, loaded with the map drawn):
-; the pixel of the tiles the ship is over (two across), two lines tall
-; (square), magenta, while GSHV is set -- column t = ((x + MAPX) & 63) >> 1, top
-; line y = (MAPZ - z) & 62.
-; The two bytes it covers are kept (mkb) and put back when it moves (mky, mkt:
-; its place, mky $FF none: ginit's).  Clobbers A, X, Y, g0, gt0..gt3.
+; marker: the ship's dot on the map, as the full build's: 2 x 2 pixels,
+; magenta, while GSHV is set -- its top line MAPZ - z's tile, one less if z's
+; fraction is 1/2 or more; its left pixel x's tile + MAPX - 1, one more if x's
+; fraction is 1/2 or more; both mod 64 (the map wraps), its pixels (p, l), (p+1,
+; l), (p+1, l+1), (p, l+1).  The bytes it covers are kept (mka, mkb: four, the
+; same byte possibly more than once) and put back, last first, when it moves
+; (mkl, mkp: its place; mkl $FF none: ginit's).  Clobbers A, X, Y, g0, gt0..gt3.
 ; Called by gpost.
-        .assert <PANEL = 0 && (>PANEL & 1) = 0, error, "marker: PANEL page-aligned, even"
-marker: ldx #$FF                   ; (no dot)
+marker: lda #$FF                   ; (no dot)
+        sta gt0
         lda GSHV
         beq @h
-        lda #MAPZ                  ; y = (MAPZ - z) & 62 (even: the dot does
-        sec                        ; not move by one line)
+        lda sz+1                   ; the top line (C clear from the ASL of the
+        eor #$FF                   ; inverted fraction: z's 1/2 or more)
+        asl a
+        lda #MAPZ
         sbc sz+2
-        and #62
-        tax                        ; X = y
-        lda sx+2                   ; t = ((x + MAPX) & 63) >> 1
-        clc
-        adc #MAPX
-        and #MAPN-1
-        lsr a
+        and #63
         sta gt0
-@h:     cpx mky                    ; unmoved?
-        bne @mv
+        lda sx+1                   ; the left pixel (C: x's fraction 1/2 or more)
+        asl a
+        lda sx+2
+        adc #MAPX-1
+        and #63
+        sta gt1
+@h:     lda gt0
+        cmp mkl
+        bne :+
+        lda gt1
+        cmp mkp
+        bne :+
+        rts                        ; (unmoved)
+:       ldx mkl                    ; the old dot's bytes back, the last first
+        bmi :+
+        ldx #3
+@b:     lda mka,x
+        sta g0
+        lda mkah,x
+        sta g0+1
+        ldy #0
+        lda mkb,x
+        sta (g0),y
+        dex
+        bpl @b
+:       lda gt0                    ; the new one: its place, its bytes kept, its
+        sta mkl                    ; pixels magenta (colour 2: the pixel's high
+        bmi @r                     ; bit)
+        lda gt1
+        sta mkp
+        ldx #0                     ; (X: the pixel, 0..3)
+        jsr @px
+        inc gt1
+        jsr @px
+        inc gt0
+        jsr @px
+        dec gt1
+@px:    lda gt0                    ; pixel (gt1, gt0) & 63: MAP + 128 (l >> 3) +
+        and #8                     ; 8 (p >> 2) + (l & 7)
+        asl a
+        asl a
+        asl a
+        asl a
+        sta g0
         lda gt0
-        cmp mkt
-        beq @r
-@mv:    stx gt1                    ; (the new y)
-        ldx mky                    ; the old dot's bytes back
-        bmi @n
-        lda mkb
-        jsr @put
-        inx
-        lda mkb+1
-        jsr @put
-@n:     ldx gt1                    ; the new one: its place and bytes kept, its
-        stx mky                    ; pixel made magenta (colour 2: the pixel's
-        bmi @r                     ; high-nibble bit)
+        and #7
+        ora g0
+        sta g0
+        lda gt1
+        and #$3C
+        asl a
+        ora g0
+        sta g0
+        sta mka,x
         lda gt0
-        sta mkt
+        and #$30
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>MAP
+        sta g0+1
+        sta mkah,x
+        lda gt1
         and #3
         tay
-        lda PIXM,y
+        lda PIXG,y
         sta gt2                    ; (the pixel's bits)
         and #$F0
         sta gt3                    ; (its magenta)
-        jsr @mag
-        sta mkb
-        inx
-        jsr @mag
-        sta mkb+1
-@r:     rts
-@mag:   jsr mkad                   ; line X's byte: A = it as was, the pixel
-        lda (g0),y                 ; magenta in it
-        pha
+        ldy #0
+        lda (g0),y
+        sta mkb,x
         ora gt2
         eor gt2
         ora gt3
         sta (g0),y
-        pla
-        rts
-@put:   pha                        ; line X's byte = A
-        jsr mkad
-        pla
-        sta (g0),y
-        rts
-; mkad: (g0),y = the map's byte for line X & 63, column mkt (0..31): g0 =
-; PANEL + 64 (y >> 3) + 8 (t >> 2) (bits 0-2 clear), Y = y & 7.  Clobbers A.
-mkad:   txa
-        and #$38                   ; 64 (y >> 3): the low byte's bits 6-7, the
-        asl a                      ; high byte's bit 0 (C)
-        asl a
-        asl a
-        sta g0
-        lda #>PANEL
-        adc #0
-        sta g0+1
-        lda mkt                    ; + 8 (t >> 2)
-        and #$1C
-        asl a
-        ora g0
-        sta g0
-        txa                        ; + (y & 7): in Y, for (g0),y (no carry:
-        and #7                     ; g0's bits 0-2 are clear)
-        tay
-        rts
+        inx
+@r:     rts
+        .assert <MAP = 0, error, "marker: MAP page-aligned"
 
 PIXG    = PIXM                     ; pixel 0..3's bits (LAND's)
 
@@ -1313,9 +1327,12 @@ satt:   .res 1                     ; last written (ginit's: $FF)
 rnd:    .res 1                    ; rand's state
 scrg:   .res 1                    ; the screen being written to (high byte)
 pnext:  .res 1                    ; emit's last dot
-mky:    .res 1                     ; marker's: the dot's top line ($FF: none),
-mkt:    .res 1                     ; its column, and what its two bytes held
-mkb:    .res 2
+mkl:    .res 1                     ; marker's: the dot's top line ($FF: none),
+mkp:    .res 1                     ; its left pixel
+        .segment "P2T"
+mka:    .res 4                     ; marker's: its four pixels' bytes' addresses
+mkah:   .res 4                     ; (low, high) and what they held
+mkb:    .res 4
         .segment "GAME"
         .include "gametab.inc"
         .segment "GA0"             ; (the dots: b32.cfg's GA0, GA1, P1L, LOWP)

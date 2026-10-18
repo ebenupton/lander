@@ -102,7 +102,7 @@ clre:
 ; ascending); every hole
 ; the uninitialised data lives in zeroed (zero page below $FC, page 1 below the
 ; stack, page 2 past IRQ1V, $0300-$13FF), the NMI's RTI; the tables the file
-; leaves out made (gfill, gqr, gpanel) and init's; the memory from the
+; leaves out made (gfill, gpanel) and init's; the memory from the
 ; program's end through land buffer 0 to the loader cleared; the CRTC (one MODE
 ; 1 frame) and the palette.  (The tests call it in place of the loader, with
 ; the file at its load address.)  Clobbers A, X, Y.
@@ -194,7 +194,6 @@ takeover:
         tax
         bcs @tc
         jsr gfill
-        jsr gqr
         jsr grung
         jsr gpanel
         jsr init
@@ -306,55 +305,6 @@ gfill:  lda #<TBLK4
         inc ptr+1
 :       rts
 
-; gqr: div8's table: QRA rows d 2..8, QRB rows 9..15, each D d..31 in turn:
-; (D div d) << 4 | D mod d; QOA + d - 2 (QOB + d - 9, QOB following QOA): row
-; d's index less d (QOB's one less: div8's ADC there has C set).  Clobbers A, X,
-; Y, ptr, z:gt0..z:gt2.
-        .assert QOB = QOA+7, error, "gqr: QOB follows QOA"
-gqr:    ldx #2                     ; d
-@d:     cpx #2
-        beq @a
-        cpx #9
-        bne @o
-        lda #<QRB                  ; (row 9: QRB from its start)
-        ldy #>QRB
-        bne @p                     ; (always)
-@a:     lda #<QRA                  ; (row 2: QRA from its start)
-        ldy #>QRA
-@p:     sta ptr
-        sty ptr+1
-        lda #0
-        sta z:gt0                    ; (the index)
-@o:     stx z:gt1
-        lda #8                     ; the offset: index - d, less 1 from row 9
-        cmp z:gt1                    ; (C: d <= 8)
-        lda z:gt0
-        sbc z:gt1
-        sta QOA-2,x
-        lda #32                    ; the row's entries, 32 - d
-        sec
-        sbc z:gt1
-        sta z:gt2
-        lda #$10                   ; D = d: q 1, r 0
-@D:     ldy z:gt0
-        sta (ptr),y
-        inc z:gt0
-        clc                        ; D + 1: r + 1, or r 0 and q + 1 at d
-        adc #1
-        tay
-        and #$0F
-        cmp z:gt1
-        tya
-        bcc @k
-        sbc z:gt1                    ; (C set) q << 4
-        adc #$0F                   ; (C set: + $10)
-@k:     dec z:gt2
-        bne @D
-        inx
-        cpx #16
-        bne @d
-        rts
-        .assert QRAN = 189 && QRBN = 140, error, "gqr: the tables' sizes"
 
 ; grung: the rungs' tables (land.s's rg_rf, rg_lf), for a 2..9 and D 0..31 at
 ; (a & 7) << 5 | D: RQF (D div a) << 4 | t(1), RPT the pattern: b(j) = t(j +
@@ -456,30 +406,32 @@ gq:     .byte 0
 gtp:    .byte 0
 gq2:    .byte 0
 gpat:   .byte 0
-; gpanel: the FUEL row (FUELR): FUEL at columns 0..7 (glb: start's, from the
-; MOS's font), the rest black; the map's rows at PANEL: 64 lines of 32 pixels,
-; line y, pixel t the tile x =
-; 2t - MAPX, z = MAPZ - y (mod 64): the pad black, the sea (its four corners 0)
-; colour 1, land colour 3.  The corners are mapgen.s's
-; (mcl), a map row at a time into MC: row z at slot 64 (y & 1), row z + 1 the
-; line before's (MOK stays 0: the first frame makes the window).  Clobbers A,
-; X, Y, ptr, $8E-$9E.
-        .assert <PANEL = 0, error, "gpanel: PANEL page-aligned"
-gpanel: lda #0
-        tax
-@c:     sta PANEL,x
-        sta PANEL+$100,x
-        inx
-        bne @c
-        ldx #FUELW*8-1             ; FUELR: FUEL (glb, start's) at columns 0..7,
-:       lda #0                     ; the rest black
-        cpx #64
+; gpanel: the top frame as the full build's screen top: row 0's columns 0..47
+; (TOP) FUEL at columns 0..7 (glb: start's, from the MOS's font), the rest
+; black; the map (MAP, as gamegen's MAPI: 64 lines of 64 pixels, line y, pixel
+; px the tile x = px - MAPX, z = MAPZ - y, mod 64): the pad PADG's grey (by
+; the pixel's parity), the sea (its four corners 0) colour 1, land colour 3.
+; The corners are mapgen.s's (mcl), a map row at a time into MC: row z at slot
+; 64 (y & 1), row z + 1 the line before's (MOK stays 0: the first frame makes
+; the window).  Clobbers A, X, Y, ptr, $8E-$9E.
+gpanel: ldx #0
+@c:     lda #0
+        sta MAP,x
+        sta MAP+$100,x
+        sta MAP+$200,x
+        sta MAP+$300,x
+        cpx #48*8-$100
         bcs :+
-        lda glb,x
-:       sta FUELR,x
-        dex
-        cpx #$FF
-        bne :--
+        sta TOP+$100,x
+:       cpx #64
+        bcc :+
+        sta TOP,x
+        bcs :++
+:       lda glb,x                  ; FUEL
+        sta TOP,x
+:       inx
+        bne @c
+        .assert 48*8 > $100 && 48*8 <= $200, error, "gpanel: TOP 1..2 pages"
         lda #<MGP                  ; (mcl: x on)
         sta mcp+1
         lda #(MAPZ+1) & 63         ; row MAPZ + 1, line -1's, at slot 64
@@ -500,33 +452,47 @@ gpanel: lda #0
         sta gpz
         ldx gpb
         jsr @row
-        lda gpy                    ; PANEL + 64 (y >> 3) + (y & 7)
-        and #$38
+        lda gpy                    ; MAP + 128 (y >> 3) + (y & 7)
+        and #8
+        asl a
         asl a
         asl a
         asl a
         sta ptr
-        lda #>PANEL
-        adc #0
-        sta ptr+1
         lda gpy
         and #7
         ora ptr
         sta ptr
-        ldx #31                    ; t
-@t:     txa                        ; x = 2t - MAPX
-        asl a
+        lda gpy
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        clc
+        adc #>MAP
+        sta ptr+1
+        ldx #63                    ; px
+@t:     txa                        ; x = px - MAPX
         sec
         sbc #MAPX
         and #63
         sta gpx
-        cmp #PADN                  ; the pad: black
-        bcs :+
+        cmp #PADN                  ; the pad: PADG's grey
+        bcs @nb
         lda gpz
         cmp #PADN
-        lda #$00
-        bcc @k
-:       lda gpx                    ; the four corners: row z at gpb, z + 1 at
+        bcs @nb
+        lda gpy
+        and #1
+        asl a
+        sta gpc
+        txa
+        and #1
+        ora gpc
+        tay
+        lda PADG,y
+        jmp @k
+@nb:    lda gpx                    ; the four corners: row z at gpb, z + 1 at
         ora gpb                    ; gpb ^ 64
         tay
         lda MC,y
@@ -552,26 +518,38 @@ gpanel: lda #0
         lda MC,y
         ora gpc                    ; (heights only: mcl's colour nibbles 0)
         beq :+
-        lda #$FF                   ; land
+        lda #3                     ; land
         bne @k
-:       lda #$0F                   ; the sea
-@k:     sta gpc
-        txa
+:       lda #1                     ; the sea
+@k:     sta gpc                    ; colour c into pixel px & 3: c's high bit at
+        txa                        ; bit 7 - p, low at 3 - p
         and #3
         tay
+        lda gpc
+        lsr a                      ; (C: low bit)
+        lda #0
+        bcc :+
         lda PIXM,y
-        and gpc
+        and #$0F
+:       sta gpb+1                  ; (scratch: gpx is free now)
+        lda gpc
+        and #2
+        beq :+
+        lda PIXM,y
+        and #$F0
+:       ora gpb+1
         sta gpc
-        txa
-        and #$1C
+        txa                        ; byte 8 (px >> 2)
+        and #$3C
         asl a
         tay
         lda (ptr),y
         ora gpc
         sta (ptr),y
         dex
-        bpl @t
-        inc gpy
+        bmi :+
+        jmp @t
+:       inc gpy
         lda gpy
         cmp #64
         beq :+
@@ -592,7 +570,7 @@ glb:    .res 64                    ; FUEL's letters (start's; zero in the tests,
                                    ; which skip start)
 gpy:    .byte 0                    ; (gpanel's: y, z, row z's slot, a byte, x)
 gpz:    .byte 0
-gpb:    .byte 0
+gpb:    .byte 0, 0
 gpc:    .byte 0
 gpx:    .byte 0
 

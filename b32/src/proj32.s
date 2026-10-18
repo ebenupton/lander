@@ -107,16 +107,8 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         sta HLO
         lda HT+12,x
         sta HHI
-@r:     lda R7L,y                  ; r
-        sta rl
-        lda R7H,y
-        sta rh
-        lda CAME                   ; EYV: 0, or eyrow's with the camera raised
-        bne @ey
-        sta EYV                    ; (A = 0)
-        beq :+                     ; (always)
-@ey:    jsr eyrow
-:       lda cxs                    ; the ends' heights, by fx
+@r:     sty RD                     ; (the row's di)
+        lda cxs                    ; the ends' heights, by fx
         sta LQ
         lda WH
         ldy WH+1
@@ -139,6 +131,20 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         bcc :+
         sta HHI
 :
+        ldy RD
+        ldx RK                     ; row 0: the far clip plane's (r 4096 exactly)
+        bne :+
+        jmp @f0
+:       lda R7L,y                  ; r
+        sta rl
+        lda R7H,y
+        sta rh
+        lda CAME                   ; EYV: 0, or eyrow's with the camera raised
+        bne @ey
+        sta EYV                    ; (A = 0)
+        beq :+                     ; (always)
+@ey:    jsr eyrow
+:
         jsr ytab                   ; YT
         lda RK                     ; the y's: YT by height, into PY + 16 k
         sta @py+1                  ; (PY page-aligned: the store's low byte)
@@ -150,7 +156,7 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
         bpl :-
         ldx RK
         jsr xrow                   ; the x's into PX + 16 k
-        lda RK                     ; the next row, or done
+@nx:    lda RK                     ; the next row, or done
         cmp RN16
         beq @fin
         adc #16                    ; (C clear: cmp RN16 found RK < RN16, both
@@ -185,9 +191,42 @@ prow32: lda SHF                    ; (zsh4 stepped the map: shift HT first)
 :       dex
         bpl :--
 @x:     rts
+; row 0, di 111 (ZFCLIP*16 - DI0: FACT, or the corner row at czs 0): d = 4096,
+; r = 4096 exactly, so ((CAMH + hg - h) r + 2048) >> 12 = CAMH + hg - h and
+; EYV = (CAME 128 + 64) >> 7 = CAME: y = HORIZON + CAMH + hg + CAME - h (at
+; most 190: never held); x: the ends 128 -+ 72, corner i (1..NX-2) 72 - cxs +
+; 16 (i - 1) (B1's high byte, r = 16 pixels a corner).
+@f0:    lda HGV
+        clc
+        adc #HORIZON+CAMH
+        adc CAME
+        sta RD                     ; (scratch)
+        ldx #NX-1
+:       lda RD
+        sec
+        sbc WH,x
+        sta PY,x
+        dex
+        bpl :-
+        lda #56
+        sta PX
+        lda #200
+        sta PX+NX-1
+        lda #72                    ; (C set: the loop's)
+        sbc cxs
+        ldx #0
+:       sta PX+1,x
+        clc
+        adc #16
+        inx
+        cpx #NX-2
+        bne :-
+        jmp @nx
+        .assert ZFCLIP*16-DI0 = 111 && HORIZON+CAMH+15+EMAX <= 254, error, "prow32's @f0: row 0's di 111, y never held"
         .assert <PY = 0, error, "PY page-aligned"
         .segment "SG1"
 YT:     .res 16                    ; ytab's: line by height
+RD:     .res 1                     ; prow32's: the row's di; @f0's scratch
         .code
 
 ; lrng: HLO, HHI = the range of corners 1..NX-2 over HT rows Y/16 and Y/16 + 1

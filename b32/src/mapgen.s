@@ -31,6 +31,9 @@ MGW     = $9D
 MGR     = $9E                      ; mtl's random byte
 MWK     = $9F                      ; mwin's row
 MRING   = 88                       ; the ring's slots: 11 columns of 8
+MMIR    = 9                        ; MC + MRING .. + 96: slots 0..8 again, so a
+                                   ; column (8) and a tile's corners (+ 9) read
+                                   ; straight through
 
 ; mwin: the window to the camera (cxt, czt + ZB): stepped a column or row at a
 ; time while within 8 columns or 7 rows, else made anew, a row at a time (and
@@ -71,7 +74,7 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
 @nx:    iny
         cpy #2
         bne @ax
-        rts
+        rts                        ; (mstep remade MCB)
 @full:  lda MWT                    ; anew: every row's corners, then tiles
         sta MWX
         lda MWT+1
@@ -102,6 +105,20 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
         bne @ft
         lda #1
         sta MOK
+        ; falls into mcolb
+; mcolb: MCB + i = column i's first slot, MWO + 8 i mod MRING (the readers').
+; Clobbers A, X.
+mcolb:  lda MWO
+        ldx #0
+:       sta MCB,x
+        clc
+        adc #8
+        cmp #MRING
+        bcc :+
+        sbc #MRING
+:       inx
+        cpx #11
+        bne :--
         rts
         .assert MWZ = MWX+1, error, "mwin: MWZ after MWX"
 
@@ -136,7 +153,8 @@ mstep:  stx MWK
         jsr mset
         jsr mdir
         dec MGN
-        jmp mtl
+        jsr mtl
+        jmp mcolb
 mdir:   ldx MWK                    ; the line's way: z on (a column) for steps 0,
         cpx #2                     ; 1, x on (a row) for 2, 3
         bcs mxl
@@ -322,6 +340,10 @@ mcl_c:  lda MGX                    ; the pad?
 :       tya
 mcl_s:  ldy MGS
         sta MC,y
+        cpy #MMIR                  ; (slots 0..8: the mirror's too)
+        bcs :+
+        sta MC+MRING,y
+:
         jsr mnext
         beq mcl_x
         ldy MGD                    ; the phases on: MGQ - 1 + MGD + t (MGD 8, x
@@ -384,38 +406,18 @@ mtl:    ldy MGS
         tax
         lda RA,x
         sta MGR
-        tya                        ; X = the slot 1 on (z + 1)
-        clc
-        adc #1
-        cmp #MRING
-        bcc :+
-        sbc #MRING
-:       tax
         lda MC,y                   ; the left corners' sum (MGW), the right's
-        and #15                    ; (MGT)
-        sta MGT
-        lda MC,x
+        and #15                    ; (MGT): the slot, + 1 (z + 1), + 8 (x + 1),
+        sta MGT                    ; + 9, straight on (the mirror, MC + MRING,
+        lda MC+1,y                 ; holds slots 0..8)
         and #15
         clc
         adc MGT
         sta MGW
-        lda MGS                    ; Y, X: the slots 8 on (x + 1)
-        clc
-        adc #8
-        cmp #MRING
-        bcc :+
-        sbc #MRING
-:       tay
-        clc
-        adc #1
-        cmp #MRING
-        bcc :+
-        sbc #MRING
-:       tax
-        lda MC,y
+        lda MC+8,y
         and #15
         sta MGT
-        lda MC,x
+        lda MC+9,y
         and #15
         clc
         adc MGT
@@ -508,7 +510,10 @@ mtl_s:  asl a                      ; A: the colour index, into the high nibble
         and #15
         ora MGT
         sta MC,y
-        jsr mnext
+        cpy #MMIR
+        bcs :+
+        sta MC+MRING,y
+:       jsr mnext
         beq :+
         jmp mtl
 :       rts
@@ -528,6 +533,8 @@ MGP:    .res 6
 YQT:    .res 7
 LQT:    .res 7
 SEAI:   .res 4
+        .segment "LDL"
+MCB:    .res 11                    ; (mcolb's: each column's first slot)
         .segment "ST2"
 HTL:    .res 15
 HTH:    .res 15

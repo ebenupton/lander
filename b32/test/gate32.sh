@@ -1,6 +1,7 @@
 #!/bin/sh
 # The 32K build's gate: build, then everything checked against the reference.
-#   soak32.py   the land, byte-exact against proto/land.py (plain and moving camera)
+#   soak32.py   the land, byte-exact against proto/land.py (plain, moving camera, and
+#               jumps of 10 tiles a frame: the map window remade, the rare paths)
 #   shiptest32  the ship, every STEP'th orientation against b32/tools/ship32.py
 #   stackdepth  the main loop's worst-case stack within b32.cfg's 12 (+ IRQ, NMI)
 #   gametest32  the game: profile32.py's flight, every frame's state, against
@@ -21,6 +22,7 @@ if [ "$1" = base ]; then cp $B/gate_state.txt $B/gate_base.txt; echo "baseline w
 cmp -s $B/gate_state.txt $B/gate_base.txt || fail "flight differs (diff $B/gate_state.txt $B/gate_base.txt)"
 python3 b32/test/soak32.py 16 2 2 2>&1 | tee $B/gate_soak1.txt | grep -q ' 0 failed' || fail "soak plain"
 python3 b32/test/soak32.py 16 5 3 cam 2>&1 | tee $B/gate_soak2.txt | grep -q ' 0 failed' || fail "soak cam"
+python3 b32/test/soak32.py 24 9 160 2>&1 | tee $B/gate_soak3.txt | grep -q ' 0 failed' || fail "soak jumps"
 python3 b32/test/shiptest32.py ${1:-5} 2>&1 | tee $B/gate_ship.txt | grep -q ' 0 failed' || fail ship
 cut -c11-17 $B/gate_flight.txt | awk '{s += $1; n++} END {printf "GATE PASS %d cycles a frame (flight), ", s/n}'
 grep -E '^strips|^project' $B/gate_soak2.txt | awk '{printf "%s %s ", $1, $3}'; echo

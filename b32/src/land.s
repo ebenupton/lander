@@ -313,6 +313,8 @@ OP_INX  = $E8
 OP_DEX  = $CA
 
         .zeropage
+tyy:    .res 1                     ; (t_steep's: INC or DEC zp tyy, patched:
+                                   ; must be zero page)
 TY:     .res NX+2                  ; the strip's top row's points' y (0 and
                                    ; NX+1: the margins)
 cxt:    .res 1                     ; the camera: tile and sixteenth, x and z
@@ -884,28 +886,17 @@ project:
         .assert XSKIP = 1, error, "project: the columns cxt - 4 .. cxt + 6 (mapgen.s's window)"
 @hl:    lda czt                    ; all 8 rows' heights: pkz = czt + ZB; HT
         clc                        ; + 16j + i = map row czt + ZB - j's column
-        adc ZB                     ; cxt - 4 + i, MC's slot MWO + 8 i + 7 - j
-        sta pkz                    ; (mapgen.s): a column at a time, its 8
-        ldy MWO                    ; slots in turn (Y, wrapped at MRING), HT
-        lda #$70                   ; rows 7 .. 0 (X from $70 + i down by 16)
-        sta z:MGU
-@hc:    ldx z:MGU
-@hr:    lda MC,y
+        adc ZB                     ; cxt - 4 + i, MC's slot MCB + i + 7 - j
+        sta pkz                    ; (mapgen.s: straight on, the mirror past
+        ldx #NX-1                  ; MRING): column i's 8 in turn
+@hc:    ldy MCB,x
+        .repeat 8, r
+        lda MC+r,y
         and #15
-        sta HT,x
-        iny
-        cpy #MRING
-        bne :+
-        ldy #0
-:       txa
-        sec
-        sbc #16
-        tax
-        bcs @hr
-        inc z:MGU
-        lda z:MGU
-        cmp #$70+NX
-        bne @hc
+        sta HT+16*(7-r),x
+        .endrepeat
+        dex
+        bpl @hc
         ldx #$70                   ; each row's range (proj32's hrng)
 :       jsr hrng
         txa
@@ -3368,7 +3359,6 @@ SHF:    .byte 0                    ; zsh4's: HT to shift a row on (1) or back
         .code
         .segment "SG0"             ; (out of zero page: rare paths)
 tdy2:   .res 1                     ; traceb's t_old, t_steep
-tyy:    .res 1
 tx1:    .res 1
 x4p4:   .res 1                     ; slow's: x4 + 4
 re:     .res 1                     ; split2's boxes' bytes
@@ -3589,30 +3579,19 @@ zsh4:   tay
         tay
         lda #$FF
 @ld:    sta SHF
-        tya                        ; Y = the row's first column's slot: MWO +
-        sec                        ; (z - WZ0) (mapgen.s), then 8 on a column,
-        sbc MWZ                    ; each mod MRING
+        tya                        ; r = z - WZ0: column i's slot MCB + i + r
+        sec                        ; (mapgen.s), read at MC + r (@zr's
+        sbc MWZ                    ; operand: under the mirror's end)
         and #63
-        clc
-        adc MWO
-        cmp #MRING
-        bcc :+
-        sbc #MRING
-:       tay
-        ldx #0
-@zn:    lda MC,y
+        ora #<MC                   ; (MC 128-aligned: r < 8)
+        sta @zr+1
+        ldx #NX-1
+@zn:    ldy MCB,x
+@zr:    lda MC,y                   ; (operand's low byte: <MC + r)
         and #15
         sta HTN,x
-        tya
-        clc
-        adc #8
-        cmp #MRING
-        bcc :+
-        sbc #MRING
-:       tay
-        inx
-        cpx #NX
-        bne @zn
+        dex
+        bpl @zn
         sec
         rts
 @no:    clc
@@ -3851,29 +3830,17 @@ crow:   stx WM
         lda #>CLO
         adc #0
         sta @so+2
-        lda WK                     ; z = WK - m: column NX-2's slot, MWO + (z -
-        sec                        ; WZ0) + 8 (NX-2) (mapgen.s; under 2 MRING),
-        sbc WM                     ; then 8 back a column, each mod MRING
+        lda WK                     ; z = WK - m, r = z - WZ0: column i's slot
+        sec                        ; MCB + i + r (mapgen.s), read at MC + r
+        sbc WM                     ; (@le's operand: under the mirror's end)
         sec
         sbc MWZ
         and #63
-        clc
-        adc MWO
-        clc
-        adc #8*(NX-2)
-        cmp #MRING
-        bcc :+
-        sbc #MRING
-:       sta z:MGT                  ; (scratch: mapgen.s's, free here)
+        ora #<MC
+        sta @le+1
         ldx #NX-2
-@c:     ldy z:MGT
-        lda z:MGT
-        sec
-        sbc #8
-        bcs :+
-        adc #MRING
-:       sta z:MGT
-        lda MC,y                   ; the tile's colour index: its corner's high
+@c:     ldy MCB,x
+@le:    lda MC,y                   ; the tile's colour index: its corner's high
         lsr a                      ; nibble
         lsr a
         lsr a

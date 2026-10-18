@@ -21,46 +21,6 @@ IRQ1V   = $0204
         .segment "BOOT"
 start:  lda #119                   ; any EXEC or SPOOL file closed: no filing
         jsr OSBYTE                 ; system call follows
-        ldx #3                     ; FUEL's letters as the full build's glyphs5
-@g:     stx gpx                    ; makes them: OSWORD 10's definition, each
-        lda flab,x                 ; line two MODE 1 bytes (its left and right
-        sta oswb                   ; 4 pixels, colour 3), 16 a letter into glb
-        lda #10
-        ldx #<oswb
-        ldy #>oswb
-        jsr OSWORD
-        lda gpx
-        asl a
-        asl a
-        asl a
-        asl a
-        tax
-        ldy #0
-@l:     lda oswb+1,y
-        and #$F0
-        sta gpc
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora gpc
-        sta glb,x
-        lda oswb+1,y
-        and #$0F
-        sta gpc
-        asl a
-        asl a
-        asl a
-        asl a
-        ora gpc
-        sta glb+8,x
-        inx
-        iny
-        cpy #8
-        bne @l
-        ldx gpx
-        dex
-        bpl @g
         sei                        ; the MOS's interrupts off for good, its
         ldx #$FF                   ; stack ours
         txs
@@ -449,8 +409,8 @@ gqr:    ldx #2                     ; d
         rts
         .assert QRAN = 189, error, "gqr: the table's size"
 
-; gpanel: the top frame: row 0's columns 0..23 (TOP) FUEL at columns 0..7
-; (glb: start's, from the MOS's font), the rest black; the map (MAP, MODE 5: 64
+; gpanel: the top frame: row 0's columns 0..23 (TOP) FUEL at columns 0..3
+; (FUELG: the MODE 2 build's narrow letters, a byte a line), the rest black; the map (MAP, MODE 5: 64
 ; lines of 32 pixels, 64 bytes a character row; line y, pixel t the tile x = 2t
 ; - MAPX, z = MAPZ - y, mod 64): the pad black, the sea (its four corners 0)
 ; colour 1, land colour 3.  The corners are mapgen.s's (mcl), two map columns
@@ -463,9 +423,9 @@ gpanel: ldx #0
         sta MAP+$100,x
         cpx #24*8
         bcs :+
-        cpx #64
+        cpx #32
         bcs @z
-        lda glb,x                  ; FUEL
+        lda FUELG,x                ; FUEL (gen32's: the MODE 2 build's letters)
 @z:     sta TOP,x
 :       inx
         bne @c
@@ -565,10 +525,6 @@ gpanel: ldx #0
 gpt:    .byte 0                    ; (gpanel's: t, the pixel's bits, its column)
 gpm:    .byte 0
 gpo:    .byte 0
-flab:   .byte "FUEL"
-oswb:   .res 9                     ; (start's: OSWORD 10's block)
-glb:    .res 64                    ; FUEL's letters (start's; zero in the tests,
-                                   ; which skip start)
 gpy:    .byte 0                    ; (gpanel's: y, z, row z's slot, a byte, x)
 gpz:    .byte 0
 gpb:    .byte 0, 0

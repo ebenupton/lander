@@ -95,6 +95,11 @@ def mapgen():
         assert all(0 <= b < 256 for b in v), name
         out.append(f'{name + ":":8s}.byte ' + ', '.join(f'${b:02X}' for b in v))
     out.append('        .segment "BOOT"            ; (copied to their holes by the loader)')
+    fuelg = []                                            # FUEL in the MODE 2 build's narrow
+    for c in 'FUEL':                                      # letters (proto/nula.py), MODE 5:
+        for v in G.NU.font_rows(c):                       # pixel i lit (colour 3: $88 >> i)
+            fuelg.append(sum(0x88 >> i for i in range(4) if v & (3 << (6 - 2 * i))))
+    out.append('FUELG:  .byte ' + ', '.join(f'${b:02X}' for b in fuelg))
     grey = GG.SW.cell(*GG.SW.ALL[L.PADC])                 # (gpanel's pad: gamegen's mapimg)
     out.append('PADG:   .byte ' + ', '.join(str(grey[(px, ln)]) for ln in (0, 1) for px in (0, 1)))
     for name, v in held:

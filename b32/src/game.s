@@ -61,9 +61,10 @@ PADX    = PADN/2                   ; the pad's middle tile: the start
 FUELMX  = 5120                     ; Lander's refuel limit (&1400): full
 REFUEL  = 40                       ; a step on the pad (1.25 of Lander's &20)
 BURN    = 5                        ; a step of thrust (1.25 of Lander's 4)
-FBC     = 9                        ; the gauge: the FUEL row's byte columns
-FBL     = 2                        ; FBC..FBC+9 (40 MODE 5 pixels, the full
-                                   ; build's 80: fuel >> 7), lines FBL..FBL+3
+FBC     = 5                        ; the gauge: the FUEL row's byte columns
+FBL     = 2                        ; FBC..FBC+9 (40 MODE 5 pixels: the full
+                                   ; build's 80 in its place, as its MODE 2
+                                   ; build's: fuel >> 7), lines FBL..FBL+3
 
 
 ; ---------------------------------------------------------------- init

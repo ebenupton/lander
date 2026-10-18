@@ -54,7 +54,7 @@ clr:    lda #0
         bpl @p                     ; (to $7FFF)
         jmp loop
 clre:
-        .assert >start >= >__IMG_LAST__+2 && __IMG_LAST__+1+clre-clr <= start, error, "clr: in the free block below the loader, a page clear between"
+        .assert >start >= >__IMG_LAST__+2 && __IMG_LAST__+1+clre-clr <= start && __IMG_LAST__+1+clre-clr <= __TOP_START__, error, "clr: in the free block below the loader, a page clear between"
 
 ; takeover: the machine taken from the MOS (interrupts off, the stack at $01FF):
 ; the picture black (the palette, MODE 1's ULA); the VIAs, IRQ1V; the program
@@ -146,18 +146,23 @@ takeover:
         jsr grung
         jsr gpanel
         jsr init
-        lda #0                     ; the pages after the program's to the loader
-        tay                        ; black (the free block, land buffer 0; clr
-        ldx #>__IMG_LAST__+1       ; clears the rest)
+        lda #0                     ; the pages after the program's to TOP, and
+        tay                        ; from the land buffers to the loader, black
+        ldx #>__IMG_LAST__+1       ; (the free block, land buffer 0; clr clears
+        sta ptr                    ; the rest)
+@z4p:   cpx #>__TOP_START__
+        bne :+
+        ldx #>$5000
+:       cpx #>start
+        beq @z4d
         stx ptr+1
-        sta ptr
 @z4:    sta (ptr),y
         iny
         bne @z4
-        inc ptr+1
-        ldx ptr+1
-        cpx #>start
-        bne @z4
+        inx
+        bne @z4p                   ; (always)
+@z4d:
+        .assert __TOP_START__ + __TOP_SIZE__ = $5000 && <__TOP_START__ = 0 && >__IMG_LAST__+1 <= >__TOP_START__ && >start > $50, error, "takeover: TOP below the land buffers"
         ldx #0                     ; the CRTC: one MODE 1 frame, 64 wide, 20
 @cr:    lda crtc_regs,x            ; rows, the sync at row 28, land buffer 0
         sta CRTC_IDX               ; shown
@@ -504,4 +509,4 @@ palv:   .repeat 16, e
         .endrepeat
         .import __P1H_START__, __P1H_SIZE__
         .import __IMG_START__, __IMG_LAST__
-        .import __MAPD_LOAD__, __MAPD_RUN__, __CODE_LOAD__, __CODE_RUN__, __SHIP_RUN__, __SHIP_SIZE__, __CODE2_RUN__, __CODE2_SIZE__, __CODE2_LOAD__, __SHIP_LOAD__
+        .import __MAPD_LOAD__, __MAPD_RUN__, __CODE_LOAD__, __CODE_RUN__, __SHIP_RUN__, __SHIP_SIZE__, __CODE2_RUN__, __CODE2_SIZE__, __CODE2_LOAD__, __SHIP_LOAD__, __TOP_START__, __TOP_SIZE__

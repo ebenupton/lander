@@ -532,12 +532,15 @@ loop:   jsr gstep
 ;     timer 1 one-shot for E2;
 ;   E2, EV2US on, the land's row 0: R4 30.
 PROWS   = 8                        ; the top frame's rows (all shown)
-E0WAIT  = 18                       ; E0's wait to the next line (dex loops)
+E0WAIT  = 17                       ; E0's wait to the next line (dex loops)
 EAW     = 2                        ; Ea's waits (dex loops), placed by jsbeeb's
 EAW2    = 14                       ; CRTC counters (tools/crtcprobe.mjs)
-EVA     = 11*512 + 3*64 + 26       ; the sync to Ea: top row 0's line 7 (the
+EVA     = 11*512 + 3*64 + 32       ; the sync to Ea: top row 0's line 7 (the
                                    ; frame starts 11 rows after the sync)
-EVB     = 11*512 + 61*64 - 22      ; to Eb: the land's first line
+EVB     = 11*512 + 61*64 - 16      ; to Eb: the land's first line (its first
+                                   ; write at C0 ~6: jitter must not take it into
+                                   ; the line before, which would then run on to
+                                   ; the new end with two syncs)
 EV2US   = 1*512 + 300              ; E1 to E2: the land's row 0 (+ ~420us)
 ULA_CTL = $FE20                    ; the video ULA's control register
 SVIA_IFR = $FE4D
@@ -584,13 +587,13 @@ irq:    txa
         CRW 12, >(TOP/8)
         CRW 13, <(TOP/8)
         ldx #E0WAIT                ; MODE 5, early in the next line (this one is
-:       dex                        ; near its end): the CRTC's line first, still
-        bne :-                     ; at 2MHz, the sync to 45 and the end to 63
-        CRW 2, 45                  ; while the count is short of both (or the
-        CRW 0, 63                  ; line gets two syncs, or runs on to 255);
-        CRW 3, $24                 ; then the clock (1MHz)
-        lda #$C4
-        sta ULA_CTL
+:       dex                        ; near its end): the sync's width, then its
+        bne :-                     ; place (45) while the count is short of it (or
+        CRW 3, $24                 ; the line gets two syncs), then the clock
+        CRW 2, 45                  ; (1MHz), all before the sync's pulse (a write
+        lda #$C4                   ; during it, the interrupt's jitter deciding
+        sta ULA_CTL                ; which side, gave the line no sync or two: the
+        CRW 0, 63                  ; picture a line up or down); then the end, 63
 .ifdef MODE2
         jsr pal5                   ; the top's palette (the sync: the top is 11 rows on)
 .endif
@@ -610,11 +613,15 @@ irq:    txa
         beq @ea
         dex
         bne @e2
-        CRW 0, 127                 ; Eb, the land's first line (black: the sky
-        CRW 2, 90                  ; above YSKY): MODE 1, the CRTC's line first,
-        CRW 3, $28                 ; still at 1MHz, its sync to 90 while the count
+        CRW 2, 90                  ; Eb, the land's first line (black: the sky
+        CRW 0, 127                 ; above YSKY): MODE 1, the CRTC's line first,
+        CRW 3, $28                 ; still at 1MHz: its sync to 90 while the count
         lda #ULAL                  ; is short of the map's 21 (else a second sync),
-        sta ULA_CTL                ; then the clock (2MHz) before the count's 90;
+        sta ULA_CTL                ; its end to 127 once the line before has ended
+                                   ; (else that line runs on, two syncs in it):
+                                   ; R2 first gives each a wide window (C0 -8 ..
+                                   ; 20, 0 .. 62) for the interrupt's jitter (7);
+                                   ; then the clock (2MHz) before the count's 90;
         CRW 1, 64                  ; the land's R1 and R6 (this line black)
         CRW 6, 12
         stx UVIA_ACR               ; (X = 0: timer 1 one-shot, for E2)

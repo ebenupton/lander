@@ -4,6 +4,10 @@
 # and the cursor off, then *RUN L32: the loader (b32/src/boot32.s, $7000), which loads
 # L32M ($1900-$4FFF: the program, its tables, the map), hands the machine over from the
 # MOS and starts.  Needs ca65, ld65, Python 3 with numpy and scipy.
+#   sh b32/build32.sh disc        all four on one disc, build32/lander32-all.ssd: !BOOT
+#                        types in b32/src/menu32.bas, which tests for a VideoNULA (as
+#                        src/menu.bas), offers the versions (NULA's only with one),
+#                        sets MODE 1 black and *RUNs D.LANDER (D: M, C, N, A)
 #   sh b32/build32.sh [VERSION]   mode1 (the default), cpc (MODE 2, the 27 CPC colours as
 #                        dithers: a plain Model B) or nula (MODE 2, the VideoNULA's
 #                        sixteen colours) or arc (MODE 2, Lander's own colours as
@@ -20,6 +24,20 @@ set -e
 cd "$(dirname "$0")/.."
 B=build32
 mkdir -p $B
+if [ "$1" = disc ]; then                # the four versions on one disc, and the chooser
+    F=
+    for v in cpc:C nula:N arc:A mode1:M; do
+        sh b32/build32.sh ${v%:*} > /dev/null 2>&1 || { echo "build32.sh: ${v%:*} failed" >&2; exit 1; }
+        mkdir -p $B/disc/${v#*:}
+        cp $B/LANDER $B/disc/${v#*:}/LANDER
+        X=$(awk '$3 == ".start" {print $2}' $B/labels.txt | sed 's/^00//')
+        F="$F ${v#*:}.LANDER:$B/disc/${v#*:}/LANDER:2000:$X"
+    done
+    { printf 'VDU21\rNEW\r'; tr '\n' '\r' < b32/src/menu32.bas; printf 'RUN\r'; } > $B/BOOTM   # typed in, unseen
+    python3 tools/mkdfs.py build $B/lander32-all.ssd LANDER32 "!BOOT:$B/BOOTM:0000:FFFF" $F
+    echo "$B/lander32-all.ssd: MODE 1 (M), CPC (C), NULA (N) and arc (A), b32/src/menu32.bas's chooser"
+    exit 0
+fi
 V=${1:-mode1}
 case $V in
     cpc) export NULA=0 CPC=1 ARC=0; CA="-D MODE2 -D CPC"; DISK=lander32-cpc ;;

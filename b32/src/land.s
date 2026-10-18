@@ -393,7 +393,9 @@ flr1:   .res 1                     ; the run's end: the floor (the strip below
                                    ; draws that line), or flr + 1 in the near
                                    ; strip when the floor is not level
 ve:     .res 1                     ; the bytes being drawn: even and odd lines
-vo:     .res 1
+vo:     .res 1                     ; (also run2's, RVE, RVO: the black runs,
+RVE     = ve                       ; rc_t's and nearpost's, keep them)
+RVO     = vo
 re:     .res 1                     ; split2's right box's bytes
 ro:     .res 1
 bpos:   .res 1                     ; a split column's boundary: pixels left
@@ -414,8 +416,8 @@ msk:     .res 1                    ; the pixel mask (pixel p: bits 7-p and 3-p)
 zv:     .res 1                     ; zline's byte
 zp_:    .res 2                     ; a line's address, for (zp_),y
 dvx:    .res 1                     ; div8's divisor
-RVE:    .res 1                     ; run2's bytes: even and odd lines
-RVO:    .res 1
+svE:    .res 1                     ; rc_t's, np_r's: RVE, RVO kept
+svO:    .res 1
 stabp:  .res 1                     ; STAB's page for t (sethalf's)
 TRL:    .res 12                    ; mktr's transitions: line, and bpos after
 TRB:    .res 12                    ; as an LM mask (a second rung's from 6;
@@ -2026,12 +2028,20 @@ fsplit: lda mx                     ; no lines (mx >= flr1): nothing to draw
 ; is STA, LDA, TXA, RTS).
 rc_t:   tax                        ; lines TOPS .. mx-1, black, by run even
         ldy mx                     ; for one line (V kept: run's entry
-        lda #0                     ; arithmetic would clear it)
+        lda ve                     ; arithmetic would clear it; RVE, RVO kept)
+        sta svE
+        lda vo
+        sta svO
+        lda #0
         sta ve
         sta vo
         php
         jsr run
         plp
+        lda svE
+        sta ve
+        lda svO
+        sta vo
         ldy x4
 ; c_rd: c_coly's rung tests again, from Y = x4 (V kept): rung ri in the
 ; column (c_split), or right of it (one box: o_nr).  (Never wholly left: c_coly's
@@ -2071,11 +2081,7 @@ c_r1x:  cpx flr1                   ; (zone1 returns here, X = mx)
 ; into c_next, so fr, which JSRs here, and s2v, whose fsplit may end through
 ; here, make c_np an RTS meanwhile.
 run2:
-        lda RVE                    ; (STAB's run, ve on even lines, vo on odd)
-        sta ve
-        lda RVO
-        sta vo
-        jsr run
+        jsr run                    ; (RVE, RVO: ve, vo themselves)
 ; c_next: the column is done.  c_np (3 bytes, cols' by kind): LDA x4 / CLC, on
 ; into c_nd1 for the next column; in the near strip JMP nearpost, which comes
 ; back to c_nd or c_xe (np_n).  fr (while it JSRs run2) and s2v (while it JSRs
@@ -2369,10 +2375,18 @@ np_r:
 pB8:    lda BOTS,y                 ; lines the floor + 1 .. BOTS black
         tay
         iny
+        lda ve                     ; (RVE, RVO kept)
+        sta svE
+        lda vo
+        sta svO
         lda #0
         sta ve
         sta vo
         jsr run
+        lda svE
+        sta ve
+        lda svO
+        sta vo
         jmp c_nd
 np_z:     ldy x4                     ; not level: each pixel's bottom-row line
         lda (bota),y

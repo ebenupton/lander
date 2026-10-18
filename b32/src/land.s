@@ -1959,7 +1959,10 @@ c_srx:  ldx ri
 c_split: cmp LO+1,x
         bcs c_dbl
         bvs :+
-fsplit: cpx lastri                 ; (equal: C set, fs_c's)
+fsplit: lda mx                     ; no lines (mx >= flr1): nothing to draw
+        cmp flr1                   ; (the rung's tables left as they are:
+        bcs c_np                   ; lastri says whose)
+        cpx lastri                 ; (equal: C set, fs_c's)
         beq :++
         jmp fs_ns
 :       jmp split

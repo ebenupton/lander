@@ -344,7 +344,12 @@ hrng:   txa
         rts
         .assert NX-2 = 9, error, "hrng: corners 1..9, columns 11, 12 spare"
 
-        .include "neartab.inc"     ; TN, B1N (gen32's)
+        .include "neartab.inc"     ; TN, B1N's sources (gen32's: the loader
+        .segment "P1H"             ; copies them into these holes)
+TN:     .res 31
+        .segment "G1B"
+B1N:    .res 32
+        .code
 
 ; lrow: WH = a clip row's heights, HT + Y + i lerped towards HT + Y + 16 + i
 ; by 16 - czs sixteenths (land.lerp(a, b, 256 - fz)), i = 0..NX-1.

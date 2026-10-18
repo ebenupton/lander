@@ -58,8 +58,8 @@ clre:
 
 ; takeover: the machine taken from the MOS (interrupts off, the stack at $01FF):
 ; the picture black (the palette, MODE 1's ULA); the VIAs, IRQ1V; the program
-; copied to its place from the file (b32.cfg: MAP32 to $1400, then the code,
-; each ascending, the second's destination over the first's source); every hole
+; copied to its place from the file (b32.cfg: the code, then CODE2, each
+; ascending); every hole
 ; the uninitialised data lives in zeroed (zero page below $FC, page 1 below the
 ; stack, page 2 past IRQ1V, $0300-$13FF), the NMI's RTI; the tables the file
 ; leaves out made (gfill, gqr, gpanel) and init's; the memory from the
@@ -89,14 +89,6 @@ takeover:
         lda #0                     ; the user VIA's timers: 1 one-shot, 2
         sta UVIA_ACR               ; counting the clock from $FF00
         sta UVIA_T2L
-        lda #<__MAPD_LOAD__        ; MAP32: four pages
-        ldx #>__MAPD_LOAD__
-        sta ptr
-        stx ptr+1
-        lda #<__MAPD_RUN__
-        ldx #>__MAPD_RUN__
-        ldy #4
-        jsr @copy
         lda #<__CODE_LOAD__        ; the code: whole pages from its start (what
         ldx #>__CODE_LOAD__        ; follows its end is cleared below)
         sta ptr
@@ -141,6 +133,26 @@ takeover:
         bne @z3
         lda #$40                   ; RTI: a stray NMI
         sta $0D00
+        ldx #mtce-mtc-5            ; the tables kept in holes (mtc: source,
+@tc:    lda mtc,x                  ; destination, length)
+        sta ptr
+        lda mtc+1,x
+        sta ptr+1
+        lda mtc+2,x
+        sta z:g0
+        lda mtc+3,x
+        sta z:g0+1
+        ldy mtc+4,x
+@tb:    dey
+        lda (ptr),y
+        sta (g0),y
+        tya
+        bne @tb
+        txa
+        sec
+        sbc #5
+        tax
+        bcs @tc
         jsr gfill
         jsr gqr
         jsr grung
@@ -405,10 +417,12 @@ gtp:    .byte 0
 gq2:    .byte 0
 gpat:   .byte 0
 ; gpanel: PANEL's map rows: 64 lines of 32 pixels, line y, pixel t the tile x =
-; t - MAPX, z = MAPZ - (y >> 1) (mod 32): its colour index's byte (MAPCLS: sea,
-; land, the pad) under the pixel's bits; the readout's row cleared.  Clobbers A,
-; X, Y, ptr, g0, z:gt0, z:gt1.
-        .assert <PANEL = 0 && <MAP32 = 0, error, "gpanel: PANEL, MAP32 page-aligned"
+; 2t - MAPX, z = MAPZ - y (mod 64): the pad black, the sea (its four corners 0)
+; colour 1, land colour 3; the readout's row cleared.  The corners are mapgen.s's
+; (mcl), a map row at a time into MC: row z at slot 64 (y & 1), row z + 1 the
+; line before's (MOK stays 0: the first frame makes the window).  Clobbers A,
+; X, Y, ptr, $8E-$9E.
+        .assert <PANEL = 0, error, "gpanel: PANEL page-aligned"
 gpanel: lda #0
         tax
 @c:     sta PANEL,x
@@ -416,29 +430,27 @@ gpanel: lda #0
         sta PANEL+9*64-$100,x
         inx
         bne @c
-        stx z:gt0                    ; y
-@y:     lda z:gt0                    ; MAP32 + 32 z: page + (z >> 3), (z & 7) << 5
+        lda #<MGP                  ; (mcl: x on)
+        sta mcp+1
+        lda #(MAPZ+1) & 63         ; row MAPZ + 1, line -1's, at slot 64
+        ldx #64
+        jsr @row
+        lda #0
+        sta gpy
+@y:     lda gpy                    ; row z = MAPZ - y at slot 64 (y & 1)
+        and #1
         lsr a
-        sta z:gt1
+        ror a
+        lsr a
+        sta gpb
         lda #MAPZ
         sec
-        sbc z:gt1
-        and #31
-        tax
-        lsr a
-        lsr a
-        lsr a
-        clc
-        adc #>MAP32
-        sta z:g0+1
-        txa
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta z:g0
-        lda z:gt0                    ; PANEL + 64 (y >> 3) + (y & 7)
+        sbc gpy
+        and #63
+        sta gpz
+        ldx gpb
+        jsr @row
+        lda gpy                    ; PANEL + 64 (y >> 3) + (y & 7)
         and #$38
         asl a
         asl a
@@ -447,45 +459,102 @@ gpanel: lda #0
         lda #>PANEL
         adc #0
         sta ptr+1
-        lda z:gt0
+        lda gpy
         and #7
         ora ptr
         sta ptr
         ldx #31                    ; t
-@t:     txa
+@t:     txa                        ; x = 2t - MAPX
+        asl a
         sec
         sbc #MAPX
-        and #31
+        and #63
+        sta gpx
+        cmp #PADN                  ; the pad: black
+        bcs :+
+        lda gpz
+        cmp #PADN
+        lda #$00
+        bcc @k
+:       lda gpx                    ; the four corners: row z at gpb, z + 1 at
+        ora gpb                    ; gpb ^ 64
         tay
-        lda (g0),y
-        lsr a
-        lsr a
-        lsr a
-        lsr a
+        lda MC,y
+        sta gpc
+        tya
+        eor #64
         tay
-        lda MAPCLS,y
-        sta z:gt1
+        lda MC,y
+        ora gpc
+        sta gpc
+        lda gpx
+        clc
+        adc #1
+        and #63
+        ora gpb
+        tay
+        lda MC,y
+        ora gpc
+        sta gpc
+        tya
+        eor #64
+        tay
+        lda MC,y
+        ora gpc                    ; (heights only: mcl's colour nibbles 0)
+        beq :+
+        lda #$FF                   ; land
+        bne @k
+:       lda #$0F                   ; the sea
+@k:     sta gpc
         txa
         and #3
         tay
         lda PIXM,y
-        and z:gt1
-        sta z:gt1
+        and gpc
+        sta gpc
         txa
         and #$1C
         asl a
         tay
         lda (ptr),y
-        ora z:gt1
+        ora gpc
         sta (ptr),y
         dex
         bpl @t
-        inc z:gt0
-        lda z:gt0
+        inc gpy
+        lda gpy
         cmp #64
-        bne @y
-        rts
-MAPCLS: MAPCLS_DATA                ; a colour index's byte (qrtab.inc)
+        beq :+
+        jmp @y
+:       rts
+@row:   sta MGZ                    ; map row A's 64 corners at slot X
+        stx MGS
+        lda #0
+        sta MGX
+        lda #1
+        sta MGD
+        lda #64
+        sta MGN
+        jmp mcl
+gpy:    .byte 0                    ; (gpanel's: y, z, row z's slot, a byte, x)
+gpz:    .byte 0
+gpb:    .byte 0
+gpc:    .byte 0
+gpx:    .byte 0
+
+mtc:    .word MGP_S, MGP
+        .byte 30
+        .word HTL_S, HTL
+        .byte 30
+        .word LUT_S, LUT
+        .byte 32
+        .word TN_S, TN
+        .byte 31
+        .word B1N_S, B1N
+        .byte 32
+mtce:
+        .assert MGQ = MGP+6 && YQT = MGQ+6 && LQT = YQT+7 && SEAI = LQT+7 && HTH = HTL+15, error, "mtc: the holes' tables in order"
+        .assert MGQ_S = MGP_S+6 && YQT_S = MGQ_S+6 && LQT_S = YQT_S+7 && SEAI_S = LQT_S+7 && HTH_S = HTL_S+15, error, "mtc: the sources in order"
 
 crtc_regs:                         ; (register, value) pairs: MODE 1's, but
         .byte 0, 127               ; 64 characters displayed

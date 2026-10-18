@@ -1134,8 +1134,9 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
 @o:     rts
 
 ; marker: the ship's dot on the map (the panel, loaded with the map drawn):
-; the pixel of the tile the ship is over, two lines tall (square), magenta,
-; while GSHV is set -- column t = x + MAPX, top line y = 2 (MAPZ - z), mod 64.
+; the pixel of the tiles the ship is over (two across), two lines tall
+; (square), magenta, while GSHV is set -- column t = ((x + MAPX) & 63) >> 1, top
+; line y = (MAPZ - z) & 62.
 ; The two bytes it covers are kept (mkb) and put back when it moves (mky, mkt:
 ; its place, mky $FF none: ginit's).  Clobbers A, X, Y, g0, gt0..gt3.
 ; Called by gpost.
@@ -1143,16 +1144,16 @@ pdraw:  lda ppx,x                  ; dx, 8.8 tiles
 marker: ldx #$FF                   ; (no dot)
         lda GSHV
         beq @h
-        lda #MAPZ                  ; y = 2 (MAPZ - z)
-        sec
+        lda #MAPZ                  ; y = (MAPZ - z) & 62 (even: the dot does
+        sec                        ; not move by one line)
         sbc sz+2
-        asl a
-        and #63
+        and #62
         tax                        ; X = y
-        lda sx+2                   ; t = x + MAPX
+        lda sx+2                   ; t = ((x + MAPX) & 63) >> 1
         clc
         adc #MAPX
         and #MAPN-1
+        lsr a
         sta gt0
 @h:     cpx mky                    ; unmoved?
         bne @mv

@@ -18,13 +18,15 @@ SCRn*256 + (y >> 3) * 512 + (x >> 2) * 8 + (y & 7)).
 import os
 import sys
 
-os.environ['LAND_MAP'] = '32'
+os.environ['LAND_MAP'] = '64'
+os.environ['LAND_GEN'] = '1'
 ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 sys.path.insert(0, os.path.join(ROOT, 'proto'))
 import landgen as G   # noqa: E402
 import land as L      # noqa: E402
 import gamegen as GG  # noqa: E402
+import mapgen as MG   # noqa: E402
 
 LAND0, LAND1 = 0x5000, 0x6800
 SCR = (LAND0 - 0x1000, LAND1 - 0x1000)      # the buffers' virtual screen starts
@@ -62,31 +64,52 @@ def colours():
     return sorted({L.colour(hm, x, z, 0, 0) for z in range(L.MAP) for x in range(L.MAP)})
 
 
-def map32():
-    """MAP32 + 32 z + x: corner (x, z)'s height (bits 0-3) and tile (x, z)'s colour
-    index (bits 4-7)."""
-    hm = L.heightmap()
+def mapgen():
+    """mapgen.inc: proto/mapgen.py's tables for b32/src/mapgen.s.  MGP, MGQ: the six
+    terms' x and z cycles (mod 64), the four k = 2 terms first; SL: SIN16 + 256's low
+    byte (its high bit set for i <= 32); HTL, HTH: the height thresholds + 2560 (the
+    sum is kept as S + 2560 = the terms' SIN16 + 256s); YQT, LQT: the colour axes'
+    quantiles; LUT: the colour index by (qy, ql), two a byte (qy << 3 | ql >> 1, the
+    odd ql's in the high nibble); RA; SEAI: the sea's colour indices by R1 & 3; PADI
+    the pad's."""
     cols = colours()
-    assert len(cols) <= 16
-    out = bytearray(0x400)
-    for z in range(L.MAP):
-        for x in range(L.MAP):
-            out[z * 32 + x] = int(hm[0][z, x]) | cols.index(L.colour(hm, x, z, 0, 0)) << 4
-    return out
+    assert [k for k, _, _ in MG.TERMS] == [2, 2, 2, 2, 1, 1]
+    lut = MG._lut()
+    lb = []
+    for qy in range(8):
+        for ql in range(0, 8, 2):
+            lb.append(cols.index(lut[qy][ql]) | cols.index(lut[qy][ql + 1]) << 4)
+    ht = [t + 2560 for t in MG.HT16]
+    assert all(0 < t < 65536 for t in ht)
+    code = [('SL', [(v + 256) & 255 for v in MG.SIN16]), ('RA', MG.RA)]
+    # (the rest the loader copies to holes: mapgen.s's .res for each, these as _S)
+    held = [('MGP', [p & 63 for _, p, _ in MG.TERMS]), ('MGQ', [q & 63 for _, _, q in MG.TERMS]),
+            ('YQT', MG.YQ), ('LQT', MG.LQ), ('SEAI', [cols.index(e) for e in L.SEAC]),
+            ('HTL', [t & 255 for t in ht]), ('HTH', [t >> 8 for t in ht]), ('LUT', lb)]
+    out = ['; b32/tools/gen32.py: proto/mapgen.py\'s tables (b32/src/mapgen.s)',
+           f'PADI    = {cols.index(L.PADC)}']
+    for name, v in code:
+        assert all(0 <= b < 256 for b in v), name
+        out.append(f'{name + ":":8s}.byte ' + ', '.join(f'${b:02X}' for b in v))
+    out.append('        .segment "BOOT"            ; (copied to their holes by the loader)')
+    for name, v in held:
+        assert all(0 <= b < 256 for b in v), name
+        out.append(f'{name + "_S:":8s}.byte ' + ', '.join(f'${b:02X}' for b in v))
+    out.append('        .code')
+    return '\n'.join(out) + '\n'
 
 
 def panel():
     """The panel's map: its first 8 rows, MODE 5 (64 bytes a row of 8 characters, 4
-    pixels a byte), 32 x 32 tiles a pixel and two lines each (square): lines 2l and 2l
-    + 1, pixel t the tile x = t - MAPX, z = MAPZ - l (mod 32); sea colour 1, land 3,
+    pixels a byte), the 64 x 64 tiles two across a pixel, one a line (square): line
+    y, pixel t the tile x = 2t - MAPX, z = MAPZ - y (mod 64); sea colour 1, land 3,
     the pad black.  Line y, pixel t's byte: 64 (y >> 3) + 8 (t >>
     2) + (y & 7), its bits $88 >> (t & 3) (as MODE 1's)."""
-    mapx, mapz = 16 - L.PADN // 2, 15 + L.PADN // 2
-    m, cols = map32(), colours()
+    mapx, mapz = GG.MAPX, GG.MAPZ
     img = bytearray(8 * 64)
     for y in range(64):
         for t in range(32):
-            e = cols[m[32 * ((mapz - (y >> 1)) & 31) + ((t - mapx) & 31)] >> 4]
+            e = MG.colour((2 * t - mapx) & 63, (mapz - y) & 63)
             v = 0x00 if e == L.PADC else 0x0F if e in L.SEAC else 0xFF
             mask = 0x88 >> (t & 3)
             o = 64 * (y >> 3) + 8 * (t >> 2) + (y & 7)
@@ -136,9 +159,7 @@ def qrtab():
 
 def gametab(out):
     """gametab.inc: tools/gamegen.py's tables less MAPI (the panel's map is drawn at
-    the start from MAP32), MAPX, MAPZ for the 32-tile map."""
-    GG.main.__globals__['MAPX'] = 16 - L.PADN // 2
-    GG.main.__globals__['MAPZ'] = 15 + L.PADN // 2
+    the start by the loader, from the generator)."""
     sys.argv = [sys.argv[0], out]
     GG.mapimg = lambda: bytes(1024)
     GG.main()
@@ -179,15 +200,17 @@ def neartab():
     out = ['; b32/tools/gen32.py: proj32\'s near clip row (di %d, r %d)' % (di, r),
            f'NDIN    = {di}', f'NRL     = {r & 255}', f'NRH     = {r >> 8}',
            f'NXL     = {nxl}', f'NXR     = {nxr}',
-           'TN:     .byte ' + ', '.join(f'{t}' for t in tn),
-           'B1N:    .word ' + ', '.join(f'${b:04X}' for b in b1)]
+           '        .segment "BOOT"            ; (copied to their holes by the loader)',
+           'TN_S:   .byte ' + ', '.join(f'{t}' for t in tn),
+           'B1N_S:  .word ' + ', '.join(f'${b:04X}' for b in b1),
+           '        .code']
     return '\n'.join(out) + '\n'
 
 
 def main():
     out = sys.argv[1]
     gametab(out)
-    open(os.path.join(out, 'MAP32'), 'wb').write(map32())
+    open(os.path.join(out, 'mapgen.inc'), 'w').write(mapgen())
     open(os.path.join(out, 'PANELMAP'), 'wb').write(panel())   # (the tests' reference)
     open(os.path.join(out, 'GLYPHS'), 'wb').write(glyphs())
     with open(os.path.join(out, 'qrtab.inc'), 'w') as f:

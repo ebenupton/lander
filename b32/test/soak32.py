@@ -53,7 +53,8 @@ import os
 import random
 import sys
 
-os.environ['LAND_MAP'] = '32'
+os.environ['LAND_MAP'] = '64'
+os.environ['LAND_GEN'] = '1'
 import numpy as np
 from py65.devices.mpu6502 import MPU
 from py65.memory import ObservableMemory
@@ -92,14 +93,14 @@ def labels(f='labels.txt'):
 
 def call(mpu, addr):
     """Run the routine at addr as if by JSR (a return to RET pushed) until it
-    returns; its cycles, the JSR's 6 included.  Raises after 3M cycles."""
+    returns; its cycles, the JSR's 6 included.  Raises after 10M cycles (the loader's takeover: 3.4M)."""
     mpu.memory[0x1FF], mpu.memory[0x1FE] = (RET - 1) >> 8, (RET - 1) & 0xFF
     mpu.sp = 0xFD
     mpu.pc = addr
     start = mpu.processorCycles
     while mpu.pc != RET:
         mpu.step()
-        if mpu.processorCycles - start > 3000000:
+        if mpu.processorCycles - start > 10000000:
             raise RuntimeError(f'${addr:04X} still running at ${mpu.pc:04X}')
     return mpu.processorCycles - start + 6
 

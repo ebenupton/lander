@@ -853,6 +853,7 @@ init:   jsr shtab                  ; the ship's walker's tables
 ; Clobbers A, X, Y, tmp, rl, rh, syp, lp, MT0, MT1, $8E-$9E.  Called by the
 ; main loop.
 project:
+        jsr mwin                   ; the map's window to the camera (mapgen.s)
         lda czs                    ; FACT = (czs != 0): ZB the far clip's row, a
         cmp #1                     ; corner row (ZB = ZFCLIP, FACT 0) at czs 0,
         lda #0                     ; else between rows ZFCLIP and ZFCLIP+1 (ZB
@@ -877,52 +878,41 @@ project:
 @zs:    jsr zsh4                   ; (bank 4) a step of one map row: the new
         bcc @hl                    ; row's heights into HTN, SHF set for prow7's
 @j5:    jmp @p5                    ; hsh to shift HT, C set; C clear: all anew
-@cx:    sta pkx                    ; CX: map x cxt - 5 + XSKIP + i, i = 0..NX-1,
-        clc                        ; mod 64 (proto's xs), made from i = NX-1 down:
-        adc #NX-1-(5-XSKIP)        ; (cxt 0..31: no carry) then - 1 a column as
-        ldx #NX-1                  ; + MAPN-1 (A <= 31+31: C stays clear)
-:       and #MAPN-1
-        sta CX,x
-        adc #MAPN-1
-        dex
-        bpl :-
+@cx:    sta pkx
         .assert ZBACK-ZSKIP-ZCLIP+1 = 8 && ZFCLIP-ZCLIP+1 = 7, error, "nr 7 or 8"
-@hl:    lda czt                    ; (bank 4) all 8 rows' heights: pkz = czt +
-        clc                        ; ZB; HPZ + 2j = map row czt + ZB - j's
-        adc ZB                     ; address (MRL, MRH), row 7's first; then
-        sta pkz                    ; HT + 16j + i = its corner CX[i]'s height
-        sbc #6                     ; (C clear: - 7)
+        .assert XSKIP = 1, error, "project: the columns cxt - 4 .. cxt + 6 (mapgen.s's window)"
+@hl:    lda czt                    ; all 8 rows' heights: pkz = czt + ZB; HPZ +
+        clc                        ; 2j = map row czt + ZB - j's first column
+        adc ZB                     ; (cxt - 4) in MC: slot MWO + 16 (ZB - 5 -
+        sta pkz                    ; j) + 1 (mapgen.s), row 7's first; then
+        lda ZB                     ; HT + 16j + i = (HPZ + 2j) + i's height
+        asl a
+        asl a
+        asl a
+        asl a
+        sec                        ; (+ 1)
+        adc MWO
+        sec
+        sbc #16*12
+        ldy #>MC
         ldx #14
-@hp:    and #MAPN-1                ; HPZ + 2j = MAP32 + 32 z: page + (z >> 3),
-        tay                        ; low byte (z & 7) << 5
-        lsr a
-        lsr a
-        lsr a
-        ora #>MAP32
-        sta HPZ+1,x
-        tya
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        sta HPZ,x
-        iny
-        tya
+@hp:    sta HPZ,x
+        sty HPZ+1,x
+        clc
+        adc #16
         dex
         dex
         bpl @hp
-        ldx #NX-1
-@hc:    ldy CX,x
-        lda (HPZ+14),y             ; row 7
+        ldy #NX-1
+@hc:    lda (HPZ+14),y             ; row 7
         and #15
-        sta HT+$70,x
+        sta HT+$70,y
         .repeat 7, i               ; rows 6..0
         lda (HPZ+12-2*i),y
         and #15
-        sta HT+$60-16*i,x
+        sta HT+$60-16*i,y
         .endrepeat
-        dex
+        dey
         bpl @hc
         ldx #$70                   ; each row's range (proj32's hrng)
 :       jsr hrng
@@ -3538,6 +3528,7 @@ tenh:   .byte <TEN4H, <TEN5H, <(TEN4H+1), <(TEN5H+1)
         .assert ROWB = ROWA + $100 && <ROWA = 0, error, "fills: the row's page's bit 0 picks the tables"
 
         .include "proj32.s"
+        .include "mapgen.s"
         .segment "GAME"
         .include "game.s"
         .segment "SHIP"
@@ -3660,10 +3651,9 @@ rg_lbe: .repeat 9, i
         .segment "RUNGT"           ; (made by the loader: grung)
 RPT:    .res 256
 RQF:    .res 256
-; MAP32 + 32 z + x: corner (x, z)'s height (bits 0-3) and tile (x, z)'s colour
-; index (bits 4-7: DCE, DCO), b32/tools/gen32.py's.
-        .segment "MAPD"
-MAP32:  .incbin "MAP32"
+; MC: mapgen.s's window of the map, a ring of 256 slots and the 17-byte mirror.
+        .segment "MCD"
+MC:     .res 256+17
 ; PANEL: the panel's 9 MODE 5 rows (64 bytes each): the map (the loader draws
 ; it from MAP32: gpanel), the readout's row (putg's).
         .segment "PANELD"
@@ -3705,24 +3695,23 @@ zsh4:   tay
         tay
         lda #$FF
 @ld:    sta SHF
-        tya
-        and #MAPN-1                ; HPZ = MAP32 + 32 z: z << 5, the high byte
-        ldx #>MAP32 >> 2           ; shifted into MAP32's page / 4 (>MAP32 & 3 = 0,
-        stx HPZ+1                  ; asserted after pcol5)
+        tya                        ; HPZ = MC + the row's first column's slot:
+        sec                        ; MWO + 16 (z - WZ0) + 1 (mapgen.s)
+        sbc MWZ
         asl a
         asl a
         asl a
         asl a
-        rol HPZ+1
-        asl a
-        rol HPZ+1
+        sec
+        adc MWO
         sta HPZ
-        ldx #NX-1
-:       ldy CX,x
-        lda (HPZ),y
+        lda #>MC
+        sta HPZ+1
+        ldy #NX-1
+:       lda (HPZ),y
         and #15
-        sta HTN,x
-        dex
+        sta HTN,y
+        dey
         bpl :-
         sec
         rts
@@ -3942,7 +3931,7 @@ pcol5:  lda cxt
         stx VHI
         lda #1
 :       bne @o                     ; (always: A = 1)
-        .assert <MAP32 = 0 && (>MAP32 & 3) = 0, error, "MAP32: 1K, aligned (its pages ORed)"
+        .assert <MC = 0, error, "MC page-aligned"
         .assert <CLE = 0 && <CLO + 48 < $100, error, "crow: CLE page-aligned (@se's operand is 16 m); CLO + 48 in its page"
 ; crow: window row X (m, 0..9): map row (WK - m) & 63, entries 0..NX-2 by CX,
 ; into CLE + 16 m and CLO + 16 m (self-modifying: @le/@lo's operands the map
@@ -3962,26 +3951,21 @@ crow:   stx WM
         lda #>CLO
         adc #0
         sta @so+2
-        lda WK
+        lda WK                     ; z = WK - m: its first column's slot, MWO +
+        sec                        ; 16 (z - WZ0) + 1 (mapgen.s)
+        sbc WM
         sec
-        sbc WM                     ; (no borrow: WK >= ZFCLIP > m)
-        and #MAPN-1                ; z = (WK - m) mod MAPN
-        tay
-        lsr a
-        lsr a
-        lsr a
-        ora #>MAP32                ; MAP32 + 32 z: page + (z >> 3),
-        sta @le+2
-        tya
+        sbc MWZ
         asl a
         asl a
         asl a
         asl a
-        asl a                      ; low byte (z & 7) << 5
-        sta @le+1
+        sec
+        adc MWO
+        sta @le+1                  ; (MC's low byte 0)
         ldx #NX-2
-@c:     ldy CX,x
-@le:    lda MAP32,y                ; the tile's colour index: its corner's high
+@c:
+@le:    lda MC,x                   ; the tile's colour index: its corner's high
         lsr a                      ; nibble
         lsr a
         lsr a

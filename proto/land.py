@@ -127,6 +127,10 @@ SINES32 = [(2, 1, -1), (2, 2, 1), (2, -2, 1), (2, 3, 2), (1, 2, 5), (1, 5, 3)]  
                           # x and z cycles a wrap): the 32-tile map's formula
 
 
+GEN = os.environ.get('LAND_GEN') == '1'   # the 32K build's generated 64-tile map
+                          # (proto/mapgen.py): heightmap and colour from it
+
+
 def heightmap():
     """The map: (h, base), each a (MAP, MAP) int array indexed [z, x].
 
@@ -140,6 +144,10 @@ def heightmap():
     frequencies about halved, SINES32, scaled by 0.96: Lander's own at 32 samples
     a wrap is twice as steep a tile, and some 11% of strips would then break
     strip.ok's guarantees (rows overlapping); this one breaks none."""
+    if GEN:
+        import mapgen
+        assert MAP == mapgen.MAP
+        return mapgen.heightmap()
     s = np.zeros((MAP, MAP))
     base = np.zeros((MAP, MAP), dtype=int)
     t = 2 * math.pi / MAP
@@ -357,6 +365,9 @@ def colour(hm, i, j, row, nrows):
     if NU.arc():
         k, s = arc_tile(hm, i, j)
         return NU.lentry(k, 10 - nrows + row + s)
+    if GEN:
+        import mapgen
+        return mapgen.colour(i, j)
     key = id(hm[0])
     if key not in _TGT:
         _TGT.clear()

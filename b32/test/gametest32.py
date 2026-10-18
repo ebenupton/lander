@@ -81,7 +81,7 @@ class Game:
         start = m.processorCycles
         while m.pc != RET:
             m.step()
-            if m.processorCycles - start > 3000000:
+            if m.processorCycles - start > 10000000:
                 raise RuntimeError(f'${addr:04X} still running at ${m.pc:04X}')
         return m.processorCycles - start
 

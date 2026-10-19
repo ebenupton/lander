@@ -1,30 +1,26 @@
 #!/usr/bin/env python3
-"""The 32K build's ship, rasterised at run time: the reference model of b32/src/ship32.s.
+"""The ship, rasterised as ship.s does: the reference it is tested by, and its data.
 
     python3 b32/tools/ship32.py [OUTDIR]   ->  OUTDIR/ship32.inc, OUTDIR/ships32.png
 
-Lander's ship (ref/lander/ship.py: nine vertices, nine faces) as tools/shipgen.py draws
-it -- direction k (32), pitch p (13, PFLAT level), the camera's parallel projection with
-slope TANV, S pixels a tile, faces in face order by tri()'s rule, Lander's shading
-through RAMPS -- but in the 6502's integer arithmetic, so that ship32.s can do the same
-whenever the attitude changes:
+Lander's ship (ref/lander/ship.py: nine vertices, nine faces) at direction k (32) and
+pitch p (13, PFLAT level), in ship.s's integer arithmetic:
 
   - The model in fixed point: each vertex V = round(4 S v) (quarter pixels), each face
     normal N = round(64 n); the angles' sines and cosines round(64 sin), round(64 cos)
-    (pitch a = (p - PFLAT) 10 degrees, direction b = k 11.25 degrees).
-  - A point (vertex or normal) pitched: Px = ca X - sa Y, Py = sa X + ca Y (8 x 8 -> 16
-    bits), Px8 = (Px + 32) >> 6; then turned: Xr = cb Px8 + sb Z, Zr = cb Z - sb Px8.
-  - A vertex's pixel offset from the centre: sx = (Xr + 128) >> 8, sy = (Py - T + 128)
-    >> 8, T = (Zr * TQ) >> 8 (TQ = 100: TANV 0.39).
-  - A face's normal: shown if -(Py * TQ >> 8) - Zr > 0 (face 8, the exhaust, with face
-    7); "negative x" (lit from the left: a brighter shade) if Xr < 0.  Its brightness
-    max(0, (4096 - Py) >> 9 + neg - 5) (Lander's, from the pitched normal's y), its
-    entry RAMPS[hue][min(15, green + brightness)] (shipgen's).
-  - Rasterised as shipgen's tri() (rows ay .. cy - 1, each edge x0 + floor(dx t /
-    dy), pixels xl <= x < xr), face after face, later over earlier.
+    (pitch (p - PFLAT) 10 degrees, direction k 11.25 degrees).
+  - A point pitched: Px = ca X - sa Y, Py = sa X + ca Y, Px8 = (Px + 32) >> 6; turned:
+    Xr = cb Px8 + sb Z, Zr = cb Z - sb Px8.
+  - A vertex's offset from the centre: sx = (Xr + 128) >> 8, sy = (Py - T + 128) >> 8,
+    T = (Zr TQ) >> 8 (TQ = 100: the camera's slope, 0.39).
+  - A face is shown if -(Py TQ >> 8) - Zr > 0 (face 8, the exhaust, with face 7), lit
+    from the left if Xr < 0; its brightness max(0, (4096 - Py) >> 9 + lit - 5) picks its
+    shade in its hue's ramp (Lander's, as tools/shipgen.py's).
+  - The faces rasterised in order, later over earlier: rows ay .. cy-1, each edge x0 +
+    floor(dx t / dy), pixels xl <= x < xr (tools/shipgen.py's tri()).
 
-Each line's faces, left to right, and boundaries are what the walker (ship32.s, from
-src/shipspan.s) draws; ship32.inc holds the model's data and tables for it.
+ship32.inc holds the model, the angles' tables and the shading ramps; with --check, the
+model is checked against tools/shipgen.py's and ships32.png has every orientation drawn.
 """
 import math
 import os
@@ -174,10 +170,7 @@ def inc(path):
       FV0, FV1, FV2 + f  face f's vertices
       FHUE, FGRN + f     its colour's ramp x 16 (0, 16, 32: RAMPE's rows) and green nibble
                          (arc: its Lander kind's row, 0: Lander's colour, by brightness)
-      RAMPE, RAMPO + 16 h + i   ramp h's entry i: its dither's even, odd line bytes
-      KTN, BYN, LIM + w  shipspan.s's: for a boundary at w (0..47) the mask of its
-                         byte's pixels before it, its byte's offset (8 (w >> 2)), the
-                         byte after's first pixel"""
+      RAMPE, RAMPO + 16 h + i   ramp h's entry i: its dither's even, odd line bytes"""
     import landgen as LG
     hues = ['purple', 'grey', 'orange']
     rows = []
@@ -212,7 +205,6 @@ def inc(path):
         db = [LG.dither_bytes(SG.RAMPS[h][i]) for h in hues for i in range(16)]
     emit('RAMPE', [d[0] for d in db])
     emit('RAMPO', [d[1] for d in db])
-    rows.append(f'SHIP_TQ = {TQ}')
     open(path, 'w').write('; b32/tools/ship32.py\n' + '\n'.join(rows) + '\n')
 
 

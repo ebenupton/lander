@@ -23,6 +23,12 @@
 ; depends on when its switch lands.  The switch events measure their own
 ; latency from the timer and pad it out (dejit).  Every write to the CRTC lands
 ; in the right line by the pace of crws (13.5us a register).
+;
+; The timing is counted in cycles from the timer's read, so asserts keep the
+; timed branches within their pages wherever the module lands.  dejit pads
+; whole microseconds: the chain settles at one of two phases half a microsecond
+; apart (whichever the start-up falls into), so the two switch lines may be
+; 63.5us and 64.5us.  The module is the same size in every version.
 
 PROWS   = 8                        ; the top frame's rows
 CR_VSYNC = 28                      ; the field's vertical sync row
@@ -58,45 +64,6 @@ T2DEND  = $FF - (CR_TOTAL-CR_VSYNC+CR_ROWS)*512/256   ; ... after its display
 .endif
         sta CRTC_DAT
 .endmacro
-
-; flip: once FMIN fields have passed since the last flip, shows the screen just
-; drawn and makes the other the one to draw.  vflip is the field of the flip, one
-; less if the land's frame has yet to start (the new screen is then shown
-; from it, so the strips need not wait).  Falls into setback.  Clobbers A, X.
-        .assert <(LAND0/8) = 0 && <(LAND1/8) = 0, error, "the land buffers' R13 is 0"
-        .assert >(LAND1/8) - >(LAND0/8) = 3, error, "flip: R12 is LAND0's + 3 back"
-flip:   lda vcount
-        sec
-        sbc vlast
-        cmp #FMIN
-        bcc flip
-        lda back                   ; R12 = >(LAND0/8) + 3 back
-        asl a
-        adc back
-        adc #>(LAND0/8)
-        sta lfront
-        lda vcount
-        sta vflip
-        sta vlast
-        lda UVIA_T2H
-        cmp #T2ROW0
-        bcc :+
-        dec vflip
-:       lda back
-        eor #1
-        sta back
-; setback: scrb and sethalf's screen bits for back.  Clobbers A.
-setback:
-        lda back
-        beq :+
-        lda #SCR1-SCR0
-:       clc
-        adc #SCR0
-        sta scrb
-        lda back
-        asl a
-        sta sh_b+1
-        rts
 
 ; irq: IRQ1V's target.  The MOS's entry has saved A in $FC; X is saved here and
 ; Y is never used.  Dispatches E0 (the sync) or the next timer event (evn).
@@ -250,8 +217,49 @@ PALT:   P5PAL                      ; the top's palette
         P2PAL                      ; the land's
 PIX5:   .byte $88, $44, $22, $11   ; MODE 5's pixels
         .popseg
+.else
+        .res 26                    ; (MODE 2's palette code: the same layout)
 .endif
         .pushseg
         .segment "TABLES"
 evn:    .byte 0                    ; the next timer event: 0 Ez, 1 Ea, 2 Eb, 3 Ev
         .popseg
+
+; flip: once FMIN fields have passed since the last flip, shows the screen just
+; drawn and makes the other the one to draw.  vflip is the field of the flip, one
+; less if the land's frame has yet to start (the new screen is then shown
+; from it, so the strips need not wait).  Falls into setback.  Clobbers A, X.
+        .assert <(LAND0/8) = 0 && <(LAND1/8) = 0, error, "the land buffers' R13 is 0"
+        .assert >(LAND1/8) - >(LAND0/8) = 3, error, "flip: R12 is LAND0's + 3 back"
+flip:   lda vcount
+        sec
+        sbc vlast
+        cmp #FMIN
+        bcc flip
+        lda back                   ; R12 = >(LAND0/8) + 3 back
+        asl a
+        adc back
+        adc #>(LAND0/8)
+        sta lfront
+        lda vcount
+        sta vflip
+        sta vlast
+        lda UVIA_T2H
+        cmp #T2ROW0
+        bcc :+
+        dec vflip
+:       lda back
+        eor #1
+        sta back
+; setback: scrb and sethalf's screen bits for back.  Clobbers A.
+setback:
+        lda back
+        beq :+
+        lda #SCR1-SCR0
+:       clc
+        adc #SCR0
+        sta scrb
+        lda back
+        asl a
+        sta sh_b+1
+        rts

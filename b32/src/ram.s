@@ -207,8 +207,10 @@ LAHB:   .res YGND+2-YSKY           ; LAH,y: 2 (y >> 3), y YSKY..YGND+1
 TN:     .res 31                    ; the near row's line by height
 ER:     .res 18                    ; the ship's edges
 ED:     .res 18
-STACK:  .res $0200 - STACK         ; the stack: loop, an IRQ (nesting the sync's)
-        .assert STACK = $0200 - 28, error, "the stack: 28 bytes"   ; and an NMI
+; The stack: the main loop's worst case, an IRQ with the sync's nested in it,
+; and an NMI (b32/tools/stackdepth.py checks it).
+STACK:  .res $0200 - STACK
+        .assert STACK = $0200 - 28, error, "the stack: 28 bytes"
 
 ; ---------------------------------------------------------------- page 2
         .segment "PAGE2"

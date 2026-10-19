@@ -13,10 +13,9 @@
 ;   strips.s    the frame's strips; the rows traced
 ;   rungs.s     the strip's rungs: where each pixel changes box
 ;   columns.s   the strip's byte columns; the runs
+;   video.s     the display's interrupt, the screens' flip
 ;   game.s      the flight, the dots, the panel
 ;   ship.s      the ship
-;   video.s     the display's interrupt, the screens' flip (last: its timing
-;               depends on its own bytes alone)
 ;   boot.s      the loader, run once from the land buffers
 ;
 ; Memory, low to high: the data (zero page to the stored tables), a free block,
@@ -98,11 +97,11 @@ loop:   jsr gstep
         .include "strips.s"
         .include "rungs.s"
         .include "columns.s"
-.ifndef COREPAD
-COREPAD = 0
+.ifndef COREPAD                    ; the renderer's page phase, tuned by the
+COREPAD = 4                        ; flight's cycles (b32/tools/padscan.sh)
 .endif
-        .res COREPAD               ; the renderer's page phase (tuned)
+        .res COREPAD
+        .include "video.s"
         .include "game.s"
         .include "ship.s"
-        .include "video.s"
         .include "boot.s"

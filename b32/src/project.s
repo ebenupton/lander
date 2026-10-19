@@ -390,6 +390,107 @@ prow32: lda CAME                   ; EHIT: the rows' EYVs kept from last frame
         .assert ZCLIP*16-DI0 = NDIN, error, "prow32: the near row's di"
         .assert ZFCLIP*16-DI0 = 111 && HORIZON+CAMH+15+EMAX <= 254, error, "prow32: row 0's di 111, y never held"
 
+; ytab: YT,h = the row's line for height h, HLO..HHI: HORIZON + ((CAMH + hg -
+; h) r + 2048) >> 12, plus EYV, held at 254.  The sum is kept times 16 as 24
+; bits at Y0, so the line is its top byte, stepping by 16 r (Q0) a height.  In:
+; rl, rh, HGV, EYV, HLO, HHI.  Clobbers A, X, Y.
+ytab:   lda #0                     ; Q0 = 16 r
+        sta Q0+2
+        lda rh
+        sta Q0+1
+        lda rl
+        .repeat 4
+        asl a
+        rol Q0+1
+        rol Q0+2
+        .endrepeat
+        sta Q0
+        lda rl                     ; Y0 = (6 r << 8) + 32768: the sum at h = hg
+        asl a
+        sta Y0+1
+        lda rh
+        rol a
+        sta Y0+2
+        lda Y0+1
+        asl a
+        tax
+        lda Y0+2
+        rol a
+        tay
+        txa
+        adc Y0+1
+        sta Y0+1
+        tya
+        adc Y0+2
+        sta Y0+2
+        lda Y0+1
+        eor #$80
+        sta Y0+1
+        bmi :+
+        inc Y0+2
+:       lda #0
+        sta Y0
+        ldy HGV                    ; then stepped to h = HLO
+        cpy HLO
+        beq @go
+        bcc @up
+@dn:    lda Y0
+        clc
+        adc Q0
+        sta Y0
+        lda Y0+1
+        adc Q0+1
+        sta Y0+1
+        lda Y0+2
+        adc Q0+2
+        sta Y0+2
+        dey
+        cpy HLO
+        bne @dn
+        beq @go                    ; (always)
+@up:    lda Y0
+        sec
+        sbc Q0
+        sta Y0
+        lda Y0+1
+        sbc Q0+1
+        sta Y0+1
+        lda Y0+2
+        sbc Q0+2
+        sta Y0+2
+        iny
+        cpy HLO
+        bne @up
+@go:    ldy HLO
+@h:     lda Y0+2                   ; the line, held at 254
+        clc
+        adc EYV
+        bcs @c
+        sbc #-HORIZON-1            ; (C clear: + HORIZON)
+@st:    sta YT,y
+        cpy HHI
+        beq @x
+        lda Y0
+        sec
+        sbc Q0
+        sta Y0
+        lda Y0+1
+        sbc Q0+1
+        sta Y0+1
+        lda Y0+2
+        sbc Q0+2
+        sta Y0+2
+        iny
+        bne @h                     ; (always)
+@x:     rts
+@c:     cmp #15
+        bcc @in
+        lda #254
+        bne @st                    ; (always)
+@in:    adc #256+HORIZON           ; (C clear)
+        bcc @st                    ; (always)
+        .assert HORIZON = -16, error, "ytab: HORIZON -16"
+
 ; lrng: HLO, HHI = the range of corners 1..NX-2 over HT rows Y/16 and Y/16+1,
 ; which any lerp between them stays within.  X kept.
 lrng:   lda HT+11,y
@@ -508,107 +609,6 @@ mul4:   sta MT1
         .endif
         .endrepeat
         rts
-
-; ytab: YT,h = the row's line for height h, HLO..HHI: HORIZON + ((CAMH + hg -
-; h) r + 2048) >> 12, plus EYV, held at 254.  The sum is kept times 16 as 24
-; bits at Y0, so the line is its top byte, stepping by 16 r (Q0) a height.  In:
-; rl, rh, HGV, EYV, HLO, HHI.  Clobbers A, X, Y.
-ytab:   lda #0                     ; Q0 = 16 r
-        sta Q0+2
-        lda rh
-        sta Q0+1
-        lda rl
-        .repeat 4
-        asl a
-        rol Q0+1
-        rol Q0+2
-        .endrepeat
-        sta Q0
-        lda rl                     ; Y0 = (6 r << 8) + 32768: the sum at h = hg
-        asl a
-        sta Y0+1
-        lda rh
-        rol a
-        sta Y0+2
-        lda Y0+1
-        asl a
-        tax
-        lda Y0+2
-        rol a
-        tay
-        txa
-        adc Y0+1
-        sta Y0+1
-        tya
-        adc Y0+2
-        sta Y0+2
-        lda Y0+1
-        eor #$80
-        sta Y0+1
-        bmi :+
-        inc Y0+2
-:       lda #0
-        sta Y0
-        ldy HGV                    ; then stepped to h = HLO
-        cpy HLO
-        beq @go
-        bcc @up
-@dn:    lda Y0
-        clc
-        adc Q0
-        sta Y0
-        lda Y0+1
-        adc Q0+1
-        sta Y0+1
-        lda Y0+2
-        adc Q0+2
-        sta Y0+2
-        dey
-        cpy HLO
-        bne @dn
-        beq @go                    ; (always)
-@up:    lda Y0
-        sec
-        sbc Q0
-        sta Y0
-        lda Y0+1
-        sbc Q0+1
-        sta Y0+1
-        lda Y0+2
-        sbc Q0+2
-        sta Y0+2
-        iny
-        cpy HLO
-        bne @up
-@go:    ldy HLO
-@h:     lda Y0+2                   ; the line, held at 254
-        clc
-        adc EYV
-        bcs @c
-        sbc #-HORIZON-1            ; (C clear: + HORIZON)
-@st:    sta YT,y
-        cpy HHI
-        beq @x
-        lda Y0
-        sec
-        sbc Q0
-        sta Y0
-        lda Y0+1
-        sbc Q0+1
-        sta Y0+1
-        lda Y0+2
-        sbc Q0+2
-        sta Y0+2
-        iny
-        bne @h                     ; (always)
-@x:     rts
-@c:     cmp #15
-        bcc @in
-        lda #254
-        bne @st                    ; (always)
-@in:    adc #256+HORIZON           ; (C clear)
-        bcc @st                    ; (always)
-        .assert HORIZON = -16, error, "ytab: HORIZON -16"
 
 ; xrow: PX + X + i, the row's x's.  The ends from Q = 1152 r: 128 + ((Q +
 ; 32768) >> 16) and 128 - ((Q + 32767) >> 16); corners 1..NX-2 from B1, r

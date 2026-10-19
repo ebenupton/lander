@@ -32,9 +32,9 @@ and `tools/`.
 | `strips.s`  | the frame, a strip of land at a time; the rows traced             |
 | `rungs.s`   | each strip's rungs: where each pixel passes from box to box       |
 | `columns.s` | the strip's byte columns; runs of lines through the parity tables |
+| `video.s`   | the display's interrupt (two CRTC frames a field), the flip       |
 | `game.s`    | the flight, the dots, the panel's gauge and map marker            |
 | `ship.s`    | the ship, rasterised from the model when its attitude changes     |
-| `video.s`   | the display's interrupt (two CRTC frames a field), the flip       |
 | `boot.s`    | the loader, run once from the land buffers                        |
 
 The display is a field of two CRTC frames: a MODE 5 panel (FUEL, the gauge and a map

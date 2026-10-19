@@ -5,6 +5,7 @@
 #   e.g.  sh b32/tools/padscan.sh mode1 COREPAD 0 95
 cd "$(dirname "$0")/../.."
 V=$1; P=$2; n=$3
+mkdir -p build32
 case $V in
     cpc) export CPC=1 NULA=0 ARC=0 ;; nula) export NULA=1 CPC=0 ARC=0 ;;
     arc) export ARC=1 CPC=0 NULA=0 ;; *) export CPC=0 NULA=0 ARC=0 ;;

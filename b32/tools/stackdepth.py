@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The worst-case stack, from the linked program.
 
-    python3 b32/tools/stackdepth.py [BUILD]        (default build32)
+    python3 b32/tools/stackdepth.py [BUILD]        (default build32; buildswr)
 
 The image is rebuilt from LANDER as the loader places it, and its code walked from
 `loop` and from `irq`: every path, a JSR adding 2 and its callee's depth, PHA/PHP 1 and
@@ -51,10 +51,10 @@ def labels():
     return lab
 
 
-def segments():
-    """{name: (start, end)} from the map's segment list (run addresses)."""
+def segments(f='map.txt'):
+    """{name: (start, end)} from a map's segment list (run addresses)."""
     seg, on = {}, False
-    for ln in open(os.path.join(B, 'map.txt')):
+    for ln in open(os.path.join(B, f)):
         if ln.startswith('Segment list'):
             on = True
         elif on and ln.startswith('Exports'):
@@ -66,108 +66,165 @@ def segments():
     return seg
 
 
+def image(lab, seg):
+    """(fetch, spaces): fetch(a, bank) the byte at a with `bank` paged in; spaces the
+    code's address ranges, [(lo, hi, bank)], bank None for main RAM."""
+    m = bytearray(65536)
+    spaces = []
+    swr = 'B4CODE' in seg
+    f = open(os.path.join(B, 'LAND' if swr else 'LANDER'), 'rb').read()
+    base = 0x3000 if swr else 0x2000
+    m[base:base + len(f)] = f
+    for s in ('CODE', 'T0', 'T1', 'T2', 'T3', 'T4'):
+        if f'__{s}_LOAD__' not in lab:
+            continue
+        ld, run, n = lab[f'__{s}_LOAD__'], lab[f'__{s}_RUN__'], lab[f'__{s}_SIZE__']
+        m[run:run + n] = f[ld - base:ld - base + n]
+        spaces.append((run, run + n, None))
+    banks = {}
+    if swr:
+        for n in (4, 5, 6, 7):
+            banks[n] = open(os.path.join(B, f'B{n}'), 'rb').read().ljust(0x4000, b'\0')
+        spaces += [(*seg['B4CODE'], 4), (*seg['B5'], 5), (*seg['B7CODE'], 7)]
+        for name, (lo, hi) in segments('shipb_map.txt').items():
+            if name in ('CODE', 'TAIL'):
+                spaces.append((lo, hi, 6))
+
+    def fetch(a, bank):
+        if 0x8000 <= a < 0xC000 and bank in banks:
+            return banks[bank][a - 0x8000]
+        return m[a]
+    return fetch, spaces
+
+
 def main():
     lab, seg = labels(), segments()
-    m = bytearray(65536)
-    f = open(os.path.join(B, 'LANDER'), 'rb').read()
-    m[0x2000:0x2000 + len(f)] = f
-    code = []
-    for s in ('CODE', 'T0', 'T1', 'T2', 'T3', 'T4'):
-        ld, run, n = lab[f'__{s}_LOAD__'], lab[f'__{s}_RUN__'], lab[f'__{s}_SIZE__']
-        m[run:run + n] = f[ld - 0x2000:ld - 0x2000 + n]
-        code.append((run, run + n))
-    incode = lambda a: any(lo <= a < hi for lo, hi in code)
+    fetch, spaces = image(lab, seg)
+    pages = {lab[f'pg{n}']: n for n in (4, 5, 6, 7) if f'pg{n}' in lab}
+
+    def space(a, bank):
+        """the code range holding a with `bank` paged in, or None"""
+        for lo, hi, b in spaces:
+            if lo <= a < hi and (b is None or b == bank):
+                return (lo, hi, b)
+        return None
     rev = {}
     for n, a in sorted(lab.items()):
         if not n.startswith(('@', '__')):
             rev.setdefault(a, n)
 
-    def name(a):
-        if not incode(a):
+    def name(a, bank=None):
+        if not space(a, bank):
             return rev.get(a, f'${a:04X}')
         best = max(x for x in rev if x <= a)
         return rev[best] if a == best else f'{rev[best]}+{a - best}'
 
-    def decode(pc):
-        mn, mode = OPS.get(m[pc], ('???', 'imp'))
+    def decode(pc, bank):
+        mn, mode = OPS.get(fetch(pc, bank), ('???', 'imp'))
         n = MODES[mode]
-        opnd = m[pc + 1] | m[pc + 2] << 8 if n == 3 else m[pc + 1]
+        b1, b2 = fetch(pc + 1, bank), fetch(pc + 2, bank)
+        opnd = b1 | b2 << 8 if n == 3 else b1
         return mn, mode, n, opnd
 
-    patched = set()                 # every byte an absolute store in the code writes
-    for lo, hi in code:
+    patched = set()                 # (address, bank): bytes an absolute store in the code
+    for lo, hi, b in spaces:        # writes (its own space's)
         pc = lo
         while pc < hi:
-            mn, mode, n, opnd = decode(pc)
-            if mn in ('STA', 'STX', 'STY') and mode in ('abs', 'abx', 'aby') and incode(opnd):
-                patched.add(opnd)
+            mn, mode, n, opnd = decode(pc, b)
+            if mn in ('STA', 'STX', 'STY') and mode in ('abs', 'abx', 'aby'):
+                sp = space(opnd, b)
+                if sp:
+                    patched.add((opnd, sp[2]))
             pc += n
 
-    memo, exits, reached, varied = {}, {}, set(), set()
+    memo, exits, reached, varied, errors = {}, {}, set(), set(), []
 
-    def walk(entry, nest=0):
-        """the most bytes pushed below entry's stack pointer on any path from it"""
-        key = (entry, nest)
+    def walk(entry, bank, nest=0):
+        """(the most bytes pushed below entry's stack pointer on any path from it, the
+        bank paged in at its RTS)"""
+        key = (entry, bank, nest)
         if key in memo:
             return memo[key]
-        memo[key] = 0
-        peak, todo, seen = 0, [(entry, 0)], set()
+        memo[key] = (0, bank)
+        peak, out, todo, seen = 0, set(), [(entry, 0, bank)], set()
         while todo:
-            pc, d = todo.pop()
-            if (pc, d) in seen or d > 64:
+            pc, d, bk = todo.pop()
+            if (pc, d, bk) in seen or d > 64:
                 continue
-            seen.add((pc, d))
-            reached.add(pc)
+            seen.add((pc, d, bk))
+            here = space(pc, bk)
+            if not here:
+                errors.append(f'{name(pc)} (${pc:04X}) run with bank {bk} paged: not code there')
+                continue
+            reached.add((pc, here[2]))
             peak = max(peak, d)
-            mn, mode, n, opnd = decode(pc)
+            mn, mode, n, opnd = decode(pc, bk)
             nxt = pc + n
-            if mn in ('JMP', 'JSR') and {pc, pc + 1, pc + 2} & patched:
-                varied.add(pc)
-            if mn in ('JMP', 'JSR') and (mode == 'ind' or not incode(opnd)):
-                exits.setdefault(pc, f'{mn} {name(opnd)}' if mode != 'ind' else 'JMP (ind)')
+            if mn in ('JMP', 'JSR') and {(pc, here[2]), (pc + 1, here[2]), (pc + 2, here[2])} & patched:
+                varied.add((pc, here[2]))
+            if mn in ('JMP', 'JSR') and mode != 'ind' and opnd in pages:
+                nb = pages[opnd]
+                if here[2] is not None and nb != here[2]:
+                    errors.append(f'{name(pc, bk)}: bank {here[2]}\'s code pages in bank {nb}')
+                peak = max(peak, d + 2)
+                if mn == 'JSR':
+                    todo.append((nxt, d, nb))
+                else:
+                    out.add(nb)
+                continue
+            if mn in ('JMP', 'JSR') and (mode == 'ind' or not space(opnd, bk)):
+                exits.setdefault(pc, f'{mn} {name(opnd, bk)}' if mode != 'ind' else 'JMP (ind)')
                 if mn == 'JSR':
                     peak = max(peak, d + 2)
-                    todo.append((nxt, d))
+                    todo.append((nxt, d, bk))
                 continue
             if mn in ('PHA', 'PHP'):
-                todo.append((nxt, d + 1))
+                todo.append((nxt, d + 1, bk))
                 peak = max(peak, d + 1)
             elif mn in ('PLA', 'PLP'):
-                todo.append((nxt, d - 1))
+                todo.append((nxt, d - 1, bk))
             elif mn in ('RTS', 'RTI'):
-                pass
+                out.add(bk)
             elif mn == 'JSR':
-                peak = max(peak, d + 2 + walk(opnd, nest))
-                todo.append((nxt, d))
+                cp, cb = walk(opnd, bk, nest)
+                peak = max(peak, d + 2 + cp)
+                todo.append((nxt, d, cb))
             elif mn == 'JMP':
-                todo.append((opnd, d))
+                todo.append((opnd, d, bk))
             elif mode == 'rel':
-                todo.append((nxt, d))
-                todo.append((nxt + (opnd - 256 if opnd & 128 else opnd), d))
+                todo.append((nxt, d, bk))
+                todo.append((nxt + (opnd - 256 if opnd & 128 else opnd), d, bk))
             elif mn == 'CLI' and nest:
                 peak = max(peak, d + 3 + nest)
-                todo.append((nxt, d))
+                todo.append((nxt, d, bk))
             elif mn in ('BRK', '???'):
-                exits.setdefault(pc, f'{mn} at {name(pc)}')
+                exits.setdefault(pc, f'{mn} at {name(pc, bk)}')
             else:
-                todo.append((nxt, d))
-        memo[key] = peak
-        return peak
+                todo.append((nxt, d, bk))
+        if len(out) > 1:
+            errors.append(f'{name(entry, bank)}: returns with banks {sorted(out)} paged')
+        memo[key] = (peak, min(out) if out else bank)
+        return memo[key]
 
-    loop = walk(lab['loop'])
-    irq0 = walk(lab['irq'])
-    irq1 = walk(lab['irq'], nest=irq0)
+    home = 4 if pages else None
+    loop, _ = walk(lab['loop'], home)
+    irq0, _ = walk(lab['irq'], home)
+    irq1, _ = walk(lab['irq'], home, nest=irq0)
     print(f'loop: {loop} bytes')
     print(f'irq: {irq1} bytes ({irq0} unnested)')
     total = loop + 3 + irq1 + 3
     print(f'total: {total} bytes (loop + an IRQ + an NMI); the stack holds {0x200 - lab["STACK"]}')
-    print('patched jumps, followed as assembled:', ' '.join(name(pc) for pc in sorted(varied)))
+    print('patched jumps, followed as assembled:', ' '.join(name(pc, b) for pc, b in sorted(varied, key=str)))
     print('exits not followed:')
     for pc in sorted(exits):
         print(f'  {name(pc):14s} {exits[pc]}')
-    unreached = sorted(a for a in rev if incode(a) and a not in reached and not rev[a].startswith('LOCAL'))
+    unreached = sorted(a for a in rev if any(space(a, b) for b in (None, 4, 5, 6, 7))
+                       and not any((a, b) in reached for b in (None, 4, 5, 6, 7))
+                       and not rev[a].startswith('LOCAL'))
     print('code labels no root reaches:', ' '.join(rev[a] for a in unreached) or 'none')
-    return total <= 0x200 - lab['STACK']
+    for e in sorted(set(errors)):
+        print('ERROR', e)
+    return total <= 0x200 - lab['STACK'] and not errors
 
 
 if __name__ == '__main__':

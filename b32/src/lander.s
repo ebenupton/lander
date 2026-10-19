@@ -30,6 +30,9 @@
 
         .setcpu "6502"
         .include "tables.inc"
+.ifdef SWR
+        .include "swrtab.inc"
+.endif
 .ifdef MODE2
         .include "pal.inc"
         .assert .defined(CPC) .xor .defined(NULA), error, "MODE2: CPC or NULA"
@@ -77,7 +80,20 @@ OP_DEX  = $CA
 :
 .endmacro
 
+; GSEG s: the game's segment s, or bank 5's in the sideways RAM build.
+.macro GSEG s
+.ifdef SWR
+        .segment "B5"
+.else
+        .segment s
+.endif
+.endmacro
+
+.ifdef SWR
+        .include "ramswr.s"
+.else
         .include "ram.s"
+.endif
 
 ; loop: the main loop, from the loader with the stack empty.  Never returns.
         .code
@@ -92,16 +108,36 @@ loop:   jsr gstep
         jsr flip
         jmp loop
 
+.ifdef SWR
+        .include "projswr.s"
+.else
         .include "project.s"
         .include "mapgen.s"
+.endif
         .include "strips.s"
         .include "rungs.s"
         .include "columns.s"
 .ifndef COREPAD                    ; the renderer's page phase, tuned by the
-COREPAD = 4                        ; flight's cycles (b32/tools/padscan.sh)
+.ifdef SWR                         ; flight's cycles (b32/tools/padscan.sh)
+COREPAD = 30
+.else
+COREPAD = 4
+.endif
 .endif
         .res COREPAD
+.ifdef SWR
+        .include "videoswr.s"
+        .pushseg
+        .segment "B5"
+        .include "game.s"
+        .popseg
+        .pushseg
+        .include "prow7.s"
+        .popseg
+        .include "bootswr.s"
+.else
         .include "video.s"
         .include "game.s"
         .include "ship.s"
         .include "boot.s"
+.endif

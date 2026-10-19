@@ -19,7 +19,9 @@ from py65.devices.mpu6502 import MPU
 from py65.memory import ObservableMemory
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
-B = os.path.join(ROOT, 'build32')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import swr32  # noqa: E402
+B = swr32.B
 RET = 0xFF00                       # where a call returns to
 SVIA_ORA_NH = 0xFE4F               # the keyboard's port
 KEYS = {'L': 0x61, 'R': 0x42, 'F': 0x46, 'B': 0x65, 'T': 0x62, 'H': 0x00, 'P': 0x43}
@@ -51,6 +53,12 @@ class Game:
         mem.subscribe_to_read([SVIA_ORA_NH], ora_r)
         self.mpu = MPU(memory=mem)
         mem._subject[0:0x8000] = random.Random(32).randbytes(0x8000)   # the MOS's leftovers
+        if swr32.SWR:
+            self.banks, self.cur = swr32.attach(mem)
+            swr32.load(mem)
+            self.call(lab['takeover'])
+            mem._subject[0x7000:0x8000] = bytes(0x1000)   # clr's work: the loader gone
+            return
         data = open(os.path.join(B, 'LANDER'), 'rb').read()
         mem._subject[0x2000:0x2000 + len(data)] = data
         self.call(lab['takeover'])

@@ -29,14 +29,30 @@ PADX    = PADN/2                   ; the pad's middle tile
 FUELMX  = 5120                     ; a full tank
 REFUEL  = 40                       ; fuel a step on the pad
 BURN    = 5                        ; fuel a step of thrust
-FBC     = 5                        ; the gauge: byte columns FBC .. FBC+9 of
-FBL     = 2                        ; the top's row 0, lines FBL .. FBL+3
+.ifdef SWR
+FBC     = 10                       ; the gauge: byte columns FBC .. FBC+19 of
+.else                              ; the panel's row 0 (32K: FBC .. FBC+9),
+FBC     = 5                        ; lines FBL .. FBL+3
+.endif
+FBL     = 2
 
 ; ginit: the game's start (the loader's): every dot dead, the sound off, the
 ; ship on the pad, the camera.
-        .segment "BOOT"
+        GSEG "BOOT"
+.ifdef SWR
+g_init: lda #SCR0                  ; both screens' panels; nothing drawn on
+        jsr gscr                   ; them yet
+        lda #SCR1
+        jsr gscr
+        lda #$FF
+        sta mkl
+        sta mkl+1
+        sta fdr
+        sta fdr+1
+.else
 ginit:  lda #$FF                   ; no marker yet
         sta mky
+.endif
         lda #$5A                   ; rand's seed
         sta rnd
         ldx #NPART-1
@@ -58,7 +74,7 @@ ginit:  lda #$FF                   ; no marker yet
         jmp gout
 SINI:   .byte $FF, $DF, $BF, $9F   ; every channel silent
 SININ   = * - SINI
-        .code
+        GSEG "CODE"
 
 ; spawn: the ship on the pad, landed, level, the tank full.  Clobbers A, X.
 spawn:  lda #0                     ; thr .. gvz zeroed
@@ -88,7 +104,12 @@ spawn:  lda #0                     ; thr .. gvz zeroed
         rts
 
 ; gstep: the frame's step; falls into gout.
-gstep:  jsr keys
+.ifdef SWR
+g_step:
+.else
+gstep:
+.endif
+        jsr keys
         jsr snd
         jsr step
 ; gout: the camera from the ship: cxt, cxs (x less half a tile), czt, czs
@@ -153,7 +174,7 @@ gsy:    tay
         sta GSHP
         rts
         .pushseg
-        .segment "TABLES"
+        GSEG "TABLES"
 GSHYT:                             ; the ship's line by the camera's height
         .repeat CAMH-KOFF+1, I
         .byte (((KOFF+I)*RSHIP+2048)>>12)+HORIZON
@@ -194,7 +215,7 @@ units:  lda sy+1
 ; keys: gkb: 1 Z, 2 X, 4 K, 8 M (or the cursor keys), 16 SPACE, 32 SHIFT, read
 ; from the keyboard with its scan off.  Clobbers A, X.
         .pushseg
-        .segment "T0"
+        GSEG "T0"
 keys:   lda #0
         sta gkb
         lda #$7F                   ; port A: bits 0-6 out, 7 in
@@ -216,7 +237,7 @@ keys:   lda #0
         rts
         .popseg
         .pushseg
-        .segment "TABLES"
+        GSEG "TABLES"
 kcode:  .byte $00, $62, $29, $65, $39, $46, $79, $42, $19, $61
 kbit:   .byte 32, 16, 8, 8, 4, 4, 2, 2, 1, 1
         .popseg
@@ -256,7 +277,7 @@ snd:    lda ctim
 :       rts
 
         .pushseg
-        .segment "T3"
+        GSEG "T3"
 ; psg: A to the sound chip (its write enable pulsed for 11us).  X kept;
 ; clobbers A, Y.
 psg:    ldy #$FF
@@ -477,7 +498,7 @@ step:   lda landed
 @up:    jmp parts
 
         .pushseg
-        .segment "T2"
+        GSEG "T2"
 ; landoff: C set if last frame's points are all below the land's lines.  Y
 ; kept; clobbers A, X.
 landoff:
@@ -510,7 +531,7 @@ landoff:
         .popseg
 
         .pushseg
-        .segment "T3"
+        GSEG "T3"
 ; throw: tx, tz = the thrust at pitch gp and direction gk, 127 a unit, from TQ
 ; (a quarter of Lander's: the rest by symmetry).  X kept; clobbers A, Y, gt0,
 ; gt1.
@@ -563,7 +584,7 @@ thc:    and #31
 ; tadd: v (X: its offset from gvx) += 1.25 (A << THRS).  vadd: v += A << Y.
 ; X kept; clobbers A, Y, gt0, gt1.
         .pushseg
-        .segment "T2"
+        GSEG "T2"
         .assert THRS >= 3, error, "tadd: both shifts at least 1"
 tadd:   pha
         ldy #THRS
@@ -592,7 +613,7 @@ vadd:   sta gt0
 ; pmove: position (Y: its offset from sx) += 5 v (X: its velocity's).  X, Y
 ; kept; clobbers A, gt0..gt3.
         .pushseg
-        .segment "T1"
+        GSEG "T1"
 pmove:  lda gvx+1,x
         sta gt1
         bpl :+
@@ -632,7 +653,7 @@ pmove:  lda gvx+1,x
 
 ; speed: C clear if |gvx| + |gvy| + |gvz| < LANDV.  Clobbers A, X, Y, gt2, gt3.
         .pushseg
-        .segment "T0"
+        GSEG "T0"
 speed:  lda #0
         sta gt2
         sta gt3
@@ -665,7 +686,7 @@ speed:  lda #0
 
 ; rand: A = rnd, the next of an 8-bit LFSR.
         .pushseg
-        .segment "T0"
+        GSEG "T0"
 rand:   lda rnd
         asl a
         bcc :+
@@ -738,7 +759,7 @@ emit:   ldx pnext
 ; ejit: -A / 2 + a jitter of -16..15 + v >> 6 (Y: v's offset from gvx).  Out:
 ; A the low byte, Y the high less gt3 and C.  X kept.
         .pushseg
-        .segment "T4"
+        GSEG "T4"
 ejit:   eor #$FF
         clc
         adc #1
@@ -873,7 +894,7 @@ parts:  ldx #NPART-1
         rts
 
         .pushseg
-        .segment "T2"
+        GSEG "T2"
 ; q5: Y:gt0 = 1.25 (Y:A), signed.  X kept; clobbers A, gt1, gt2.
 q5:     sta gt2
         sty gt1
@@ -895,14 +916,27 @@ q5:     sta gt2
 ; gpre: the dots beyond the ship.  gpost: those nearer, the marker and the
 ; gauge.  Each dot's column records are widened over it, so the strips that
 ; next draw this screen take it off.
-gpre:   jsr dset
+.ifdef SWR
+g_pre:
+.else
+gpre:
+.endif
+        jsr dset
         jsr units
         lda #0
         beq dots                   ; (always)
-gpost:  jsr dset
+.ifdef SWR
+g_post:
+.else
+gpost:
+.endif
+        jsr dset
         lda #$80
         jsr dots
         jsr marker
+.ifdef SWR
+        jmp status
+.else
 ; status: the fuel gauge, fuel >> 7 pixels, redrawn when it changes.
 status: lda fuel+1
         sta gt1
@@ -938,13 +972,15 @@ status: lda fuel+1
 @x:     rts
         .assert FBC+10 <= 24, error, "status: the gauge left of the map"
         .pushseg
-        .segment "TABLES"
+        GSEG "TABLES"
 BARB:   .byte $00, $88, $CC, $EE, $FF   ; 0..4 pixels lit
         .popseg
 
+.endif
+
 ; dset: scrg, tsg, bsg: the screen being drawn and its column records.
         .pushseg
-        .segment "T1"
+        GSEG "T1"
 dset:   lda scrb
         sta scrg
         ldx back
@@ -1086,6 +1122,7 @@ pdraw:  lda ppx,x                  ; dx, off unless -8 <= dx < 8
         sta (bsg),y
 @o:     rts
 
+.ifndef SWR
 ; marker: the ship's dot on the map, two lines of one pixel (its two tiles
 ; across), magenta; the bytes under it kept (mkb) and put back when it moves.
         .assert <MAP = 0, error, "marker: MAP page-aligned"
@@ -1170,7 +1207,243 @@ mkad:   txa
         and #7
         tay
         rts
+.endif
+.ifdef SWR
+; status: this screen's fuel gauge, fuel >> 6 pixels over byte columns FBC ..
+; FBC+19 of lines FBL .. FBL+3, redrawn when it differs from what the screen
+; shows (fdr).  Clobbers A, X, Y, g0, gt1.
+status: lda fuel+1
+        sta gt1
+        lda fuel
+        asl a
+        rol gt1
+        asl a
+        rol gt1
+        ldx back
+        lda gt1
+        cmp fdr,x
+        beq @x
+        sta fdr,x
+        lda #FBC*8+FBL
+        sta g0
+        lda scrg
+        sta g0+1
+@b:     lda gt1                    ; the pixels left
+        cmp #4
+        bcc :+
+        lda #4
+:       tay
+        lda BARB,y
+        ldy #3
+:       sta (g0),y
+        dey
+        bpl :-
+        lda gt1
+        sec
+        sbc #4
+        bcs :+
+        lda #0
+:       sta gt1
+        lda g0
+        clc
+        adc #8
+        sta g0
+        cmp #(FBC+20)*8+FBL
+        bcc @b
+@x:     rts
+        .assert FBC >= 8 && FBC+20 <= 48 && (FBC+20)*8+FBL < 256, error, "status: the gauge between FUEL and the map, in row 0's first page"
+
+; gscr: screen A's panel: FUEL (FUELI) at row 0's first eight byte columns,
+; the map (MAPI's 64 lines of 16 bytes) at byte columns 48..63 of character
+; rows 0..7.  Clobbers A, X, Y, g0, g1, gt0.
+gscr:   sta g0+1
+        sta gt0
+        lda #0
+        sta g0
+        ldy #63
+:       lda FUELI,y
+        sta (g0),y
+        dey
+        bpl :-
+        lda #<MAPI
+        sta g1
+        lda #>MAPI
+        sta g1+1
+        ldx #0                     ; X: the map line
+@l:     txa                        ; its first byte: the screen + $200 (line
+        and #7                     ; >> 3) + $180 + (line & 7)
+        ora #$80
+        sta g0
+        txa
+        lsr a
+        lsr a
+        and #$FE
+        sec
+        adc gt0
+        sta g0+1
+        ldy #15
+:       tya                        ; byte Y to column 48 + Y
+        pha
+        lda (g1),y
+        pha
+        tya
+        asl a
+        asl a
+        asl a
+        tay
+        pla
+        sta (g0),y
+        pla
+        tay
+        dey
+        bpl :-
+        lda g1
+        clc
+        adc #16
+        sta g1
+        bcc :+
+        inc g1+1
+:       inx
+        cpx #64
+        bne @l
+        rts
+
+; marker: the ship's dot on this screen's map: 2 x 2 pixels, magenta, on the
+; four tiles whose common corner is nearest the ship (gamegen's layout: tile x
+; at pixel (x + MAPX) & 63, z at line (MAPZ - z) & 63); none while crashed.
+; Each screen remembers its dot (mkl line, $FF none; mkp pixel); a dot that
+; has moved is put back from MAPI first.  Clobbers A, X, Y, g0, g1, gt0..gt5.
+marker: lda #$FF                   ; (no dot)
+        sta gt0
+        lda GSHV
+        beq @h
+        lda sz+1                   ; the top line: MAPZ - z's tile, one less if
+        eor #$FF                   ; its fraction is 1/2 or more
+        asl a
+        lda #MAPZ
+        sbc sz+2
+        and #63
+        sta gt0
+        lda sx+1                   ; the left pixel: x's tile + MAPX - 1, plus
+        asl a                      ; 1 if its fraction is 1/2 or more
+        lda sx+2
+        adc #MAPX-1
+.ifdef MODE2
+        and #62                    ; (both of a MODE 2 pixel's two)
+.else
+        and #63
+.endif
+        sta gt1
+@h:     ldx back
+        lda gt0
+        cmp mkl,x
+        bne :+
+        lda gt1
+        cmp mkp,x
+        beq @r                     ; (unmoved on this screen)
+:       lda mkl,x                  ; the old dot back to the map's pixels
+        bmi :+
+        sta mdl
+        lda mkp,x
+        sta mdp
+        lda #0
+        jsr mdot
+:       ldx back                   ; the new one remembered and drawn
+        lda gt1
+        sta mkp,x
+        sta mdp
+        lda gt0
+        sta mkl,x
+        bmi @r
+        sta mdl
+        lda #$80
+        jmp mdot
+@r:     rts
+; mdot: the four pixels (mdp, mdl), (mdp+1, mdl), (mdp+1, mdl+1), (mdp,
+; mdl+1), wrapping at the map's edges, magenta (A $80) or the map's own (A 0).
+; Clobbers A, Y, g0, g1, gt2..gt5; mdp, mdl kept.
+mdot:   sta mdc
+        jsr mpix
+        inc mdp
+        jsr mpix
+        inc mdl
+        jsr mpix
+        dec mdp
+        jsr mpix
+        dec mdl
+        rts
+; mpix: pixel mdp & 63 of map line mdl & 63 on screen scrg: magenta (mdc bit
+; 7) or MAPI's colour for it.  Clobbers A, Y, g0, g1, gt2..gt5.
+mpix:   lda mdl
+        and #63
+        sta gt2                    ; (the line)
+        and #7
+        sta g0
+        lda mdp
+        and #63
+        sta gt3                    ; (the pixel)
+        lsr a
+        lsr a
+        sta gt4                    ; (its byte in the line, 0..15)
+        asl a                      ; the screen byte: scrg + $200 (line >> 3)
+        asl a                      ; + $180 + 8 byte + (line & 7)
+        asl a
+        ora g0
+        ora #$80
+        sta g0
+        lda gt2
+        lsr a
+        lsr a
+        and #$FE
+        sec
+        adc scrg
+        sta g0+1
+        lda gt3
+        and #3
+        tay
+        lda PIXG,y
+        sta gt3                    ; (the pixel's bits)
+        bit mdc
+        bpl :+
+.ifdef MODE2
+        and #MAGB
+.else
+        and #$F0
+.endif
+        bne @w
+:       lda gt2                    ; MAPI + 16 line + byte, masked
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta g1+1
+        lda gt2
+        asl a
+        asl a
+        asl a
+        asl a
+        ora gt4
+        clc
+        adc #<MAPI
+        sta g1
+        lda g1+1
+        adc #>MAPI
+        sta g1+1
+        ldy #0
+        lda (g1),y
+        and gt3
+@w:     sta gt5                    ; the pixel's bits replaced in the byte
+        lda gt3
+        eor #$FF
+        ldy #0
+        and (g0),y
+        ora gt5
+        sta (g0),y
+        rts
+        .include "panel.inc"
+.endif
+
         .pushseg
-        .segment "TABLES"
+        GSEG "TABLES"
         .include "gametab.inc"
         .popseg

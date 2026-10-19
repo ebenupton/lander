@@ -6,3 +6,4 @@ __pycache__/
 proto/*.png
 jsbeeb-*.json.gz
 build32/
+buildswr/

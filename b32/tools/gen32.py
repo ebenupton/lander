@@ -125,11 +125,13 @@ def neartab_inc():
 def gametab_inc(out):
     """tools/gamegen.py's tables less the map and the thrust tables (TQ instead)."""
     sys.argv = [sys.argv[0], out]
-    GG.mapimg = lambda: bytes(1024)
+    swr = os.environ.get('SWR') == '1'
+    if not swr:
+        GG.mapimg = lambda: bytes(1024)
     GG.main()
     path = os.path.join(out, 'gametab.inc')
     lines = open(path).read().split('\n')
-    for name in ('MAPI:', 'THX:', 'THZ:', 'SHYT:'):
+    for name in ('THX:', 'THZ:', 'SHYT:') if swr else ('MAPI:', 'THX:', 'THZ:', 'SHYT:'):
         i = lines.index(name)
         j = next(k for k in range(i + 1, len(lines)) if not lines[k].startswith('        .byte'))
         lines = lines[:i] + lines[j:]
@@ -166,11 +168,109 @@ def pal_inc():
     return out
 
 
+B4MAP, B4CE, B4CO, B4TR, B4CODE = 0x8000, 0x9000, 0xA000, 0xB000, 0xB600
+B7CODE = 0xB480
+
+
+def rfast_tables():
+    """landgen's TRk, TLk (rungs' fast way) packed into pages from B4TR: {name: (address,
+    bytes)}.  Entry 16 (RFA - a) + D of TRk is pixel k's transition for a rung of a
+    pixels leaning right, D lines deep: ceil(D (2j - 1) / 2a), j = k + 1 (TLk: j = a - k)."""
+    rfa = G.RFA
+    tabs = []
+    for k in range(rfa):
+        for side in 'RL':
+            v = bytearray(16 * (rfa - k))
+            for a in range(k + 1, rfa + 1):
+                j = k + 1 if side == 'R' else a - k
+                for d in range(16):
+                    v[16 * (rfa - a) + d] = -(-d * (2 * j - 1) // (2 * a))
+            tabs.append((f'T{side}{k}', bytes(v)))
+    tabs.sort(key=lambda t: -len(t[1]))
+    pages, out = [], {}
+    for name, v in tabs:                           # first fit, largest first
+        for p in pages:
+            if p[1] + len(v) <= 256:
+                out[name] = (B4TR + 256 * p[0] + p[1], v)
+                p[1] += len(v)
+                break
+        else:
+            out[name] = (B4TR + 256 * len(pages), v)
+            pages.append([len(pages), len(v)])
+    assert B4TR + 256 * len(pages) <= B4CODE, 'bank 4: the rung tables over its code'
+    return out
+
+
+def bank4():
+    """Bank 4's image: the map's heights (64 a row from B4MAP), each tile's colour bytes
+    (CMAPE, CMAPO; the arc build's CMAPE its class, 9 kind + slope) and the rungs' tables;
+    the code follows at B4CODE."""
+    img = bytearray(0x4000)
+    for z in range(64):
+        for x in range(64):
+            o = 64 * z + x
+            img[B4MAP - 0x8000 + o] = MG.height(x, z)
+            if NU.arc():
+                k, s = MG.arc_tile(x, z)
+                img[B4CE - 0x8000 + o] = 9 * k + s
+            else:
+                e, d = G.dither_bytes(MG.colour(x, z))
+                img[B4CE - 0x8000 + o] = e
+                img[B4CO - 0x8000 + o] = d
+    for a, v in rfast_tables().values():
+        img[a - 0x8000:a - 0x8000 + len(v)] = v
+    return img
+
+
+def swrtab_inc():
+    """The sideways RAM build's addresses and constants: banks 4 and 7's tables."""
+    eys = 255 - max(L.HORIZON + (((L.CAMH + L.HMAX) * L.recip((G.DI0 + di) * 16) + L.HSCALE * 128)
+                                 // (L.HSCALE * 256)) for di in range(G.NDI))
+    k = dict(B4MAP=B4MAP, CMAPE=B4CE, CMAPO=B4CO, B4CODE=B4CODE, B7CODE=B7CODE)
+    k.update({n: a for n, (a, _) in rfast_tables().items()})
+    k.update(G.ADDR7)
+    out = ['; b32/tools/gen32.py: the sideways RAM banks\' tables']
+    out += [f'{n:8s}= ${v:04X}' for n, v in k.items()]
+    out += [f'{n:8s}= {v}' for n, v in dict(RFA=G.RFA, NCLP=G.NCLP, LQOFF=G.LQOFF, EYS=eys,
+                                            XL=L.XL, XR=L.XR, HMAX=L.HMAX).items()]
+    return out
+
+
+def panel_inc():
+    """The sideways RAM build's panel: FUELI, FUEL's letters as the bytes of row 0's
+    first eight byte columns (16 a letter: two columns of 8 lines, proto/nula.py's
+    letters, MODE 1's pixels doubled), and BARB, the gauge's byte by pixels lit."""
+    fuel = bytearray(64)
+    for n, c in enumerate('FUEL'):
+        for line, v in enumerate(NU.font_rows(c)):
+            for i in range(4):
+                if not v & (3 << (6 - 2 * i)):
+                    continue
+                if NU.enabled():
+                    fuel[16 * n + 8 * (i >> 1) + line] |= NU.yelb() & NU.pixel(2 * i)
+                else:
+                    fuel[16 * n + 8 * (i >> 1) + line] |= 0xCC >> (2 * (i & 1))
+    if NU.enabled():
+        barb = [0, NU.yelb() & 0xAA, NU.yelb() & 0xAA, NU.yelb(), NU.yelb()]
+        pixg = [0xAA, 0xAA, 0x55, 0x55]
+    else:
+        barb = [0x00, 0x88, 0xCC, 0xEE, 0xFF]
+        pixg = [0x88, 0x44, 0x22, 0x11]
+    return (['; b32/tools/gen32.py: the panel'] + byte_rows('FUELI', list(fuel))
+            + byte_rows('BARB', barb) + byte_rows('PIXG', pixg))
+
+
 def main():
     out = sys.argv[1]
+    swr = os.environ.get('SWR') == '1'
     files = {'tables.inc': tables_inc(), 'colours.inc': colours_inc(),
-             'mapgen.inc': mapgen_inc(), 'neartab.inc': neartab_inc(),
              'gametab.inc': gametab_inc(out)}
+    if swr:
+        files.update({'swrtab.inc': swrtab_inc(), 'panel.inc': panel_inc()})
+        open(os.path.join(out, 'B4'), 'wb').write(bank4())
+        open(os.path.join(out, 'B7'), 'wb').write(G.build7())
+    else:
+        files.update({'mapgen.inc': mapgen_inc(), 'neartab.inc': neartab_inc()})
     if NU.enabled():
         files['pal.inc'] = pal_inc()
     for name, lines in files.items():

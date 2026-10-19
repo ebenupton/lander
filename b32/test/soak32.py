@@ -37,8 +37,10 @@ import land as L      # noqa: E402
 import frame as F     # noqa: E402
 import landgen as G   # noqa: E402
 import points as P    # noqa: E402
+import swr32          # noqa: E402
 
-B = os.path.join(ROOT, 'build32')
+B = swr32.B
+LAND = 0 if swr32.SWR else 0x1000                # the land buffers' first line's offset
 RET = 0xFF00                                     # where a call returns to
 DBG = bool(os.environ.get('SOAKDBG'))
 PIXM = G.NU.PIXM                                 # each pixel's bits
@@ -89,10 +91,16 @@ def machine():
     mpu = MPU(memory=ObservableMemory())
     m = mpu.memory
     m[0:0x8000] = random.Random(32).randbytes(0x8000)   # the MOS's leftovers
-    data = open(os.path.join(B, 'LANDER'), 'rb').read()
-    m[0x2000:0x2000 + len(data)] = data
-    call(mpu, lab['takeover'])
-    m[0x5000:0x8000] = bytes(0x3000)              # clr's work: the loader gone
+    if swr32.SWR:
+        swr32.attach(m)
+        swr32.load(m)
+        call(mpu, lab['takeover'])
+        m[0x7000:0x8000] = bytes(0x1000)          # clr's work: the loader gone
+    else:
+        data = open(os.path.join(B, 'LANDER'), 'rb').read()
+        m[0x2000:0x2000 + len(data)] = data
+        call(mpu, lab['takeover'])
+        m[0x5000:0x8000] = bytes(0x3000)          # clr's work: the loader gone
     m[lab['back']] = 0
     call(mpu, lab['setback'])
     return mpu, lab
@@ -120,7 +128,7 @@ def main():
         cz &= 0xFFFF
         m[lab['cxt']], m[lab['cxs']] = (cx >> 8) & 63, (cx >> 4) & 15
         m[lab['czt']], m[lab['czs']] = (cz >> 8) & 63, (cz >> 4) & 15
-        scr = (lab['LAND0'] if m[lab['back']] == 0 else lab['LAND1']) - 0x1000
+        scr = (lab['LAND0'] if m[lab['back']] == 0 else lab['LAND1']) - LAND
         e = int(rng.integers(0, L.EMAX + 1)) if cam and rng.integers(2) else 0
         if os.environ.get('SOAKE'):
             e = int(os.environ['SOAKE'])

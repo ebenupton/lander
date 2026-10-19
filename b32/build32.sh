@@ -1,30 +1,23 @@
 #!/bin/sh
-# The 32K build (branch b32): build32/lander32.ssd, Lander for a 32K Model B with no
-# sideways RAM.  SHIFT+BREAK: !BOOT (an EXEC file) sets MODE 1 with every colour black
-# and the cursor off, then *RUN L32: the loader (b32/src/boot32.s, $7000), which loads
-# L32M ($1900-$4FFF: the program, its tables, the map), hands the machine over from the
-# MOS and starts.  Needs ca65, ld65, Python 3 with numpy and scipy.
-#   sh b32/build32.sh disc        all four on one disc, build32/lander32-all.ssd: !BOOT
-#                        types in b32/src/menu32.bas, which tests for a VideoNULA (as
-#                        src/menu.bas), offers the versions (NULA's only with one),
-#                        sets MODE 1 black and *RUNs D.LANDER (D: M, C, N, A)
-#   sh b32/build32.sh [VERSION]   mode1 (the default), cpc (MODE 2, the 27 CPC colours as
-#                        dithers: a plain Model B) or nula (MODE 2, the VideoNULA's
-#                        sixteen colours) or arc (MODE 2, Lander's own colours as
-#                        checkerboards of the NULA's sixteen): proto/nula.py.  The land is MODE 2, the top
-#                        (FUEL, the map) still MODE 5, the palette rewritten at each
-#                        switch (irq).  build32/variant says which was built; the tests
-#                        need CPC=1 or NULA=1 in the environment to match.
-#   b32/tools/gen32.py   the renderer's and the game's tables (tables.inc, b32tab.inc,
-#                        gametab.inc, MAP32)
-#   b32/tools/ship32.py  the ship's model data (ship32.inc)
-# The tests (b32/test/: soak32.py, shiptest32.py, gametest32.py) run L32M and L32 in
-# py65.
+# b32/build32.sh: Lander for the 32K BBC Micro Model B.
+#
+#   sh b32/build32.sh [mode1|cpc|nula|arc]   one version: build32/lander32[-VERSION].ssd
+#   sh b32/build32.sh disc                   all four and a chooser: build32/lander32-all.ssd
+#
+# The versions: mode1 (MODE 1's four colours), cpc (MODE 2: the CPC's 27 colours as
+# dithers), nula (MODE 2: the VideoNULA's 16) and arc (MODE 2: Lander's own colours as
+# dithers of the NULA's).  A disc boots with SHIFT+BREAK; the chooser (src/menu32.bas)
+# offers the NULA versions only on a machine with a VideoNULA.
+#
+# The steps: b32/tools/gen32.py and ship32.py write the generated includes; ca65
+# assembles b32/src/lander.s; the code's size (od65) places it to end at the screen;
+# ld65 links LANDER (loaded at $2000, run at its loader, `start`).  Extra assembler
+# options in CAFLAGS (e.g. -D COREPAD=n).  Needs cc65, Python 3 with numpy.
 set -e
 cd "$(dirname "$0")/.."
 B=build32
 mkdir -p $B
-if [ "$1" = disc ]; then                # the four versions on one disc, and the chooser
+if [ "$1" = disc ]; then
     F=
     for v in cpc:C nula:N arc:A mode1:M; do
         sh b32/build32.sh ${v%:*} > /dev/null 2>&1 || { echo "build32.sh: ${v%:*} failed" >&2; exit 1; }
@@ -33,26 +26,28 @@ if [ "$1" = disc ]; then                # the four versions on one disc, and the
         X=$(awk '$3 == ".start" {print $2}' $B/labels.txt | sed 's/^00//')
         F="$F ${v#*:}.LANDER:$B/disc/${v#*:}/LANDER:2000:$X"
     done
-    { printf 'VDU21\rNEW\r'; tr '\n' '\r' < b32/src/menu32.bas; printf 'RUN\r'; } > $B/BOOTM   # typed in, unseen
+    { printf 'VDU21\rNEW\r'; tr '\n' '\r' < b32/src/menu32.bas; printf 'RUN\r'; } > $B/BOOTM
     python3 tools/mkdfs.py build $B/lander32-all.ssd LANDER32 "!BOOT:$B/BOOTM:0000:FFFF" $F
-    echo "$B/lander32-all.ssd: MODE 1 (M), CPC (C), NULA (N) and arc (A), b32/src/menu32.bas's chooser"
+    echo "$B/lander32-all.ssd: MODE 1 (M), CPC (C), NULA (N), arc (A)"
     exit 0
 fi
 V=${1:-mode1}
 case $V in
-    cpc) export NULA=0 CPC=1 ARC=0; CA="-D MODE2 -D CPC"; DISK=lander32-cpc ;;
-    nula) export NULA=1 CPC=0 ARC=0; CA="-D MODE2 -D NULA"; DISK=lander32-nula ;;
-    arc) export NULA=0 CPC=0 ARC=1; CA="-D MODE2 -D NULA -D ARC"; DISK=lander32-arc ;;
     mode1) export NULA=0 CPC=0 ARC=0; CA=; DISK=lander32 ;;
+    cpc)   export NULA=0 CPC=1 ARC=0; CA="-D MODE2 -D CPC"; DISK=lander32-cpc ;;
+    nula)  export NULA=1 CPC=0 ARC=0; CA="-D MODE2 -D NULA"; DISK=lander32-nula ;;
+    arc)   export NULA=0 CPC=0 ARC=1; CA="-D MODE2 -D NULA -D ARC"; DISK=lander32-arc ;;
     *) echo "build32.sh: no version $V (mode1, cpc, nula, arc)" >&2; exit 1 ;;
 esac
-echo $V > $B/variant
 python3 b32/tools/gen32.py $B
 python3 b32/tools/ship32.py $B
-ca65 -g --cpu 6502 $CA ${CODEPAD:+-D CODEPAD=$CODEPAD} -I b32/src -I $B --bin-include-dir $B -o $B/land.o b32/src/land.s -l $B/land.lst
-ld65 -C b32/src/b32.cfg -o $B/x.bin $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/game.dbg
+ca65 -g --cpu 6502 $CA $CAFLAGS -I b32/src -I $B -o $B/lander.o b32/src/lander.s -l $B/lander.lst
+PROG=$(od65 --dump-segsize $B/lander.o | awk '$1 ~ /^(FILLS|CODE):$/ {n += $2} END {print 18688 - n}')
+ld65 -C b32/src/lander.cfg -D __PROG__=$PROG -o $B/x.bin $B/lander.o -m $B/map.txt \
+    -Ln $B/labels.txt --dbgfile $B/lander.dbg
 EXEC=$(awk '$3 == ".start" {print $2}' $B/labels.txt | sed 's/^00//')
-printf '*RUN LANDER\r' > $B/BOOT    # (the test disc's convenience: not the program's)
-python3 tools/mkdfs.py build $B/$DISK.ssd LANDER32 "!BOOT:$B/BOOT:0000:FFFF" \
-    "LANDER:$B/LANDER:2000:$EXEC"
-echo "LANDER $(wc -c < $B/LANDER | tr -d ' ') bytes ($(( ($(wc -c < $B/LANDER) + 255) / 256 )) sectors), exec \$$EXEC; $B/$DISK.ssd"
+printf '*RUN LANDER\r' > $B/BOOT
+python3 tools/mkdfs.py build $B/$DISK.ssd LANDER32 "!BOOT:$B/BOOT:0000:FFFF" "LANDER:$B/LANDER:2000:$EXEC"
+D=$(awk '$3 == ".__DATA_LAST__" {print $2}' $B/labels.txt)
+echo "LANDER: data to \$${D#00}, code from \$$(printf %04X $PROG), $((PROG - 0x$D)) bytes free"
+echo "$B/$DISK.ssd"

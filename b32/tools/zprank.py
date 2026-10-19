@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Rank the 32K build's data for zero page: from build32/profile.json (profile32.py),
-each variable's accesses a frame that zero page would make a cycle cheaper (abs and
-abs,X operands; LDX/STX abs,Y), per byte of it.  Variables are the data labels
-(labels.txt, not code: a code label's bytes are a patched operand) and the fixed-address
-equates in b32/src (NAME = $xxxx); a variable's size runs to the next one (or to the last
-byte touched).  Address-taken variables (#<name, #>name in b32/src) are marked: moving
-one needs its users checked.
+"""The data that zero page would make cheapest, from build32/profile.json (profile32.py):
+each variable's accesses a frame that zero page would save a cycle on (abs and abs,X
+operands; LDX/STX abs,Y), per byte of it, the best N (default 60).  A variable is a
+data label (ram.s's, the tables'), its size running to the next label or the last byte
+touched; one whose address the code takes (#<name, #>name) is marked: moving it needs
+its users checked.
 
-    python3 b32/tools/zprank.py [N]
+    python3 b32/test/profile32.py && python3 b32/tools/zprank.py [N]
 """
 import bisect, collections, glob, json, re, sys
 
@@ -21,10 +20,6 @@ for ln in open('build32/labels.txt'):
     if not n.startswith(('__', '@')):
         names.setdefault(a, n)
 src = ''.join(open(f).read() for f in glob.glob('b32/src/*.s'))
-for m in re.finditer(r'^([A-Za-z_]\w*)\s*=\s*\$([0-9A-Fa-f]{4})\b', src, re.M):
-    a = int(m.group(2), 16)
-    if 0x200 <= a < 0x1400:
-        names.setdefault(a, m.group(1))
 taken = set(re.findall(r'#[<>]\(?([A-Za-z_]\w*)', src))
 keys = sorted(names)
 gain, top, ins = collections.Counter(), {}, collections.defaultdict(set)

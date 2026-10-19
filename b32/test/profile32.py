@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The 32K build's profile in py65: gametest32's game loop over a scripted flight, every
-instruction's cycles, every data byte's reads and writes, the stack's depth.
+"""A profile in py65: gametest32's game over a scripted flight, every instruction's
+cycles and page crossings, every data byte's reads and writes, the stack's depth.
 
     python3 b32/test/profile32.py [SCRIPT] [OUT]     (OUT default build32/profile.json)
 

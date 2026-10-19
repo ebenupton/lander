@@ -1,48 +1,31 @@
-; ============================================================================
-; mapgen.s -- the 64-tile map made on the fly (.included by land.s): an 11 x 8
-; window of it kept in MC, 88 slots used as a ring, column-major, the generator
-; making the column or row the camera brings into it (proto/mapgen.py's map,
-; exactly).
+; mapgen.s: the 64 x 64 map, generated as the camera moves (proto/mapgen.py's,
+; exactly).  The window the land reads, 11 columns by 8 corner rows (x WX0 ..
+; WX0+10, z WZ0 .. WZ0+7, WX0 = cxt - 4, WZ0 = czt + ZB - 7), is a ring of
+; MRING = 88 slots in MC, column-major from slot MWO: corner (x, z) is at MWO +
+; 8 (x - WX0) + (z - WZ0), mod 88, and MCB,i is column i's first slot.  The
+; slots past the ring's end mirror its first MMIR, so a column or a tile's
+; corners read straight on without wrapping.
 ;
-; The ring: corner (x, z) of the window (x WX0 .. WX0+10, z WZ0 .. WZ0+7, map
-; coordinates mod 64) is at slot MWO + 8 (x - WX0) + (z - WZ0), mod MRING (88):
-; a map column's 8 corners are 8 consecutive slots (mod 88) and the corner a
-; column on is 8 slots on.  Every access is LDA/STA MC,X or MC,Y with the whole
-; slot in the index register, each slot brought back under 88 (CMP, SBC).  A
-; slot holds the corner's height (bits 0-3) and its tile's colour index (bits
-; 4-7; tile (x, z) between corners x, x+1 and z, z+1: kept for x < WX0+10, z <
-; WZ0+7).  The window is exactly what the land reads: WX0 = cxt - 4, WZ0 = czt
-; + ZB - 7 (project's columns cxt-4 .. cxt+6 and its 8 corner rows, czt + ZB -
-; 7 .. czt + ZB, whose 7 rows of tiles are the strips'), so a reader's slot for
-; map row WZ0 + r, column cxt - 4 + i is MWO + 8 i + r.
-; ============================================================================
+; A slot holds its corner's height (bits 0-3) and, but for the arc build, the
+; colour index of the tile whose top left it is (bits 4-7).  The arc build
+; keeps the height's terrain kind there instead (the sum's bits 2-3 << 4), with
+; bit 6 set for the pad's tiles: crow works the tile out from its corners.
+;
+; A corner's height counts the thresholds HTL/HTH its terrain sum reaches; the
+; sum is six sine terms of p x + q z (mod 64), the first four doubled.  Moving
+; the window a column or row makes only the new line's corners and tiles.
 
-MGPH    = $8E                      ; mcl's phases (6): p x + q z mod 64 a term
-MGA     = $94                      ; the sum + 2560, low and high
-MGB     = $95
-MGX     = $96                      ; the line's map x, z (mod 64)
-MGZ     = $97
-MGS     = $98                      ; its slot
-MGN     = $99                      ; corners or tiles left
-MGD     = $9A                      ; the slot's step: 8 (x on) or 1 (z on)
-MGT     = $9B                      ; scratch
-MGU     = $9C
-MGW     = $9D
-MGR     = $9E                      ; mtl's random byte
-MWK     = $9F                      ; mwin's row
 MRING   = 88                       ; the ring's slots: 11 columns of 8
 .ifdef ARC
-MMIR    = 15                       ; (arc: crow's corner a column on, a row r up: + 8 + 6)
+MMIR    = 15                       ; the mirror: a tile's corner a column on
 .else
-MMIR    = 9                        ; MC + MRING .. + 96: slots 0..8 again, so a
-.endif                             ; column (8) and a tile's corners (+ 9) read
-                                   ; straight through
+MMIR    = 9                        ; the mirror: a tile's corners
+.endif
 
-; mwin: the window to the camera (cxt, czt + ZB): stepped a column or row at a
-; time while within 8 columns or 7 rows, else made anew, a row at a time (and
-; the first time: MOK 0).  Clobbers A, X, Y, $8E-$9E.  Caller: project (after ZB).
-mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
-        sec                        ; ZB - 7 (MWT, MWT+1)
+; mwin: the window to the camera: stepped while within 7 columns or rows, else
+; made anew (and the first time: MOK 0).  Clobbers A, X, Y, the overlay.
+mwin:   lda cxt                    ; the targets WX0, WZ0
+        sec
         sbc #4
         and #63
         sta MWT
@@ -55,8 +38,8 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
         sta MWT+1
         lda MOK
         beq @full
-        ldy #0                     ; each axis (Y: 0 x, 1 z): a step on or back
-@ax:    lda MWT,y                  ; while within 7, else anew
+        ldy #0                     ; each axis (Y 0: x, 1: z)
+@ax:    lda MWT,y
         sec
         sbc MWX,y
         and #63
@@ -77,7 +60,7 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
 @nx:    iny
         cpy #2
         bne @ax
-        rts                        ; (mstep remade MCB)
+        rts
 @full:  lda MWT                    ; anew: every row's corners, then tiles
         sta MWX
         lda MWT+1
@@ -85,7 +68,7 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
         lda #0
         sta MWO
         sta MWK
-@fc:    lda #0                     ; row k's corners
+@fc:    lda #0
         ldy MWK
         jsr mset
         jsr mxl
@@ -94,10 +77,10 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
         lda MWK
         cmp #8
         bne @fc
-.ifndef ARC                        ; (arc: no tiles: the readers take their corners')
+.ifndef ARC
         lda #0
         sta MWK
-@ft:    lda #0                     ; rows 0..6's tiles (10 each)
+@ft:    lda #0
         ldy MWK
         jsr mset
         jsr mxl
@@ -110,9 +93,7 @@ mwin:   lda cxt                    ; the targets: WX0 = cxt - 4, WZ0 = czt +
 .endif
         lda #1
         sta MOK
-        ; falls into mcolb
-; mcolb: MCB + i = column i's first slot, MWO + 8 i mod MRING (the readers').
-; Clobbers A, X.
+; mcolb: MCB,i = column i's first slot.  Clobbers A, X.
 mcolb:  lda MWO
         ldx #0
 :       sta MCB,x
@@ -128,13 +109,12 @@ mcolb:  lda MWO
         .assert MWZ = MWX+1, error, "mwin: MWZ after MWX"
 
 ; mstep: the window a step, X: 0 a column right, 1 left, 2 a row on, 3 back:
-; WX0 or WZ0 one on or back, MWO with it (SWO), then the new line's corners
-; (from the window's corner SCA across, SCY down; a column, z on, for 0 and 1,
-; a row, x on, for 2 and 3: mdir) and the tiles they complete (STX0, STY0).
+; WX0 or WZ0 and MWO moved, then the new line's corners and the tiles they
+; complete.
 mstep:  stx MWK
         txa
         lsr a
-        tay                        ; (Y: the axis)
+        tay
         lda MWX,y
         clc
         adc SDL,x
@@ -162,32 +142,34 @@ mstep:  stx MWK
         jsr mtl
 .endif
         jmp mcolb
-mdir:   ldx MWK                    ; the line's way: z on (a column) for steps 0,
-        cpx #2                     ; 1, x on (a row) for 2, 3
+mdir:   ldx MWK                    ; a column (z on) for steps 0, 1, a row (x
+        cpx #2                     ; on) for 2, 3
         bcs mxl
         bcc mzl                    ; (always)
-SDL:    .byte 1, 63, 1, 63         ; (the step's: WX0, WZ0 + 1 or - 1)
-SWO:    .byte 8, MRING-8, 1, MRING-1
-SCA:    .byte 10, 0, 0, 0          ; the new corners' line
+        .pushseg
+        .segment "TABLES"
+SDL:    .byte 1, 63, 1, 63         ; by step: WX0 or WZ0's change
+SWO:    .byte 8, MRING-8, 1, MRING-1   ; MWO's
+SCA:    .byte 10, 0, 0, 0          ; the new corners' first, across and down
 SCY:    .byte 0, 0, 7, 0
 .ifndef ARC
-STX0:   .byte 9, 0, 0, 0           ; the tiles' line
+STX0:   .byte 9, 0, 0, 0           ; the new tiles' first
 STY0:   .byte 0, 0, 6, 0
 .endif
-MWT:    .byte 0, 0                 ; (mwin's targets: WX0, WZ0)
-mxl:    lda #8                     ; x on, 11
+MWT:    .byte 0, 0                 ; mwin's targets
+        .popseg
+mxl:    lda #8                     ; a row: 11, x on
         ldy #11
         bne :+                     ; (always)
-mzl:    lda #1                     ; z on, 8
+mzl:    lda #1                     ; a column: 8, z on
         ldy #8
-:       sta MGD                    ; (also mcl's phase steps' index)
+:       sta MGD
         sty MGN
         rts
         .assert MGP = MGQ+7, error, "mcl: MGP = MGQ - 1 + 8"
 
-; mset: MGX, MGZ, MGS for the window's corner A across (0..10), Y down (0..7):
-; x = WX0 + A, z = WZ0 + Y (mod 64), slot MWO + 8 A + Y (mod MRING).  Clobbers
-; A.
+; mset: MGX, MGZ, MGS for the window's corner A across (0..10), Y down (0..7).
+; Clobbers A.
 mset:   sta MGT
         clc
         adc MWX
@@ -204,7 +186,7 @@ mset:   sta MGT
         asl a
         sty MGT
         clc
-        adc MGT                    ; 8 A + Y < MRING
+        adc MGT
         clc
         adc MWO
         cmp #MRING
@@ -213,7 +195,8 @@ mset:   sta MGT
 :       sta MGS
         rts
 
-.macro MADD t                      ; A, X (low, high) + term t's SIN16 + 256
+; MADD t: (X:A) += term t's SIN16 + 256.
+.macro MADD t
         ldy MGPH+t
         cpy #33
         bcs :+
@@ -224,16 +207,13 @@ mset:   sta MGT
         inx
 :
 .endmacro
-; mcl: MGN corners from (MGX, MGZ) at slot MGS, each next MGD slots on and x or
-; z one on (MGD 8 or 1: MGP or MGQ the phases' steps): each height into its
-; slot (colour 0).  The height: PADH on the pad (x, z <= PADN),
-; else the count of HTL/HTH's thresholds the sum + 2560 reaches, the sum the
-; six terms' SIN16 + 256 (MADD's), the four k = 2 terms' doubled.  Clobbers A,
-; X, Y.
-mcl:    lda MGX                    ; the phases, p x + q z (mod 64), by sums of
-        asl a                      ; x, z doubled (gen32 asserts the terms):
-        sta MGA                    ; MGA, MGB, MGT 2x, 4x, 8x; MGU, MGW, MGR
-        asl a                      ; 2z, 4z, 8z (mod 256: only bits 0-5 matter)
+
+; mcl: MGN corners from (MGX, MGZ) at slot MGS, each MGD slots and one x
+; (MGD 8) or z (1) on: each one's height into its slot.  Clobbers A, X, Y.
+mcl:    lda MGX                    ; the phases p x + q z, from 2x, 4x, 8x
+        asl a                      ; (MGA, MGB, MGT) and 2z, 4z, 8z (MGU,
+        sta MGA                    ; MGW, MGR)
+        asl a
         sta MGB
         asl a
         sta MGT
@@ -296,7 +276,7 @@ mcl:    lda MGX                    ; the phases, p x + q z (mod 64), by sums of
         sta MGPH+5
 mcl_c:
 .ifndef ARC
-        lda MGX                    ; the pad?
+        lda MGX                    ; the pad: PADH
         cmp #PADN+1
         bcs :+
         lda MGZ
@@ -306,9 +286,9 @@ mcl_c:
         jmp mcl_s
 :
 .endif
-        ldx #0                     ; the sum: terms 0..3 (k = 2) doubled, then
-        txa                        ; terms 4, 5 (A its low byte, X its high):
-        MADD 0                     ; each SL's byte, 256 more for i <= 32
+        ldx #0                     ; the sum: terms 0..3 doubled, then 4, 5
+        txa
+        MADD 0
         MADD 1
         MADD 2
         MADD 3
@@ -322,8 +302,8 @@ mcl_c:
         MADD 5
         stx MGB
         sta MGA
-        ldy #0                     ; Y: the thresholds reached (T k at HTL + k
-        cmp HTL+7                  ; - 1, k 1..15; A = MGA)
+        ldy #0                     ; the thresholds reached, by binary search
+        cmp HTL+7
         lda MGB
         sbc HTH+7
         bcc :+
@@ -352,38 +332,37 @@ mcl_c:
         iny
 :       tya
 .ifdef ARC
-        sta z:MGT                  ; (arc) the corner's byte: height | kind << 4 (the
-        ldx MGZ                    ; sum's bits 2, 3: Lander's altitude bits) | $40
-        cpx #PADN+1                ; for the pad's tile (x - 1 and z both under
-        bcs @k                     ; PADN: the corner a tile on's); the pad's own
-        lda MGX                    ; corners (x, z <= PADN) at PADH, their kind
-        cmp #PADN+1                ; the sum's still
+        sta MGT                  ; the corner's byte: height | kind << 4 |
+        ldx MGZ                    ; $40 for the pad's tiles (x - 1 and z under
+        cpx #PADN+1                ; PADN); the pad's corners at PADH
+        bcs @k
+        lda MGX
+        cmp #PADN+1
         bcs @k
         lda #PADH
-        sta z:MGT
+        sta MGT
         cpx #PADN
         bcs @k
         lda MGX
         beq @k
         lda #$40
-        ora z:MGT
-        sta z:MGT
-@k:     lda MGA
+        ora MGT
+        sta MGT
+@k:     lda MGA                    ; kind: the sum's bits 2, 3
         and #12
         asl a
         asl a
-        ora z:MGT
+        ora MGT
 .endif
 mcl_s:  ldy MGS
         sta MC,y
-        cpy #MMIR                  ; (slots 0..8: the mirror's too)
+        cpy #MMIR                  ; (and its mirror)
         bcs :+
         sta MC+MRING,y
-:
-        jsr mnext
+:       jsr mnext
         beq mcl_x
-        ldy MGD                    ; the phases on: MGQ - 1 + MGD + t (MGD 8, x
-        .repeat 6, t               ; on: MGP, MGQ + 7; 1, z on: MGQ)
+        ldy MGD                    ; the phases a corner on
+        .repeat 6, t
         lda MGPH+t
         clc
         adc MGQ-1+t,y
@@ -392,9 +371,9 @@ mcl_s:  ldy MGS
         .endrepeat
         jmp mcl_c
 mcl_x:  rts
-; mnext: a line's next: MGN - 1 (Z set: done), else the slot MGD on (mod
-; MRING: mnm1, mnm2's operands, gpanel's 128 while it runs) and x (MGD 8) or z
-; (1) one on (Z clear after).  Clobbers A, X.
+
+; mnext: MGN less one (Z set: done), else the slot MGD on (mod MRING: mnm1,
+; mnm2's operands) and x or z one on.  Clobbers A, X.
 mnext:  dec MGN
         beq mnext_x
         lda MGS
@@ -404,7 +383,7 @@ mnm1:   cmp #MRING
         bcc :+
 mnm2:   sbc #MRING
 :       sta MGS
-        ldx #0                     ; (MGZ = MGX + 1)
+        ldx #0
         lda MGD
         lsr a                      ; (C: MGD 1, z on)
         bcc :+
@@ -418,14 +397,13 @@ mnm2:   sbc #MRING
 mnext_x: rts
         .assert MGZ = MGX + 1, error, "mnext: MGZ after MGX"
 
-; mtl: MGN tiles from (MGX, MGZ) at slot MGS on (as mcl): each one's colour
-; index into its slot's high nibble, from its corners (the
-; slot, + 1 (z + 1), + 8 (x + 1), + 9, each mod MRING) and r = RA[(x + RA[z]) & 63] (R1, R2 its nibbles): the
-; pad PADI (x, z < PADN); the sea (every corner 0) SEAI[R1 & 3]; land LUT's
-; entry for qy, ql, the YQT and LQT quantiles TY = 4 R1 + 60 - the corners' sum
-; and TL = 3 R2 + 7 clamp(6 - slope2, 0, 12) reach (slope2: the left corners'
-; sum less the right's).  Clobbers A, X, Y.
 .ifndef ARC
+; mtl: MGN tiles from (MGX, MGZ) at slot MGS (as mcl): each one's colour index
+; into its slot's high nibble.  The pad PADI; the sea (all four corners 0)
+; SEAI by R1 & 3; land LUT's entry by the quantiles TY and TL reach, TY = 4 R1
+; + 60 - the corners' sum, TL = 3 R2 + 7 clamp(6 - slope, 0, 12), the slope
+; the left corners' sum less the right's; R1, R2 the nibbles of r = RA[(x +
+; RA[z]) & 63].  Clobbers A, X, Y.
 mtl:    ldy MGS
         lda MGX                    ; the pad?
         cmp #PADN
@@ -443,38 +421,10 @@ mtl:    ldy MGS
         tax
         lda RA,x
         sta MGR
-.ifdef ARC
-        lda MC,y                   ; (arc) the corners (x, z), (x + 1, z): MGT, MGW
-        and #15
-        sta MGT
-        lda MC+8,y
-        and #15
-        sta MGW
-        ora MGT
-        bne @l
-        lda #SEAN                  ; the sea (both at SEA)
-        bne mtl_s                  ; (always)
-@l:     lda MGR                    ; X: kind (R1 & 3) << 2, then + the slope in
-        and #3                     ; thirds, held at 2
-        asl a
-        asl a
-        tax
-        lda MGW
-        sec
-        sbc MGT
-        bcc @k
-        cmp #3
-        bcc @k
-        inx
-        cmp #6
-        bcc @k
-        inx
-@k:     txa
-.else
         lda MC,y                   ; the left corners' sum (MGW), the right's
-        and #15                    ; (MGT): the slot, + 1 (z + 1), + 8 (x + 1),
-        sta MGT                    ; + 9, straight on (the mirror, MC + MRING,
-        lda MC+1,y                 ; holds slots 0..8)
+        and #15                    ; (MGT)
+        sta MGT
+        lda MC+1,y
         and #15
         clc
         adc MGT
@@ -494,15 +444,15 @@ mtl:    ldy MGS
         tax
         lda SEAI,x
         jmp mtl_s
-@l:     lda MGR                    ; TY = 4 R1 + 60 - the sum (0..120)
+@l:     lda MGR                    ; TY
         and #15
         asl a
         asl a
-        adc #60                    ; (C clear: 4 R1 <= 60)
+        adc #60
         sec
         sbc MGW
-        sbc MGT                    ; (C stays set: TY >= 0)
-        ldx #0                     ; X: qy, the YQT thresholds reached
+        sbc MGT
+        ldx #0                     ; qy
         cmp YQT+3
         bcc :+
         ldx #4
@@ -516,34 +466,34 @@ mtl:    ldy MGS
 :       txa
         asl a
         asl a
-        sta MGU                    ; qy << 2
+        sta MGU
         lda #6                     ; c = clamp(6 - left + right, 0, 12)
         clc
         adc MGT
         sec
-        sbc MGW                    ; (-24 .. 36)
+        sbc MGW
         bpl :+
         lda #0
 :       cmp #13
         bcc :+
         lda #12
-:       sta MGT                    ; 7 c = 8 c - c
+:       sta MGT                    ; 7 c
         asl a
         asl a
         asl a
         sec
         sbc MGT
         sta MGT
-        lda MGR                    ; TL = 3 R2 + 7 c (0..129)
+        lda MGR                    ; TL
         lsr a
         lsr a
         lsr a
         lsr a
         sta MGW
         asl a
-        adc MGW                    ; (C clear: R2 <= 15)
+        adc MGW
         adc MGT
-        ldx #0                     ; X: ql, the LQT thresholds reached
+        ldx #0                     ; ql
         cmp LQT+3
         bcc :+
         ldx #4
@@ -554,8 +504,8 @@ mtl:    ldy MGS
 :       cmp LQT,x
         bcc :+
         inx
-:       txa                        ; LUT + (qy << 2 | ql >> 1): odd ql's in the
-        lsr a                      ; high nibble (C: ql odd)
+:       txa                        ; LUT: two entries a byte, odd ql high
+        lsr a
         ora MGU
         tax
         lda LUT,x
@@ -565,8 +515,7 @@ mtl:    ldy MGS
         lsr a
         lsr a
 :       and #15
-.endif
-mtl_s:  asl a                      ; A: the colour index, into the high nibble
+mtl_s:  asl a                      ; into the slot's high nibble
         asl a
         asl a
         asl a
@@ -583,28 +532,13 @@ mtl_s:  asl a                      ; A: the colour index, into the high nibble
         beq :+
         jmp mtl
 :       rts
-
 .endif
-MWX:    .byte 0                    ; the window: WX0, WZ0, MWO (its slot), MOK
-MWZ:    .byte 0                    ; (0: none made yet)
+
+        .pushseg
+        .segment "TABLES"
+MWX:    .byte 0                    ; the window: WX0, WZ0, its first slot, and
+MWZ:    .byte 0                    ; MOK 0 until it is made
 MWO:    .byte 0
 MOK:    .byte 0
-
-        .include "mapgen.inc"      ; SL, RA, PADI; the rest's sources (_S, BOOT)
-; the tables the loader copies into holes (takeover's mtc): the phases' steps,
-; the quantiles, the sea's colours; the height thresholds; the colour table.
-        .segment "P2T"
-MGQ:    .res 6
-        .res 1
-MGP:    .res 6
-YQT:    .res 7
-LQT:    .res 7
-SEAI:   .res 4
-        .segment "LDL"
-MCB:    .res 11                    ; (mcolb's: each column's first slot)
-        .segment "ST2"
-HTL:    .res 15
-HTH:    .res 15
-        .segment "ST0"
-LUT:    .res 32
-        .code
+        .include "mapgen.inc"
+        .popseg

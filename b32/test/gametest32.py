@@ -1,49 +1,32 @@
 #!/usr/bin/env python3
-"""The 32K build's game loop in py65 (build32/, b32/build32.sh), test/gametest.py's
-harness for the flat machine: LAND at $1900, DEV at $8000, no banks.
+"""The game in py65: the loader's start-up, then the main loop's routines frame by frame.
 
     python3 b32/test/gametest32.py [SCRIPT]
 
-SCRIPT as test/gametest.py's: comma-separated N:KEYS parts, N frames with KEYS held
-(L left, R right, F nose down, B nose up, T thrust, H shift, P F's key).  Each line:
-the frame, the keys, the frame's cycles (gstep, project, strips, gpre, ship, gpost,
-flip: everything the main loop runs), then the ship's state.  vcount moves on 4 syncs a frame (FMIN), or with
-GT_VS=real as many as its cycles would take; the game takes one step a frame either
-way, so the state is the same.  Importable: Game().frame(keys, vs) and state().
+SCRIPT: comma-separated N:KEYS parts, N frames with KEYS held (L left, R right, F nose
+down, B nose up, T thrust, H SHIFT, P F's key); default '10:,20:T,30:'.  Prints a line a
+frame: its number, the keys, its cycles (gstep through flip) and the ship's state.  Each
+frame moves vcount on FMIN fields (GT_VS=real: as many as the last frame's cycles would
+take); the game steps once a frame either way, so the state does not depend on it.
+
+Importable: Game() (the machine after start-up), .frame(keys), .state(), .call(addr).
 """
 import os
 import random
-import re
 import sys
 
 from py65.devices.mpu6502 import MPU
 from py65.memory import ObservableMemory
 
-ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 B = os.path.join(ROOT, 'build32')
-RET = 0xFF00
-SVIA_ORA_NH = 0xFE4F
-
-
-def equ(name):
-    """A fixed-address equate's value (NAME = $xxxx in b32/src), or a label's."""
-    for f in os.listdir(os.path.join(ROOT, 'b32', 'src')):
-        if f.endswith('.s'):
-            m = re.search(r'^' + name + r'\s*=\s*\$([0-9A-Fa-f]+)\b', open(os.path.join(ROOT, 'b32', 'src', f)).read(), re.M)
-            if m:
-                return int(m.group(1), 16)
-    for ln in open(os.path.join(ROOT, 'build32', 'labels.txt')):     # (or a label)
-        _, a, n = ln.split()
-        if n.lstrip('.') == name:
-            return int(a, 16)
-    raise KeyError(name)
-
-
-CAME, HGV, GSHY, GSHV = equ('CAME'), equ('HGV'), equ('GSHY'), equ('GSHV')
+RET = 0xFF00                       # where a call returns to
+SVIA_ORA_NH = 0xFE4F               # the keyboard's port
 KEYS = {'L': 0x61, 'R': 0x42, 'F': 0x46, 'B': 0x65, 'T': 0x62, 'H': 0x00, 'P': 0x43}
 
 
 def labels():
+    """The link's labels: {name: address}."""
     out = {}
     for ln in open(os.path.join(B, 'labels.txt')):
         _, a, name = ln.split()
@@ -53,7 +36,7 @@ def labels():
 
 class Game:
     def __init__(self):
-        self.lab = labels()
+        self.lab = lab = labels()
         self.mem = mem = ObservableMemory()
         self.held = set()
         self.sel = 0
@@ -68,16 +51,16 @@ class Game:
         mem.subscribe_to_read([SVIA_ORA_NH], ora_r)
         self.mpu = MPU(memory=mem)
         mem._subject[0:0x8000] = random.Random(32).randbytes(0x8000)   # the MOS's leftovers
-        for addr, name in ((0x2000, 'LANDER'),):
-            data = open(os.path.join(B, name), 'rb').read()
-            mem._subject[addr:addr + len(data)] = data
-        self.call(self.lab['takeover'])                # (the loader's start-up)
-        self.mpu.memory[self.lab['back']] = 0
-        self.call(self.lab['setback'])
-        self.call(self.lab['ginit'])
-        mem._subject[0x5000:0x8000] = bytes(0x3000)   # (clr's: the loader's pages)
+        data = open(os.path.join(B, 'LANDER'), 'rb').read()
+        mem._subject[0x2000:0x2000 + len(data)] = data
+        self.call(lab['takeover'])
+        self.mpu.memory[lab['back']] = 0
+        self.call(lab['setback'])
+        self.call(lab['ginit'])
+        mem._subject[0x5000:0x8000] = bytes(0x3000)   # clr's work: the loader gone
 
     def call(self, addr):
+        """Run the routine at addr until it returns; its cycles."""
         m = self.mpu
         m.memory[0x1FF], m.memory[0x1FE] = (RET - 1) >> 8, (RET - 1) & 0xFF
         m.sp = 0xFD
@@ -94,21 +77,17 @@ class Game:
         return [self.mpu.memory[a + i] for i in range(n)]
 
     def frame(self, keys, vs=None):
+        """One frame with keys held: the main loop's routines in turn; its cycles."""
         self.held = {KEYS[k] for k in keys}
         m = self.mpu.memory
-        c = 0
-        if vs is None and os.environ.get('GT_VS') == 'real':   # the syncs vcount moves
-            vs = max(4, -(-getattr(self, 'last', 0) // 40000))   # on (no interrupts
-        elif vs is None:                                         # here): FMIN, or with
-            vs = 4                      # GT_VS=real what the last frame's cycles would
-                                        # take; only flip and strips' wait
-                                        # read vcount: one step a frame whatever it is
+        if vs is None:
+            vs = max(4, -(-getattr(self, 'last', 0) // 40000)) if os.environ.get('GT_VS') == 'real' else 4
         m[self.lab['vcount']] = (m[self.lab['vcount']] + vs) & 255
-        for r in ('gstep', 'project', 'strips', 'gpre', 'ship', 'gpost'):
-            if r == 'ship' and not m[GSHV]:
+        c = 0
+        for r in ('gstep', 'project', 'strips', 'gpre', 'ship', 'gpost', 'flip'):
+            if r == 'ship' and not m[self.lab['GSHV']]:
                 continue
             c += self.call(self.lab[r])
-        c += self.call(self.lab['flip'])  # (with setback: the frame's own work)
         self.last = c
         return c
 
@@ -123,8 +102,9 @@ class Game:
         r = self.rd
         return (f"x {s24(r('sx', 3)):7.3f} z {s24(r('sz', 3)):7.3f} y {s24(r('sy', 3)) * 16:6.2f}u "
                 f"v {s16(r('gvx', 2)):6d} {s16(r('gvy', 2)):6d} {s16(r('gvz', 2)):6d} "
-                f"k {r('gk')[0]:2d} p {r('gp')[0]:2d} fuel {r('fuel')[0] | r('fuel', 2)[1] << 8:5d} landed {r('landed')[0]} ctim {r('ctim')[0]:2d} "
-                f"hg {self.mpu.memory[HGV]} came {self.mpu.memory[CAME]} shy {self.mpu.memory[GSHY]}")
+                f"k {r('gk')[0]:2d} p {r('gp')[0]:2d} fuel {r('fuel')[0] | r('fuel', 2)[1] << 8:5d} "
+                f"landed {r('landed')[0]} ctim {r('ctim')[0]:2d} "
+                f"hg {r('HGV')[0]} came {r('CAME')[0]} shy {r('GSHY')[0]}")
 
 
 def main():

@@ -1,9 +1,9 @@
-// b32/tools/eprobe.mjs DISC [FIELDS] [KEYS]: irq's events timed in jsbeeb, in us (to the 2MHz
-// tick) from the vertical sync's start, field by field: timer 1 underflows (U), each
-// handler's timer 1 count read (R<evn>=count), the ULA's control writes (C<value>) and
-// the CRTC's (R<reg>=<value>); then, per kind, the delay from its underflow to each
-// write (the handlers' fixed delays), and the hsync intervals that are not 64us.
-const J='/Users/ebenupton/.npm/_npx/e76f2a7d329553db/node_modules/jsbeeb/src/';
+// b32/tools/eprobe.mjs DISC [FIELDS] [KEYS]: irq's events, in jsbeeb, in us from the
+// vertical sync: timer 1's underflows (U), each handler's timer read (R<evn>=count), the
+// ULA's control writes (C<value>) and the CRTC's (R<reg>=<value>); then each kind's delay
+// from its underflow to each write, and the hsync intervals that are not 64us.  For
+// placing irq's writes.  JSBEEB: jsbeeb's src directory.
+const J = process.env.JSBEEB || '/Users/ebenupton/.npm/_npx/e76f2a7d329553db/node_modules/jsbeeb/src/';
 const { MachineSession } = await import(J+'machine-session.js');
 const fs = await import('fs');
 const s = new MachineSession('B-DFS1.2');

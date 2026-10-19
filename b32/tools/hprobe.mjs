@@ -1,9 +1,9 @@
-// b32/tools/hprobe.mjs DISC [FIELDS] [KEYS]: boots DISC headless in the MCP server's jsbeeb and
-// times every horizontal sync's start to the 2MHz clock (0.5us), field by field from the
-// vertical sync; prints, for each line whose sync-to-sync interval is not 64us in some field,
-// the intervals seen (us) and how often, and the sync pulse widths seen.  KEYS: browser key
-// codes held (16 SHIFT: thrust, 90 Z: turn).
-const J='/Users/ebenupton/.npm/_npx/e76f2a7d329553db/node_modules/jsbeeb/src/';
+// b32/tools/hprobe.mjs DISC [FIELDS] [KEYS]: the hsync spacing, in jsbeeb.  Boots DISC
+// headless, runs LANDER with KEYS held (browser key codes: 16 SHIFT thrusts, 90 Z turns)
+// and times every horizontal sync's start to the 2MHz clock, field by field from the
+// vertical sync; prints the syncs a field and, for each line whose sync-to-sync interval
+// is ever not 64us, the intervals and pulse widths seen.  JSBEEB: jsbeeb's src directory.
+const J = process.env.JSBEEB || '/Users/ebenupton/.npm/_npx/e76f2a7d329553db/node_modules/jsbeeb/src/';
 const { MachineSession } = await import(J+'machine-session.js');
 const s = new MachineSession('B-DFS1.2');
 await s.initialise();

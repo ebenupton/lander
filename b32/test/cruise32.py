@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Fast level flight's cost by routine: the camera moved DX, DZ (sixteenths of a
-tile) a frame at a low raise, project and strips each frame (soak32's machine), every
-instruction's cycles by routine.  python3 b32/test/cruise32.py [frames] [dx] [dz] [came]"""
+"""Fast level flight's cost by routine: the camera moved DX, DZ sixteenths of a tile a
+frame at the raise CAME, project, strips and flip each frame (soak32's machine), every
+instruction's cycles summed by routine (the first frame not counted).
+
+    python3 b32/test/cruise32.py [FRAMES] [DX] [DZ] [CAME]      (default 60 7 9 20)"""
 import bisect, collections, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import soak32 as S
@@ -18,7 +20,7 @@ tot = 0
 for f in range(n):
     m[lab['cxt']], m[lab['cxs']] = (cx >> 4) & 63, cx & 15
     m[lab['czt']], m[lab['czs']] = (cz >> 4) & 63, cz & 15
-    m[S.CAME] = came
+    m[lab['CAME']] = came
     m[lab['vcount']] = (m[lab['vflip']] + 4) & 255
     for r in ('project', 'strips', 'flip'):
         m[0x1FF], m[0x1FE] = (S.RET - 1) >> 8, (S.RET - 1) & 255

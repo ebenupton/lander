@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The 32K build's ship (b32/src/ship32.s) in py65 against b32/tools/ship32.py's model:
-every direction and pitch (or a sample), drawn over random bytes in a land buffer at a
-random centre, every byte checked.
+"""The ship in py65 against b32/tools/ship32.py's model: every direction and pitch (or
+a sample), drawn over random bytes in a land buffer at a random centre, every byte
+checked.
 
     python3 b32/test/shiptest32.py [STEP] [SEED]
 
@@ -18,20 +18,17 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
-import soak32 as S         # noqa: E402  (its machine; LAND_MAP=32 set)
+import soak32 as S         # noqa: E402  (its machine)
 import ship32 as M         # noqa: E402
-
-import gametest32 as GT  # noqa: E402
-GSHK, GSHP, GSHX, GSHY = (GT.equ(n) for n in ('GSHK', 'GSHP', 'GSHX', 'GSHY'))
 
 
 def main():
     step = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     rng = np.random.default_rng(int(sys.argv[2]) if len(sys.argv) > 2 else 1)
-    S.K = S.consts()
     mpu, lab = S.machine()
+    GSHK, GSHP, GSHX, GSHY = (lab[n] for n in ('GSHK', 'GSHP', 'GSHX', 'GSHY'))
     m = mpu.memory
-    scr = 256 * S.K['SCR0']
+    scr = lab['LAND0'] - 0x1000
     fails = 0
     cyc = {}
     n = 0

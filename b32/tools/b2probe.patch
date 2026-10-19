@@ -1,12 +1,13 @@
-# b32/tools/b2probe.patch: b2's headless probe (github.com/tom-seddon/b2, e1c9b84), a
-# test in its test_beeb: env B2PROBE_DISC (an .ssd: *RUN LANDER), B2PROBE_FIELDS,
-# B2PROBE_KEYS (S shift, Z), B2PROBE_PNG (b2's TV picture), B2PROBE_LOGW (CRTC, ULA,
-# timer writes and reads by time from the vsync).  Prints each field's length and the
-# lines whose hsync-to-hsync interval is not 64us.  To build:
-#   git clone --recursive https://github.com/tom-seddon/b2 && cd b2 && git apply
-#   .../b2probe.patch && mkdir -p build/r && cd build/r && cmake -G Ninja
-#   -DCMAKE_BUILD_TYPE=RelWithDebInfo ../.. && ninja test_beeb
-#   B2PROBE_DISC=$PWD/build32/lander32.ssd .../test_beeb -t b2probe
+# b32/tools/b2probe.patch: a headless probe for b2 (github.com/tom-seddon/b2, e1c9b84),
+# whose TV is stricter about sync timing than most emulators; a test in its test_beeb.
+# It boots B2PROBE_DISC (*RUN LANDER), runs B2PROBE_FIELDS fields with B2PROBE_KEYS held
+# (S SHIFT, Z), and prints each field's length and the lines whose hsync-to-hsync
+# interval is not 64us; B2PROBE_PNG saves the TV's picture, B2PROBE_LOGW logs the CRTC,
+# ULA and timer accesses by time from the vertical sync.  To build and run:
+#   git clone --recursive https://github.com/tom-seddon/b2 && cd b2
+#   git apply .../b2probe.patch && mkdir -p build/r && cd build/r
+#   cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo ../.. && ninja test_beeb
+#   B2PROBE_DISC=$PWD/build32/lander32.ssd B2PROBE_KEYS=SZ .../test_beeb -t b2probe
 diff --git a/src/beeb/tests/test_beeb.cpp b/src/beeb/tests/test_beeb.cpp
 index 68f8624..c098b4f 100644
 --- a/src/beeb/tests/test_beeb.cpp

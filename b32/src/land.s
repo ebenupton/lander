@@ -519,29 +519,55 @@ loop:   jsr gstep
 ; it runs, the next's start address too.  The map moves right at top row 0's
 ; last line, 88 characters long (its sync at 45 as ever, the next 64us later at
 ; the new 21), so the syncs keep their 64us and no line is lost.  The modes
-; change in the sync (E0) and in the land's first line (black: the sky above
-; YSKY), the line the change lands in the only one of another length.  Four
-; interrupts (irq), each write placed by jsbeeb's own CRTC counters
-; (tools/crtcprobe.mjs):
-;   E0, the sync (the system VIA's CA1): vcount, timer 2 restarted (the time
-;     since the sync), the top frame's R1 (32), R6 and start, MODE 5; timer 1
-;     free running for Ea, then Eb (its latch reloaded: no drift between them);
-;   Ea, EVA later, top row 0's last line: R0 87, the top frame's R4, the
-;     land's R7 and start; past the line's sync R1 8, R2 21; next line R0 63;
-;   Eb, EVB after E0, the land's first line: MODE 1, the land's R1 and R6;
-;     timer 1 one-shot for E2;
-;   E2, EV2US on, the land's row 0: R4 30.
+; change in the land's line EZL after the sync (Ez) and in its first line
+; (Eb), each such that every hsync stays 64us after the last (below).  Five
+; interrupts (irq), placed by b32/tools/eprobe.mjs (jsbeeb) and b2's TV:
+;   E0, the sync (the system VIA's CA1), a fixed time after it (Ev's NOPs):
+;     timer 1 restarted (Ez at TZ, free running), vcount, timer 2 restarted
+;     (the time since the sync);
+;   Ez, line EZL: MODE 5 (R0 63 + EZS first, the clock at EZS us), the top
+;     frame's R3, R2, R0, R1 (32), R6 and start (CTZ);
+;   Ea, top row 0's last line: R0 87, the top frame's R4, the land's R7 and
+;     start; past the line's sync R1 8, R2 21; next line R0 63 (CTA);
+;   Eb, the land's first line: R0 79 - EBS, R2 90, MODE 1 (the clock at EBS
+;     us), then R0 127, R3, the land's R1, R6, R4 (CTB0, CTB);
+;   Ev, just before the next sync: E0 waited for (NOPs, interrupts on).
 PROWS   = 8                        ; the top frame's rows (all shown)
-E0WAIT  = 17                       ; E0's wait to the next line (dex loops)
-EAW     = 2                        ; Ea's waits (dex loops), placed by jsbeeb's
-EAW2    = 14                       ; CRTC counters (tools/crtcprobe.mjs)
-EVA     = 11*512 + 3*64 + 32       ; the sync to Ea: top row 0's line 7 (the
-                                   ; frame starts 11 rows after the sync)
-EVB     = 11*512 + 61*64 - 16      ; to Eb: the land's first line (its first
-                                   ; write at C0 ~6: jitter must not take it into
-                                   ; the line before, which would then run on to
-                                   ; the new end with two syncs)
-EV2US   = 1*512 + 300              ; E1 to E2: the land's row 0 (+ ~420us)
+; The field, in us from the vertical sync's start: 312 lines of exactly 64us, every
+; hsync 64us after the last (a display, or b2's TV, places each line by its hsync:
+; one early or late moves or bends what follows).  Lines 0..EZL: the land's (2MHz,
+; R0 127, the sync at 90: 45us into the line); line EZL is the switch to MODE 5:
+; the clock goes to 1MHz at EZS us (after the sync), its R0 63 + EZS so that it
+; ends at 64us (EZS us at 2 characters a us, the rest at one); lines EZL+1 ..: the
+; top's (1MHz, R0 63, the sync at 45).  Top row 0's last line (Ea) is 88 characters
+; long, its sync at 45 as ever, the next at 21 (rows 1..7, their lines 24us on);
+; the land's first line (Eb) has its sync at 21, the clock to 2MHz at EBS us, and
+; R0 79 - EBS so that it ends at 40us; the land's lines after it are 2MHz again,
+; the sync 45us in.  The switches must happen at their exact us: they are timer
+; events (Ez, Eb) whose interrupt's latency is measured from the timer and padded
+; out (dejit).  Timer 1 runs free from one event to the next, its latch set an
+; event ahead (IZA, IAB, IBV: the intervals).  E0, the sync's interrupt, restarts
+; it every field (RSL: Ez at TZ), and so must come at a fixed time after the sync:
+; Ev, the chain's last event, comes just before and waits for it in NOPs with
+; interrupts on (EVN).  (A switch line's length depends on its switch's us: one
+; late by e makes its field e longer or shorter, so a free-running chain would
+; drift; restarted from the sync it cannot.)  The CRTC's 2MHz phase against the
+; VIAs' 1MHz settles at one of two (the builds differ): every line 64us, or the
+; switch lines 63.5 and 64.5 (b32/tools/hprobe.mjs, eprobe.mjs; b2's TV).
+EZL     = 4                        ; Ez's line
+EZS     = 54                       ; its switch, us into the line
+EBS     = 38                       ; Eb's, us into the land's first line
+TZ      = 242                      ; the underflows, us after the sync: Ez, Ea,
+TA      = 6016                     ; Eb, Ev (Ev's the next field's: its NOPs over
+TB      = 9686                     ; the sync's interrupt; placed by
+TV      = FIELD+52                 ; b32/tools/eprobe.mjs and b2's TV)
+FIELD   = 312*64
+IZA     = TA-TZ                    ; the intervals
+IAB     = TB-TA
+IBV     = TV-TB
+RSL     = 163                      ; (E0's restart: the sync to its timer write)
+EVN     = 16                       ; (Ev's NOPs)
+EVA     = TA                       ; (flip's T2ROW0: the sync to Ea)
 ULA_CTL = $FE20                    ; the video ULA's control register
 SVIA_IFR = $FE4D
 SVIA_IER = $FE4E
@@ -561,95 +587,142 @@ UVIA_T1LH = $FE67
 .endif
         sta CRTC_DAT
 .endmacro
-; irq (IRQ1V: the MOS ROM's entry has stored A in $FC): E0 .. E2 above.
+; irq (IRQ1V: the MOS ROM's entry has stored A in $FC; X pushed here, Y never
+; used): E0, then the chain Ez, Ea, Eb, E2 (evn: the next, 0..3).
 irq:    txa
         pha
         lda #$02                   ; the sync (CA1)?
         bit SVIA_IFR
-        bne :+
-        jmp @t
-:       sta SVIA_IFR               ; (its flag cleared)
-        inc vcount
-        lda #$FF
-        sta UVIA_T2H               ; the time since the sync
-        lda #$40                   ; timer 1 free running: Ea at EVA, first (a
-        sta UVIA_ACR               ; fixed time after the sync: its place in its
-        lda #<EVA                  ; line), then Eb at EVB (the latch reloaded at
-        sta UVIA_T1L               ; Ea: the latch + 2 later: no drift)
-        lda #>EVA
-        sta UVIA_T1H               ; (its flag cleared)
-        lda #<(EVB-EVA-2)
-        sta UVIA_T1LL
-        lda #>(EVB-EVA-2)
-        sta UVIA_T1LH
-        CRW 1, 32                  ; the top frame: row 0 32 wide (FUEL, the
-        CRW 6, PROWS               ; map's first 8 lines), 8 rows shown, TOP
-        CRW 12, >(TOP/8)
-        CRW 13, <(TOP/8)
-        ldx #E0WAIT                ; MODE 5, early in the next line (this one is
-:       dex                        ; near its end): the sync's width, then its
-        bne :-                     ; place (45) while the count is short of it (or
-        CRW 3, $24                 ; the line gets two syncs), then the clock
-        CRW 2, 45                  ; (1MHz), all before the sync's pulse (a write
-        lda #$C4                   ; during it, the interrupt's jitter deciding
-        sta ULA_CTL                ; which side, gave the line no sync or two: the
-        CRW 0, 63                  ; picture a line up or down); then the end, 63
-.ifdef MODE2
-        jsr pal5                   ; the top's palette (the sync: the top is 11 rows on)
-.endif
-        lda #0
+        beq :+
+        jmp @e0
+:       lda UVIA_IFR               ; timer 1?
+        and #$40
+        beq @x
+        lda UVIA_T1LL              ; the latency: the latch (the interval just
+        sec                        ; begun) less the count (its flag cleared),
+        sbc UVIA_T1L               ; kept in A for dejit
+        ldx evn
+        beq @ez
+        dex
+        beq @ea
+        dex
+        beq @eb1
+        jsr dejit                  ; Ev, before the sync: E0 must interrupt a NOP
+        lda #0                     ; (its latency then fixed): the chain's next is
+        sta evn                    ; Ez (E0 restarts it anyway), interrupts on
+        lda $FC                    ; (the MOS's entry saves A at $FC: kept), NOPs
+        pha                        ; over the sync's interrupt, off again
+        cli
+        .repeat EVN
+        nop
+        .endrepeat
+        sei
+        pla
+        sta $FC
+        jmp @x
+@nx:    sta UVIA_T1LL              ; the latch: the event after next's interval
+        stx UVIA_T1LH
+        lda evn
+        clc
+        adc #1
+        and #3
         sta evn
-        beq @x                     ; (always)
-@e2:    CRW 4, CR_TOTAL-PROWS-1    ; E2: the land's rows
 @x:     pla
         tax
         lda $FC
         rti
-@t:     lda UVIA_IFR               ; timer 1 (Ea, Eb, E2)?
-        and #$40
-        beq @x
-        lda UVIA_T1L               ; (its flag cleared)
-        ldx evn
-        beq @ea
-        dex
-        bne @e2
-        CRW 2, 90                  ; Eb, the land's first line (black: the sky
-        CRW 0, 127                 ; above YSKY): MODE 1, the CRTC's line first,
-        CRW 3, $28                 ; still at 1MHz: its sync to 90 while the count
-        lda #ULAL                  ; is short of the map's 21 (else a second sync),
-        sta ULA_CTL                ; its end to 127 once the line before has ended
-                                   ; (else that line runs on, two syncs in it):
-                                   ; R2 first gives each a wide window (C0 -8 ..
-                                   ; 20, 0 .. 62) for the interrupt's jitter (7);
-                                   ; then the clock (2MHz) before the count's 90;
-        CRW 1, 64                  ; the land's R1 and R6 (this line black)
-        CRW 6, 12
-        stx UVIA_ACR               ; (X = 0: timer 1 one-shot, for E2)
-        lda #<EV2US
-        sta UVIA_T1L
-        lda #>EV2US
-        sta UVIA_T1H
+@eb1:   jmp @eb
+@ez:    jsr dejit                  ; Ez, line EZL: R0 63 + EZS, the clock (1MHz) at
+        CRW 0, 63+EZS              ; EZS us, then the sync's width and place (45:
+        lda #$C4                   ; the count is past it), and R0 63 once the line
+        sta ULA_CTL                ; has ended (CTZ)
+        ldx #CTZ-CRT
+        jsr crws
+.ifdef MODE2
+        jsr pal5                   ; the top's palette
+.endif
+        lda #<(IAB-2)
+        ldx #>(IAB-2)
+        jmp @nx
+@ea:    jsr dejit
+        ldx #CTA-CRT               ; Ea, top row 0's last line: 88 characters, so
+        jsr crws                   ; the next line starts 24 on (rows 1..7: the
+                                   ; map alone, at the right; its sync, 21, 64us
+                                   ; after this line's, 45); the top frame's end,
+                                   ; the land's sync row and start (CTA, its R12
+                                   ; lfront); past this line's sync (R1 after
+                                   ; its display, R2 after its sync, before the next
+                                   ; line's 8 and 21), rows 1..7 8 wide with their
+                                   ; sync at 21; early in the next line R0 63 (each
+                                   ; write 13.5us on: crws's)
+        lda #<(IBV-2)
+        ldx #>(IBV-2)
+        bne @nx                    ; (always)
+@eb:    jsr dejit                  ; Eb, the land's first line (black: the sky
+        ldx #CTB0-CRT              ; above YSKY), its sync at 21 passed: R0 79 -
+        jsr crws                   ; EBS, the sync's place (90; CTB0), the clock
+        lda #ULAL                  ; (2MHz) at EBS us, the sync's width, and R0 127
+        sta ULA_CTL                ; once the line has ended (at 40us; CTB, with the land's
+        ldx #CTB-CRT               ; R1 and R6)
+        jsr crws
 .ifdef MODE2
         jsr pal2                   ; the land's palette (the sky is black in both)
 .endif
-        inc evn
+        lda #$FF                   ; Ev to Ez: never (E0 restarts the chain first)
+        tax
+        jmp @nx
+@e0:    sta SVIA_IFR               ; (its flag cleared)
+        lda #<(TZ-RSL)             ; the chain restarted from the sync, exactly
+        sta UVIA_T1L               ; (E0 interrupts Ev's NOPs, a fixed latency):
+        lda #>(TZ-RSL)             ; Ez at TZ, the latch IZA
+        sta UVIA_T1H
+        lda #<(IZA-2)
+        sta UVIA_T1LL
+        lda #>(IZA-2)
+        sta UVIA_T1LH
+        lda #0
+        sta evn
+        inc vcount
+        lda #$FF
+        sta UVIA_T2H               ; the time since the sync
         jmp @x
-@ea:    CRW 0, 87                  ; Ea, top row 0's last line: 88 characters, so
-        CRW 4, PROWS-1             ; the next line starts 24 on (rows 1..7: the
-        CRW 7, CR_VSYNC-PROWS      ; map alone, at the right; its sync, 21, 64us
-        CRW 12                     ; after this line's, 45); the top frame's end,
-        CRW 13, 0                  ; the land's sync row and start; past this
-        ldx #EAW                   ; line's sync, rows 1..7 8 wide with their
-:       dex                        ; sync at 21; then early in the next line R0
-        bne :-                     ; 63
-        CRW 1, 8
-        CRW 2, 21
-        ldx #EAW2
-:       dex
-        bne :-
-        CRW 0, 63
-        inc evn
-        jmp @x
+; crws: CRTC register, value pairs from CRT + X on, to a negative register.
+; Clobbers A, X.
+crws:   lda CRT,x
+        bmi @d
+        sta CRTC_IDX
+        lda CRT+1,x
+        sta CRTC_DAT
+        inx
+        inx
+        bne crws                   ; (always)
+@d:     rts
+CRT:
+CTZ:    .byte 3, $24, 2, 45, 0, 63     ; Ez's, after the switch; then the top
+CT0:    .byte 1, 32, 6, PROWS, 12, >(TOP/8), 13, <(TOP/8), $FF  ; frame: row 0 32
+                                   ; wide (FUEL, the map's first 8 lines), 8 rows
+                                   ; shown, TOP
+CTB0:   .byte 0, 79-EBS, 2, 90, $FF  ; Eb's, before the switch (R2 after the
+                                   ; line's sync at 21: crws's pace)
+CTB:    .byte 0, 127, 3, $28, 1, 64, 6, 12, 4, CR_TOTAL-PROWS-1, $FF  ; (and the
+                                   ; land's rows)   ; Eb's (R0 first: by 23.5us into the next line)
+CTA:    .byte 0, 87, 4, PROWS-1, 7, CR_VSYNC-PROWS, 13, 0, 12
+lfront: .byte >(LAND0/8), 1, 8, 2, 21, 0, 63, $FF  ; Ea's (lfront: R12, the land
+                                   ; shown: flip's)
+; dejit: A = the interrupt's latency at an event (the latch less the count, + a
+; constant): pads it out to its greatest, DJK, a us a NOP (15 at most).  Clobbers A.
+dejit:  clc
+        adc #<(15-DJK)
+        and #15                    ; (out of range: wrapped)
+        sta @b+1
+        clc
+@b:     bcc @b+2                   ; (operand: 15 - the pad: NOPs skipped)
+        .repeat 15
+        nop
+        .endrepeat
+        rts
+        .assert >(@b+2) = >(@b+17), error, "dejit: its slide in one page"
+DJK     = 39                       ; (the greatest latency's A: A 24 .. 39)
 .ifdef MODE2
 ; pal2, pal5: the ULA's palette made the land's (PALT + 16 on) or the top's (PALT),
 ; 16 writes (the MODE 2 builds: MODE 5's logical colours are four entries each, MODE
@@ -662,7 +735,6 @@ pal5    = pal2+3
 .endif
 evn:    .byte 0                    ; irq's: the next timer event (0 Ea, 1 Eb, 2
                                    ; E2)
-lfront: .byte >(LAND0/8)           ; the land shown (flip's)
         .assert <(LAND0/8) = 0 && <(LAND1/8) = 0, error, "the land buffers' R13 is 0"
 
 ; flip: when FMIN vertical syncs have passed since the last flip, show the

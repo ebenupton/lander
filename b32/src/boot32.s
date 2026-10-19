@@ -196,6 +196,7 @@ takeover:
         inx
         cpx #crtc_end-crtc_regs
         bne @cr
+        jsr chst                   ; irq's timer chain
 .ifdef MODE2
         ldx #35                    ; PALT: irq's palettes, the top's and the land's
 :       lda palt,x                 ; (and PIX5)
@@ -597,6 +598,27 @@ crtc_regs:                         ; (register, value) pairs: MODE 1's, but
         .byte 12, >(LAND0/8)
         .byte 13, <(LAND0/8)
 crtc_end:
+; chst: irq's timer chain started a known time after a vertical sync (the
+; interrupts off: its flag polled): timer 1 free running, Ez at about TZ after
+; the sync, the latch IZA; E0's lock takes the rest (a us a 16 fields).
+; Clobbers A.
+chst:   lda #$02
+        sta SVIA_IFR               ; (a sync's flag cleared, then the next one's)
+:       bit SVIA_IFR
+        beq :-
+        lda #$40
+        sta UVIA_ACR
+        lda #<(TZ-30)
+        sta UVIA_T1L
+        lda #>(TZ-30)
+        sta UVIA_T1H
+        lda #<(IZA-2)
+        sta UVIA_T1LL
+        lda #>(IZA-2)
+        sta UVIA_T1LH
+        lda #0
+        sta evn
+        rts
 ; palv: the ULA's palette writes, (entry << 4) | (colour ^ 7), MODE 1's
 ; logical colour c in the entries with c's high bit at bit 3, its low at 1
 .ifdef MODE2

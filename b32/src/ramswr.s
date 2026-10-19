@@ -73,19 +73,13 @@ svO:    .res 1
 TRL:    .res 12                    ; mktr's transitions: line, mask (also
 TRB:    .res 12                    ; the ship's scratch, bank 6's)
 kb:     .res 1                     ; split2: the second rung's transition
-pp:     .res 2                     ; run's planted RTS
 tsp:    .res 2                     ; the screen's column records
 bsp:    .res 2
 bpos2:  .res 1                     ; split2's second boundary
 DCUR:   .res 1                     ; prow7: the row's depth index
 RN16:   .res 1                     ; 16 RN
-rodd:   .res 1                     ; run: the even pass's end entry
 syp:    .res 2                     ; prow7: the row's SYT7 row
 lp:     .res 2                     ; prow7, hgnd: a LERPQ7 row
-.ifdef ARC
-cte:    .res 2                     ; setup: CTE, CTO + the strip's brightness
-cto:    .res 2
-.endif
 OVL:    .res 19                    ; the overlay (below)
 HGV:    .res 1                     ; the ground's height under the ship
 c_v1:   .res 1                     ; $40: BIT c_v1 sets V
@@ -98,6 +92,10 @@ TX:     .res 16                    ; the strip's rows' x's
 BX:     .res 16
 LO:     .res 16                    ; each rung's pixels LO .. HI-1
 HI:     .res 16
+.ifdef ARC
+cte:    .res 2                     ; setup: CTE, CTO + the strip's brightness
+cto:    .res 2
+.endif
         .assert * <= $FC, error, "zero page: $FC on are the MOS's"
 
 RVE     = ve                       ; run's bytes

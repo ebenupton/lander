@@ -1,54 +1,39 @@
-; ============================================================================
-; shipb.s -- SHIPB, LAND's bank 6: sideways RAM at $8000.  build.sh assembles
-; it (ca65; it includes landsyms.inc, shipspan.s and shipspan.inc) and links
-; it with shipb.cfg (CODE at $8000, then SPANS, then TAIL and DTAB each on a
-; page boundary); LANDS loads the file into bank 6.  Two entry points, the
-; jmps at the bank's start, each reached through LAND's call6 (A = the low
-; byte; bank 6 paged in for the call, bank 4 back after):
-;   B6_KEYS ($8000): each frame after the game's step (bank 5, game.s) and
-;     before LAND projects.  Copies the ship's direction, pitch and screen
-;     centre from the game's low-RAM bytes GSHK, GSHP, GSHX, GSHY ($07DB-
-;     $07DE) into shk, shp, shx, shy.  (GSHV, $07DF, is read by LAND, which
-;     calls B6_SHIP only while it is nonzero.)  No zero page.
-;   B6_SHIP ($8003): after the strips have drawn screen scrb and the game has
-;     drawn its dots beyond the ship.  Draws the ship there (shipspan.s's
-;     shipdraw), then widens that screen's column records to the ship's box
-;     so the strips repaint its rows the next time they draw the screen.
+; shipb.s: the ship, bank 6 of the sideways RAM build: every orientation of
+; Lander's ship pre-rasterised (tools/shipgen.py's shipspan.inc) and drawn by
+; shipspan.s's walker.  Assembled apart from the rest (build32.sh), with the
+; labels it needs from the main link in landsyms.inc (L_ before each), and
+; linked by shipb.cfg: CODE at $8000, then SPANS, then TAIL and DTAB each on a
+; page boundary.  Two entries, the JMPs at the bank's start (videoswr.s's ship
+; calls both, bank 6 paged in):
+;   B6_KEYS ($8000): shk, shp, shx, shy = GSHK, GSHP, GSHX, GSHY (the game's).
+;   B6_SHIP ($8003): the ship on screen scrb, then that screen's column records
+;     widened to its box, so the strips repaint its lines the next time they
+;     draw the screen.
 ;
-; Memory: CODE $8000-$869E (keys and ship here, then shipspan.s's walker, its
-; tables and FCE, FCX); SPANS $869F-$B3AE (the orientations' streams); TAIL
-; $B400-$B57B (spdec); DTAB $B600-$BF8E (DTH, DL4, shipspan.inc's tables).
-; Main RAM: DBUF ($2F00, under 256 bytes), the current orientation's lines,
-; kept across frames (dlast, dmir, dal).  Zero page, shipdraw's only: LAND's
-; $8E-$9F (project's HPZ, bank 7's and the strips' scratch, all finished when
-; B6_SHIP runs and set afresh each frame) for c0+1..6, x0+1..6, ptr, dp, lim,
-; bl and spdec's dl; TRL+0..15 (LAND's TRL and the first four of TRB:
-; a split column's transitions, dead after the strips) for the rest; $8D,
-; c0 itself, is never touched.
+; Main RAM: DBUF, the orientation drawn last (dlast, dmir, dal: kept across
+; frames).  Zero page: the overlay (OVL: c0+1 .. bl; c0 itself is never
+; touched) and TRL, TRB (dead after the strips) for the rest.
 ;
-; Data: shk the direction (0..31, the game's gk), shp the pitch (0..12), shx,
+; shk is the direction (0..31, the game's gk), shp the pitch (0..12), shx,
 ; shy the centre.  The game holds GSHX at 128 and GSHY within YSKY+14 ..
-; YGND-16, so the ship's lines (shy - 14 .. shy + 16 at most) stay on the
-; land's lines YSKY..YGND and its columns (shx - 17 .. shx + 16) on the
-; screen.  The box bxl, bxr, byt, byb: first and last pixel column, first
-; and last line, inclusive.  LAND's column records: three sets (TOPS, BOTS;
-; TOPS+64, BOTS+64; CURT, CURB), each column's highest and lowest land line,
-; their addresses in setTl/h, setBl/h; sidx[back] names the set the strips
-; have just recorded the screen being drawn in.
-; ============================================================================
+; YGND-16, so the ship's lines stay on the land's and its columns on the
+; screen.  The box bxl, bxr, byt, byb: first and last pixel column, first and
+; last line, inclusive.  The column records: three sets (TOPS, BOTS; TOPS+64,
+; BOTS+64; CURT, CURB), their addresses in setTl/h, setBl/h; sidx[back] names
+; the set the strips have just recorded the screen being drawn in.
         .setcpu "6502"
-        .include "landsyms.inc"    ; LAND's labels, L_ before each (build.sh):
-                                   ; TRL, back, scrb, sidx, setTl, setTh,
-                                   ; setBl, setBh (TRB is reached as TRL+12)
+        .include "landsyms.inc"    ; the main link's labels, L_ before each:
+                                   ; TRL, back, scrb, sidx, setTl .. setBh,
+                                   ; OVL, DBUF, GSHK (TRB is TRL+12)
 
 scrb    = L_scrb                   ; the high byte of the screen being drawn
-c0      = L_OVL                     ; c0+j, j 1..6 ($8E-$93): slot j's dither for
-x0      = L_OVL+6                     ; the pass; x0+j ($94-$99): its even ^ odd
-ptr     = L_OVL+13                     ; the line's screen byte; spdec's stream;
+c0      = L_OVL                    ; c0+j, j 1..6: slot j's dither for
+x0      = L_OVL+6                  ; the pass; x0+j: its even ^ odd
+ptr     = L_OVL+13                 ; the line's screen byte; spdec's stream;
                                    ; ship's TOPS pointer
-dp      = L_OVL+15                     ; the line's bytes in DBUF
-lim     = L_OVL+17                     ; LIM's for the last boundary (is the next in
-bl      = L_OVL+18                     ; its byte?); lines left in the pass
+dp      = L_OVL+15                 ; the line's bytes in DBUF
+lim     = L_OVL+17                 ; LIM's for the last boundary (is the next in
+bl      = L_OVL+18                 ; its byte?); lines left in the pass
 t       = L_TRL                    ; scratch
 al      = L_TRL+1                  ; shx & 3
 wb      = L_TRL+2                  ; spdec's base for w: al, or 41 + al mirrored

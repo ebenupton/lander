@@ -1,7 +1,8 @@
-# Lander for the 32K BBC Micro
+# Lander for the BBC Micro
 
-A Lander-style landscape and flight for an unexpanded Model B: no sideways RAM, the
-whole program, its tables and two screens in 32K.
+A Lander-style landscape and flight, in two builds: for an unexpanded Model B (the
+whole program, its tables and two screens in 32K), and for a Model B with 64K of
+sideways RAM or a Master (below: the sideways RAM build).
 
 ## Building
 
@@ -59,20 +60,59 @@ The MOS keeps `$FC`, the vectors at `$0200`, the top of the stack and the NMI's 
 `$0D00`.  `LANDER` loads at `$2000`; the loader copies its parts into place, makes the
 generated tables and code, and clears itself away.  The build prints the free bytes.
 
+## The sideways RAM build
+
+    SWR=1 sh b32/build32.sh [mode1|cpc|nula|arc]   one version: buildswr/landerswr[-VERSION].ssd
+    SWR=1 sh b32/build32.sh disc                   all four and a chooser: buildswr/landerswr-all.ssd
+
+For a Model B with 64K of sideways RAM (four 16K banks, in any sockets, written through
+ROMSEL or a Watford or Solidisk board) or a Master.  The same game, flight and land as the
+32K build, drawn faster: the tables and code that the 32K build cannot hold are in the banks.
+
+The display is one CRTC frame a field, MODE 1 or 2 throughout: two 10K screens at `$3000`
+and `$5800`, 64 bytes by 20 rows, the panel (FUEL, the gauge and the map) in each screen's
+top 64 lines.  The only interrupt is the vertical sync's (`videoswr.s`).
+
+| bank | contents                                                                          |
+|------|-----------------------------------------------------------------------------------|
+| 4    | the map's heights and every tile's colour bytes; the rungs' tables; the projection's front, the rungs' fast way (`rfast`), the level two-rung columns (`s2v`), setup's strip |
+| 5    | the game (`game.s`), its tables and the panel's map                               |
+| 6    | the ship: every orientation pre-rasterised (`shipb.s`, `shipspan.s`, `tools/shipgen.py`) |
+| 7    | the rows' points (`prow7.s`) and their tables by depth                            |
+
+Bank 4 is paged in while the land is drawn; the game, the ship and the projection page their
+own banks in and bank 4 back (`pg4` .. `pg7`).
+
+| from      | to        | main RAM                                                       |
+|-----------|-----------|----------------------------------------------------------------|
+| `$0000`   | `$0CFF`   | the data (`ramswr.s`)                                          |
+| `$0D00`   | `$0DFF`   | the MOS's (a Master's NMI code and extended vectors)           |
+| `$0E00`   |           | the data, then the stored tables                               |
+|           |           | free                                                           |
+| computed  | `$27FF`   | the code, linked to end exactly here                           |
+| `$2800`   | `$2FFF`   | run's eight store pages (generated), code in their first 111 bytes |
+| `$3000`   | `$7FFF`   | the two screens                                                |
+
+The disc's `LANDER` loads at `$7000` and finds the banks; the bank images `B7` .. `B4` and
+`LAND` (the stored parts) load through the screens at `$3000`.
+
 ## Testing
 
-    [VERSION=...] sh b32/test/gate32.sh [base]
+    [SWR=1] [VERSION=...] sh b32/test/gate32.sh [base]
 
 builds and checks a version: no warnings, the worst-case stack within the stack's bytes
-(`tools/stackdepth.py`), a scripted flight's every frame against a baseline (`base`
+and every bank's code run with its bank paged in (`tools/stackdepth.py`), a scripted flight's every frame against a baseline (`base`
 writes it), the land byte for byte against `proto/` over random and jumping pans, and
-the ship against its model (`tools/ship32.py`).  It prints the flight's cycles a frame.
+the ship against its model (`tools/ship32.py`; the sideways RAM build's against
+`tools/shipgen.py`).  Both builds' flights are checked against the one baseline.  It prints the flight's cycles a frame.
 
 | test               | checks                                                     |
 |--------------------|------------------------------------------------------------|
 | `gametest32.py`    | the game in py65, frame by frame                           |
 | `soak32.py`        | the renderer against `proto/land.py` and `proto/frame.py`  |
 | `shiptest32.py`    | the ship against `tools/ship32.py`                         |
+| `shipswr.py`       | the sideways RAM build's ship against `tools/shipgen.py`   |
+| `swr32.py`         | the tests' machine for the sideways RAM build: the banks   |
 | `profile32.py`     | cycles, page crossings and data accesses over a flight     |
 | `cruise32.py`      | fast flight's cycles by routine                            |
 
@@ -80,9 +120,9 @@ the ship against its model (`tools/ship32.py`).  It prints the flight's cycles a
 
 | tool              | use                                                              |
 |-------------------|------------------------------------------------------------------|
-| `gen32.py`        | the generated includes: constants, colours, map and game tables   |
+| `gen32.py`        | the generated includes: constants, colours, map and game tables; the sideways RAM build's bank images (4, 7) |
 | `ship32.py`       | the ship's model data, and the reference the ship is tested by    |
-| `stackdepth.py`   | the worst-case stack, from the linked program                     |
+| `stackdepth.py`   | the worst-case stack, and the banks' paging, from the linked program |
 | `padscan.sh`      | the flight's cycles for each value of a page-phase pad            |
 | `zprank.py`       | the variables zero page would save most on                        |
 | `hprobe.mjs`      | the hsync spacing in jsbeeb                                       |

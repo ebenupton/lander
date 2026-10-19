@@ -152,7 +152,7 @@ setup:
         adc #$F0
         tay
         jmp su_l4
-.endif
+.else
         asl a                      ; Y = 16 (ns - 1) + NX-1: point NX of row
         asl a                      ; ns-1, walked down
         asl a
@@ -191,6 +191,7 @@ su_co:  lda CLO,y
         dex
         bpl su_l
         jmp su_m
+.endif
 su_qc:  inc BCL
         bcs su_qb                  ; (always)
 su_r:   ldx #NX-1                  ; strip 0: row 0 as the bottom row

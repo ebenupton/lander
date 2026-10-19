@@ -1,5 +1,6 @@
-; prow7.s: the rows' points, bank 7 (the sideways RAM build).  Main's prow7
-; with its tables (gen32.py: tools/landgen.py's bank 7, by depth index).
+; prow7.s: the rows' points, bank 7 of the sideways RAM build, by tables of
+; the depth index (gen32.py's bank 7: tools/landgen.py's build7).  Its zero
+; page is ramswr.s's overlay names (CX2 .. HOFF) and syp, lp.
 
 .macro PYSE i                       ; (bank 7) corner i's y: SYT7 (syp) by the
         ldy PY+i,x                  ; height in PY + EYV, the camera raised
@@ -129,7 +130,7 @@ L1:     lda LERPQ7,y
 ; ---------------------------------------------------------------- bank 7
         .segment "B7CODE"
         .assert LQOFF = 15, error, "LERPQ7 is indexed by (b | 16) - a - 1: LQOFF 15"
-; prow7 (bank 7, $B480; bank 7 must be paged in): the rows' screen points,
+; prow7 (bank 7, B7CODE; bank 7 paged in): the rows' screen points,
 ; land.project.  For rows j = 0..RN (nr of them) corner i's x and y go to PX,
 ; PY + 16 j + i from the raw heights HT + 16 j + i.  A row's depth index is di
 ; = 16 ZB - czs - DI0 - 16 j (DCUR, 16 less each row); the clip rows have fixed
@@ -154,7 +155,7 @@ L1:     lda LERPQ7,y
 ; first), cxs, czs, ZB, RN, FACT, CAME.  Out: PX, PY rows 0..RN; np = NX;
 ; HGV, HOFF (hgnd); EYV (the last row's).  Clobbers A, X, Y, rl, rh, syp, lp,
 ; tmp, MT0, MT1, zero page CX2..HOFF, and its own operands @lq2, @lq3, @nj.
-; Caller: project (PAGE 7 around it).
+; Caller: project (pg7 before, pg4 after).
 prow7:  lda SHF                    ; (zsh4 stepped the map: shift HT first)
         beq :+
         jsr hsh

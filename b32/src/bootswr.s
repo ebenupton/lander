@@ -99,7 +99,7 @@ cmdb:
 cmd4:   .byte "LOAD B4 3000", 13
 cmd5:   .byte "LOAD B5 3000", 13
 cmd6:   .byte "LOAD B6 3000", 13
-cmd7:   .byte "LOAD B7 3000", 13
+cmd7:   .byte "LOAD $.B7 3000", 13        ; (shared by the versions)
 cmd_land: .byte "LOAD LAND", 13
 cmdo:   .byte cmd4-cmdb, cmd5-cmdb, cmd6-cmdb, cmd7-cmdb
 cmdl:   .byte >cmdb, >cmdb, >cmdb, >cmdb

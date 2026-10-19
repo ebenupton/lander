@@ -4,6 +4,12 @@
 #   sh b32/build32.sh [mode1|cpc|nula|arc]   one version: build32/lander32[-VERSION].ssd
 #   sh b32/build32.sh disc                   all four and a chooser: build32/lander32-all.ssd
 #
+# SWR=1: the sideways RAM build instead, into buildswr/ (BDIR=dir: elsewhere):
+# buildswr/landerswr[-VERSION].ssd, or landerswr-all.ssd (80 tracks; B7 shared).
+# gen32.py also writes the bank images B4, B7, into which mergebank.py puts their
+# code; B5 is linked whole; B6 (the ship) is assembled apart from shipb.s with the
+# main link's labels (landsyms.inc).
+#
 # The versions: mode1 (MODE 1's four colours), cpc (MODE 2: the CPC's 27 colours as
 # dithers), nula (MODE 2: the VideoNULA's 16) and arc (MODE 2: Lander's own colours as
 # dithers of the NULA's).  A disc boots with SHIFT+BREAK; the chooser (src/menu32.bas)
@@ -18,6 +24,26 @@ cd "$(dirname "$0")/.."
 B=build32
 [ "$SWR" = 1 ] && B=${BDIR:-buildswr}
 mkdir -p $B
+if [ "$1" = disc ] && [ "$SWR" = 1 ]; then
+    F=
+    for v in cpc:C nula:N arc:A mode1:M; do
+        sh b32/build32.sh ${v%:*} > /dev/null 2>&1 || { echo "build32.sh: ${v%:*} failed" >&2; exit 1; }
+        d=$B/disc/${v#*:}
+        mkdir -p $d
+        for f in LANDER LAND B4 B5 B6 B7; do                  # (trailing zeros trimmed)
+            python3 -c "import sys; d = open(sys.argv[1], 'rb').read(); open(sys.argv[2], 'wb').write(d.rstrip(bytes(1)))" $B/$f $d/$f
+        done
+        X=$(awk '$3 == ".start" {print $2}' $B/labels.txt | sed 's/^00//')
+        F="$F ${v#*:}.LANDER:$d/LANDER:7000:$X ${v#*:}.LAND:$d/LAND:3000:3000"
+        F="$F ${v#*:}.B4:$d/B4:3000:3000 ${v#*:}.B5:$d/B5:3000:3000 ${v#*:}.B6:$d/B6:3000:3000"
+    done
+    for d in C N A; do cmp -s $B/disc/$d/B7 $B/disc/M/B7 || { echo "build32.sh: B7 differs" >&2; exit 1; }; done
+    { printf 'VDU21\rNEW\r'; sed 's/LANDER (32K)/LANDER (sideways RAM)/' b32/src/menu32.bas | tr '\n' '\r'; printf 'RUN\r'; } > $B/BOOTM
+    python3 tools/mkdfs.py build $B/landerswr-all.ssd LANDERSWR "!BOOT:$B/BOOTM:0000:FFFF" \
+        "B7:$B/disc/M/B7:3000:3000" $F
+    echo "$B/landerswr-all.ssd: MODE 1 (M), CPC (C), NULA (N), arc (A)"
+    exit 0
+fi
 if [ "$1" = disc ]; then
     F=
     for v in cpc:C nula:N arc:A mode1:M; do

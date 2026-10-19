@@ -1,32 +1,40 @@
-; lander.s: Lander for a 32K BBC Micro Model B.
+; lander.s: Lander for the BBC Micro: a 32K Model B, or (SWR) a Model B with
+; 64K of sideways RAM, or a Master.
 ;
 ; A landscape of dithered tiles seen in perspective, a strip of land at a time
-; between rows of projected corners, with the ship flying over it.  The
-; display is a field of two CRTC frames: a MODE 5 panel (FUEL, the gauge and
-; the map) above a double-buffered land, 256 x 96 pixels in MODE 1 or MODE 2.
+; between rows of projected corners, with the ship flying over it.  The 32K
+; build's display is a field of two CRTC frames: a MODE 5 panel (FUEL, the
+; gauge and the map) above a double-buffered land, 256 x 96 pixels in MODE 1
+; or MODE 2.  The sideways RAM build's is one frame, two 256 x 160 screens,
+; the panel in each one's top 64 lines.
 ;
-; The modules, in the code's order:
+; The modules, in the code's order (the sideways RAM build's in brackets):
 ;
-;   ram.s       the memory map: every variable and table, by address
-;   project.s   the camera's rows of points; the tiles' colours
-;   mapgen.s    the map, generated as it comes into view
+;   ram.s       the memory map: every variable and table, by address (ramswr.s)
+;   project.s   the camera's rows of points; the tiles' colours (projswr.s;
+;               prow7.s, bank 7)
+;   mapgen.s    the map, generated as it comes into view (none: bank 4 holds
+;               the map)
 ;   strips.s    the frame's strips; the rows traced
 ;   rungs.s     the strip's rungs: where each pixel changes box
 ;   columns.s   the strip's byte columns; the runs
-;   video.s     the display's interrupt, the screens' flip
-;   game.s      the flight, the dots, the panel
-;   ship.s      the ship
-;   boot.s      the loader, run once from the land buffers
+;   video.s     the display's interrupt, the screens' flip (videoswr.s: and
+;               the banks' paging)
+;   game.s      the flight, the dots, the panel (bank 5)
+;   ship.s      the ship (shipb.s, shipspan.s: bank 6, assembled apart)
+;   boot.s      the loader, run once from the land buffers (bootswr.s)
+;   tabgen.s    the loader's table makers
 ;
 ; Memory, low to high: the data (zero page to the stored tables), a free block,
-; the code (ending with the parity tables' pages), the screen (the panel, then
-; the land buffers at $5000 and $6800).  The code is placed to end exactly at
-; the screen; the build links it there.
+; the code, ending with the generated tables' pages (the 32K build's parity
+; tables; the SWR build's store pages), and the screen.  The code is placed to
+; end exactly where the generated pages begin; the build links it there.
 ;
 ; Builds (-D): MODE 1 (none); MODE2 with CPC (the CPC's 27 colours as MODE 2
 ; dithers) or NULA (the VideoNULA's 16), and NULA with ARC (Lander's own
 ; colours as dithers of the NULA's).  In MODE 2 the land is drawn exactly as in
-; MODE 1, four pixels a byte; only the masks (PM) and the colours differ.
+; MODE 1, four pixels a byte; only the masks (PM) and the colours differ.  SWR:
+; the sideways RAM build, its parts in banks 4 .. 7 (videoswr.s has the list).
 
         .setcpu "6502"
         .include "tables.inc"
@@ -135,7 +143,7 @@ loop:   jsr gstep
         .include "columns.s"
 .ifndef COREPAD                    ; the renderer's page phase, tuned by the
 .ifdef SWR                         ; flight's cycles (b32/tools/padscan.sh)
-COREPAD = 30
+COREPAD = 80
 .else
 COREPAD = 4
 .endif

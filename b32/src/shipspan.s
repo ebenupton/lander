@@ -1,24 +1,22 @@
 ; ============================================================================
-; shipspan.s -- the ship's drawing for LAND's bank 6.  Included by shipb.s:
-; the span walker and its tables go into the bank's CODE segment after keys
-; and ship ($8100-$869E), the decoder spdec into TAIL ($B400-$B57B, the page
-; after the SPANS streams) and the nibble tables DTH, DL4 open DTAB ($B600),
-; where shipspan.inc's tables follow.  tools/shipgen.py writes shipspan.inc:
-; every stored orientation's lines, rasterised by its reference tri() and
-; compressed; test/shipbtest.py runs shipdraw under py65 for every orientation
-; and checks each screen byte against that reference.
-; Addresses quoted here are build/shipb_labels.txt's.
+; shipspan.s -- the ship's drawing, bank 6 of the sideways RAM build.
+; Included by shipb.s: the span walker and its tables go into the bank's CODE
+; segment after keys and ship, the decoder spdec into TAIL (the page after the
+; SPANS streams) and the nibble tables DTH, DL4 open DTAB, where
+; shipspan.inc's tables follow.  tools/shipgen.py writes shipspan.inc: every
+; stored orientation's lines, rasterised by its reference tri() and
+; compressed; b32/test/shipswr.py runs shipdraw under py65 for every
+; orientation and checks each screen byte against that reference.
 ;
 ; Entry: shipdraw (jsr from shipb.s's ship; the test calls it directly).
 ; In: shk the direction (0..31), shp the pitch (0..12), shx, shy the centre,
-; scrb the high byte of the screen to draw on (LAND's zero page).  Out: the
-; ship's pixels on that screen, every other pixel untouched; bxl, bxr, byt,
-; byb its box (first and last pixel column and line, inclusive); DBUF holding
-; the orientation's lines and dlast naming it.  Clobbers A, X, Y, zero page
-; $8E-$9F and TRL+0..15 (shipb.s's names), FCE, FCX, and the patched
-; operands named below.  LAND's own uses of that zero page (project's HPZ,
-; bank 7's CX2.., the strips' BE, BO) and of TRL, TRB (a split column's
-; transitions) are over when B6_SHIP runs and are set afresh before each use.
+; scrb the high byte of the screen to draw on.  Out: the ship's pixels on that
+; screen, every other pixel untouched; bxl, bxr, byt, byb its box (first and
+; last pixel column and line, inclusive); DBUF holding the orientation's lines
+; and dlast naming it.  Clobbers A, X, Y, the overlay (c0+1 .. bl) and
+; TRL+0..15 (shipb.s's names), FCE, FCX, and the patched operands named
+; below.  The main program's uses of those (project's, prow7's, the strips')
+; are over when B6_SHIP runs and set afresh before each use.
 ;
 ; Orientation: entry e = 17 shp + kk, kk the stored direction (shipgen's
 ; kmap): (shk + 8) & 31 when that is under 17 (mir 0), else (24 - shk) & 31
@@ -42,7 +40,7 @@
 ; byte a pair (an odd m's first high nibble zero, unused): each boundary's
 ; change from the line before, the high nibble rotated to put its sign bit
 ; lowest; $FF after the last band.  spdec expands it
-; into DBUF ($2F00, main RAM): P, L, then the lines in order, each as its w's
+; into DBUF (main RAM): P, L, then the lines in order, each as its w's
 ; (below) in the last m bytes of an eight-byte slot; $FF the end.  An
 ; orientation's DBUF image is under 256 bytes (shipgen asserts), so it never
 ; leaves page $2F: dp and the reads' low bytes alone move.
@@ -748,7 +746,6 @@ DL4:    .repeat 32, b
 ; it: LIM, SPATN, SPATO, SPATON, SPATF, SNEG, EYS, EXB, SHDE, SHDO, ELO,
 ; EHI, and after its SPANS segment KTN, BYN.
 
-DBUF    = L_DBUF                   ; main RAM: the page below screen 0 ($3000),
-                                   ; above LAND's end (land.s asserts <= $2F00);
-                                   ; entry dlast's lines, in the order the
-                                   ; walker reads them (under 256 bytes)
+DBUF    = L_DBUF                   ; main RAM, a page: entry dlast's lines, in
+                                   ; the order the walker reads them (under 256
+                                   ; bytes)

@@ -82,6 +82,10 @@ RN16:   .res 1                     ; 16 RN
 rodd:   .res 1                     ; run: the even pass's end entry
 syp:    .res 2                     ; prow7: the row's SYT7 row
 lp:     .res 2                     ; prow7, hgnd: a LERPQ7 row
+.ifdef ARC
+cte:    .res 2                     ; setup: CTE, CTO + the strip's brightness
+cto:    .res 2
+.endif
 OVL:    .res 19                    ; the overlay (below)
 HGV:    .res 1                     ; the ground's height under the ship
 c_v1:   .res 1                     ; $40: BIT c_v1 sets V
@@ -198,6 +202,7 @@ mo:     .res 1
 p0:     .res 1                     ; mktr's top boundary
 vflip:  .res 1                     ; the flip's field (less one: shown at once)
 vlast:  .res 1                     ; the field of the last flip
+ldCLE:  .res 1                     ; 16 o: setup's window row (pcol5's)
 BANKMAP: .res 4                    ; banks 4..7's sockets
 plife:  .res NPART                 ; the dots: life, position (8.8 tiles x, z;
 ppx:    .res NPART                 ; 8.8 units y), velocity
@@ -245,7 +250,8 @@ RPT:    .res 256                   ; the rungs' tables (grung)
         .org $0E00
 RQF:    .res 256
 CURB:   .res 64
-OLB:    .res YGND+3-YSKY           ; OL,y: line y's entry in a parity table
+EINLB:  .res YGND+4-YSKY           ; EINL,y: run's slot for line y (y from
+                                   ; YSKY-1 to YGND+2)
 QOA:    .res 7                     ; div8's rows
 TEN5L:  .res TNB+1                 ; the fills' entries
         .res $1000 - *
@@ -258,7 +264,7 @@ QRA:    .res QRAN                  ; div8's table
         .res $1200 - *             ; (the stored tables' CTE, CTO: setup's
 .endif                             ; operands index them within their pages)
 
-OL      = OLB-YSKY
+EINL    = EINLB-(YSKY-1)
 LAH     = LAHB-YSKY
 
         .assert <PX = 0 && <PY = 0 && <HT = $80 && <CLE = 0, error, "the rows' points and heights"
@@ -267,10 +273,13 @@ LAH     = LAHB-YSKY
         .assert >CE = >(CO+15), error, "slow2: CE, CO in one page"
         .assert ROWB = ROWA + $100 && <ROWA = 0 && (>ROWA & 1) = 0, error, "the rows: a page each, ROWA's even"
         .assert <DBUF = 0 && <RTBUF = 0, error, "DBUF, RTBUF page-aligned"
-        .assert <LAHB = YSKY && <OLB = YSKY, error, "the line tables: their lines' offsets in the page"
+        .assert <LAHB = YSKY && >EINL = >(EINL+YGND+2), error, "the line tables: indexed within their pages"
         .assert >TOPS = >(BOTS+127) && >CURT = >(CURT+63) && >CURB = >(CURB+63), error, "the column records"
         .assert <RPT = 0 && <RQF = 0, error, "page-aligned tables"
         .assert >TEN5L = >(TEN5L+TNB) && >TEN4H = >(TEN5H+TNB) && >TEN4L = >(TEN4L+TNB) && >QRA = >(QRA+QRAN-1), error, "TEN4L .. TEN5H, QRA: in their pages"
+
+RUNT    = $2800                    ; run's store pages (made by init): eight,
+                                   ; their first R2OFF bytes code (T0 .. T7)
 
 ; ---------------------------------------------------------------- the screen
         .segment "SCREEN"

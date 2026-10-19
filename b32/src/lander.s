@@ -62,6 +62,8 @@ UVIA_IER = $FE6E
 FMIN    = 4                        ; fields a frame at least
 NPART   = 20                       ; the dots
 FSRJ    = 8                        ; fsplit walks to transitions this near
+R2N     = (YGND+1-YSKY)/2          ; run's store pages (SWR): slots a page,
+R2OFF   = 255 - 3*R2N              ; the first's offset
 PTN     = 3*((YGND+1-YSKY)/2+1)    ; a parity table's bytes
 PTEND   = PTN-3                    ; its end slot (line YGND+1)
 OP_STAY = $99                      ; STA abs,Y
@@ -86,6 +88,20 @@ OP_DEX  = $CA
         .segment "B5"
 .else
         .segment s
+.endif
+.endmacro
+
+; TAIL s .. ENDTAIL: code in segment s, a store page's head, in the sideways
+; RAM build; in the 32K build, where it stands.
+.macro TAIL s
+.ifdef SWR
+        .pushseg
+        .segment s
+.endif
+.endmacro
+.macro ENDTAIL
+.ifdef SWR
+        .popseg
 .endif
 .endmacro
 

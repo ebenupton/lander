@@ -15,7 +15,6 @@ project:
         jsr pg7
         jsr prow7
         jmp pg4
-        .segment "T3"
         .popseg
 
         .pushseg
@@ -129,11 +128,7 @@ pcol5:  lda cxt
         asl a
         asl a
         asl a
-        sta su_ce+1
-        adc #<CLO
-.ifndef ARC
-        sta su_co+1
-.endif
+        sta ldCLE
         rts
 @f:     lda cxt
 @fx:    sta WX                     ; anew: rows 1..7, o 1

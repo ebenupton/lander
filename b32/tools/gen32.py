@@ -21,7 +21,7 @@ import os
 import sys
 
 os.environ['LAND_MAP'] = '64'
-os.environ['LAND_GEN'] = '1'
+os.environ.setdefault('LAND_GEN', '1')   # (LAND_GEN=0: Lander's own map, for comparisons)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 sys.path.insert(0, os.path.join(ROOT, 'proto'))
@@ -206,15 +206,16 @@ def bank4():
     (CMAPE, CMAPO; the arc build's CMAPE its class, 9 kind + slope) and the rungs' tables;
     the code follows at B4CODE."""
     img = bytearray(0x4000)
+    hm = L.heightmap()
     for z in range(64):
         for x in range(64):
             o = 64 * z + x
-            img[B4MAP - 0x8000 + o] = MG.height(x, z)
+            img[B4MAP - 0x8000 + o] = int(hm[0][z, x])
             if NU.arc():
-                k, s = MG.arc_tile(x, z)
+                k, s = MG.arc_tile(x, z) if L.GEN else L.arc_tile(hm, x, z)
                 img[B4CE - 0x8000 + o] = 9 * k + s
             else:
-                e, d = G.dither_bytes(MG.colour(x, z))
+                e, d = G.dither_bytes(L.colour(hm, x, z, 0, 0))
                 img[B4CE - 0x8000 + o] = e
                 img[B4CO - 0x8000 + o] = d
     for a, v in rfast_tables().values():

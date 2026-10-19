@@ -120,9 +120,18 @@ setup:
         adc #<CTE+7
         sec
         sbc nr
+.ifdef SWR
+        sta cte                    ; (SWR: their pointers)
+        adc #CTO-CTE-1
+        sta cto
+        lda #>CTE
+        sta cte+1
+        sta cto+1
+.else
         sta su_te+1
         adc #CTO-CTE-1             ; (C set)
         sta su_to+1
+.endif
         .assert CTO = CTE+61 && <CTE+13 <= 255 && <CTO+13 <= 255, error, "su_te, su_to: in their pages"
 .endif
         ldx #0
@@ -135,6 +144,15 @@ setup:
 :       stx last
         lda ns
         beq su_r
+.ifdef SWR
+        asl a                      ; Y = 16 (ns - 1): bank 4's su_l4
+        asl a
+        asl a
+        asl a
+        adc #$F0
+        tay
+        jmp su_l4
+.endif
         asl a                      ; Y = 16 (ns - 1) + NX-1: point NX of row
         asl a                      ; ns-1, walked down
         asl a
@@ -534,6 +552,7 @@ tfbl:   .byte <TBLK4, <TBLK5
 tfbh:   .byte >TBLK4, >TBLK5
         .popseg
 
+        TAIL "T4"
 ; divs: rq, rrem = D div 2a, D mod 2a, and rq2, rr2 = D div a, 2 (D mod a).
 ; In: dva = a, ra2 = dvx = 2a, dvd = D.  Clobbers A, Y, dvx, dvd.
 divs:   jsr div8
@@ -551,6 +570,9 @@ divs:   jsr div8
         sta rr2
         rts
 
+        ENDTAIL
+
+        TAIL "T5"
 ; div8: dvd = dvd div dvx, A = dvd mod dvx (A = dvd in).  Small cases at once
 ; or from QRA ((q << 4) | r, row dvx at QOA,dvx-2); the rest by shift and
 ; subtract.  X kept; clobbers Y.
@@ -595,6 +617,9 @@ div8:   cmp dvx
         bne @l
         rts
 
+        ENDTAIL
+
+        TAIL "T4"
 ; tr_l: t_old's pixels X+1 .. tx1; Y is the error, a carry out of Y + 2|dy|
 ; a step (tr_k, tr_inc patched).  In: C clear.  Clobbers A, X, Y, tyy.
 tr_l:   inx
@@ -617,6 +642,9 @@ tr_k:   adc #0                     ; (operand: 255 - 2dx)
 tr_inc: inc tyv                    ; (INC or DEC)
         jmp tr_y
 
+        ENDTAIL
+
+        TAIL "T6"
 ; bclip: the bottom row's lines held at YGND+1, between the point before the
 ; first past YGND and the point after the last (beyond, every line is on the
 ; screen already); a segment with both points past is past throughout.
@@ -671,6 +699,8 @@ bcl:    cpx #0                     ; (operand: the last past)
         bcc bc_n
         rts
 
+        ENDTAIL
+
 ; The fills: generated code (gfill), in the code region.
         .segment "FILLS"
 TBLK4:  .res 3*TNB+3
@@ -682,3 +712,54 @@ tenl:   .byte <TEN4L, <TEN5L, >TEN4L, >TEN5L, <(TEN4L+1), <(TEN5L+1), >(TEN4L+1)
 tenh:   .byte <TEN4H, <TEN5H, <(TEN4H+1), <(TEN5H+1)
         .popseg
         .assert >TEN4H = >TEN5H && >(TEN4H+1) = >(TEN5H+1), error, "traceb: TEN4H, TEN5H share a page"
+
+.ifdef SWR
+; su_l4 (bank 4): setup's strip unrolled.  Corner i of rows ns-1 and ns (PX, PY
+; + Y + i, + 16) into points i+1 (TX, TY; BX, BY), BCL counting the bottom ones
+; past YGND; then window entry i of row o + ns - 1 (CLE, CLO + ldCLE + Y + i)
+; into box i+1 (CE, CO; the arc build's by the strip's brightness, cte and
+; cto).  In: Y = 16 (ns-1).  On to su_m.  Clobbers A, X, Y.
+.macro SUPX i
+        lda PX+i,y
+        sta TX+1+i
+        lda PY+i,y
+        sta TY+1+i
+        lda PX+16+i,y
+        sta BX+1+i
+        lda PY+16+i,y
+        sta BY+1+i
+        cmp #YGND+1
+        bcc :+
+        inc BCL
+:
+.endmacro
+.macro SUCL i
+.ifdef ARC
+        ldy CLE+i,x
+        lda (cte),y
+        sta CE+1+i
+        lda (cto),y
+        sta CO+1+i
+.else
+        lda CLE+i,x
+        sta CE+1+i
+        lda CLO+i,x
+        sta CO+1+i
+.endif
+.endmacro
+        .pushseg
+        .segment "B4CODE"
+su_l4:  .repeat NX, i
+        SUPX i
+        .endrepeat
+        tya
+        clc
+        adc ldCLE
+        tax
+        .repeat NX, i
+        SUCL i
+        .endrepeat
+        jmp su_m
+        .assert <CLO + 160 <= 256 && <CLE + 160 <= 256, error, "su_l4: the window's rows in their pages"
+        .popseg
+.endif

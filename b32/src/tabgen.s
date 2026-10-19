@@ -301,6 +301,74 @@ init:
         cpx #NDI
         bne @r7
 .endif
+.ifdef SWR
+        lda #0                     ; run's store pages: page q at >RUNT + q
+        sta tmp                    ; (t = q >> 1, the odd lines' when q is
+@tab:   lda tmp                    ; odd): STA line,Y for each of its lines
+        clc                        ; from R2OFF, an RTS at $FF
+        adc #>RUNT
+        sta ptr+1
+        lda #R2OFF
+        sta ptr
+        lda tmp
+        and #1
+        ora #YSKY
+        tax                        ; (X: the page's first line)
+        ldy #0
+@line:  lda #OP_STAY
+        sta (ptr),y
+        iny
+        txa                        ; the line's address: y & 7, and 2 (y >>
+        and #7                     ; 3) + the half + the screen's page
+        sta (ptr),y
+        iny
+        txa
+        lsr a
+        lsr a
+        and #$FE
+        sta tmp+1
+        lda tmp
+        lsr a
+        and #1
+        ora tmp+1
+        sta tmp+1
+        lda tmp
+        and #4
+        beq :+
+        lda #SCR1-SCR0
+:       clc
+        adc #SCR0
+        adc tmp+1
+        sta (ptr),y
+        iny
+        inx
+        inx
+        cpx #YGND+1
+        bcc @line
+        lda #OP_RTS
+        ldy #$FF-R2OFF
+        sta (ptr),y
+        inc tmp
+        lda tmp
+        cmp #8
+        bne @tab
+        .assert R2OFF + 3 * R2N = 255, error, "the store pages: the slots end at $FF"
+        ldx #YSKY-1                ; EINL: R2OFF + 3 ceil((j - YSKY) / 2),
+@el:    txa                        ; $FF at most (YGND+2's: the end slot)
+        sec
+        sbc #YSKY-1
+        lsr a
+        sta tmp+1
+        asl a
+        adc tmp+1
+        adc #R2OFF
+        bcc :+
+        lda #$FF
+:       sta EINL,x
+        inx
+        cpx #YGND+3
+        bne @el
+.else
         lda #0                     ; the parity tables: table t at >STAB + t,
         sta tmp                    ; STA line,Y for each even line
 @tab:   lda tmp
@@ -356,6 +424,7 @@ init:
         inx
         cpx #YGND+3
         bne @ol
+.endif
         ldx #0                     ; LAH: 2 (y >> 3)
 @ent:   cpx #YSKY
         bcc :+
@@ -376,12 +445,14 @@ init:
         sta BOTS,x
         dex
         bpl :-
+.ifndef SWR
         lda #<(STAB+PTEND)         ; the first RTS
         sta pp
         lda #>(STAB+PTEND)
         sta pp+1
         lda #OP_RTS
         sta STAB+PTEND
+.endif
         lda #40                    ; the camera
         sta cxt
         lda #30

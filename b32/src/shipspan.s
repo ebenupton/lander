@@ -600,7 +600,7 @@ FCX:    .res 9                     ; even-line dither byte, and even ^ odd
 ; slot byte, which it sets after this runs), sd_y, the patched opcodes and
 ; operands.  Called by shipdraw when dlast, dmir or dal changes.  TAIL
 ; starts a page (shipb.cfg) so that the chains, laid first, each lie in one.
-dl      = $8E                      ; lines left in the band
+dl      = c0+1                     ; lines left in the band (slot 1, free while spdec runs)
 ; RAW k: line 0's slot byte k from the stream's u: wb + u, or wb + (u ^ $FF)
 ; + 1 mirrored (C, mir's bit 0 from sd_c, kept by the add: w is in 3 .. 41).
 .macro RAW k

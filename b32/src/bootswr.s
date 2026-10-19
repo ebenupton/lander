@@ -240,6 +240,11 @@ copies: .word __TABLES_LOAD__, __TABLES_RUN__, __TABLES_SIZE__
         .word __T0_LOAD__, __T0_RUN__, __T0_SIZE__
         .word __T1_LOAD__, __T1_RUN__, __T1_SIZE__
         .word __T2_LOAD__, __T2_RUN__, __T2_SIZE__
+        .word __T3_LOAD__, __T3_RUN__, __T3_SIZE__
+        .word __T4_LOAD__, __T4_RUN__, __T4_SIZE__
+        .word __T5_LOAD__, __T5_RUN__, __T5_SIZE__
+        .word __T6_LOAD__, __T6_RUN__, __T6_SIZE__
+        .word __T7_LOAD__, __T7_RUN__, __T7_SIZE__
 copye:
         .assert __TABLES_RUN__ + __TABLES_SIZE__ <= __TABLES_LOAD__ && __CODE_RUN__ <= __CODE_LOAD__, error, "copies: below their sources"
 
@@ -514,5 +519,7 @@ wrsb:   .byte 0, 1, 2, 3
         .import __DATA_LAST__, __BOOT_LOAD__
         .import __TABLES_LOAD__, __TABLES_RUN__, __TABLES_SIZE__, __CODE_LOAD__, __CODE_RUN__, __CODE_SIZE__
         .import __T0_LOAD__, __T0_RUN__, __T0_SIZE__, __T1_LOAD__, __T1_RUN__, __T1_SIZE__
-        .import __T2_LOAD__, __T2_RUN__, __T2_SIZE__
+        .import __T2_LOAD__, __T2_RUN__, __T2_SIZE__, __T3_LOAD__, __T3_RUN__, __T3_SIZE__
+        .import __T4_LOAD__, __T4_RUN__, __T4_SIZE__, __T5_LOAD__, __T5_RUN__, __T5_SIZE__
+        .import __T6_LOAD__, __T6_RUN__, __T6_SIZE__, __T7_LOAD__, __T7_RUN__, __T7_SIZE__
         .include "tabgen.s"

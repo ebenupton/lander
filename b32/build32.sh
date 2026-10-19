@@ -16,7 +16,7 @@
 set -e
 cd "$(dirname "$0")/.."
 B=build32
-[ "$SWR" = 1 ] && B=buildswr
+[ "$SWR" = 1 ] && B=${BDIR:-buildswr}
 mkdir -p $B
 if [ "$1" = disc ]; then
     F=
@@ -44,8 +44,9 @@ esac
 if [ "$SWR" = 1 ]; then
     python3 b32/tools/gen32.py $B
     ca65 -g --cpu 6502 -D SWR $CA $CAFLAGS -I b32/src -I $B -o $B/lander.o b32/src/lander.s -l $B/lander.lst
-    PROG=$(od65 --dump-segsize $B/lander.o | awk '$1 ~ /^(FILLS|CODE):$/ {n += $2} END {print 11264 - n}')
-    ld65 -C b32/src/landerswr.cfg -D __PROG__=$PROG -o $B/x.bin $B/lander.o -m $B/map.txt \
+    PROG=$(od65 --dump-segsize $B/lander.o | awk '$1 ~ /^(FILLS|CODE):$/ {n += $2} END {print 10240 - n}')
+    sed "s|\"buildswr/|\"$B/|" b32/src/landerswr.cfg > $B/lander.cfg
+    ld65 -C $B/lander.cfg -D __PROG__=$PROG -o $B/x.bin $B/lander.o -m $B/map.txt \
         -Ln $B/labels.txt --dbgfile $B/lander.dbg
     python3 tools/mergebank.py $B $B/map.txt B4:B4CODE B7:B7CODE
     awk '$3 ~ /^\.(TRL|scrb|back|sidx|setTl|setTh|setBl|setBh|OVL|DBUF|GSHK)$/ \

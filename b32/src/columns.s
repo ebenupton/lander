@@ -154,7 +154,16 @@ ph_en:  stx ph_e
 
 ; c_dbl: rung ri+1 is in the column too (A = x4 | 3): split2, or slow for
 ; three or more.  A level top (V clear) is made each pixel's top first.
-c_dbl:  bvs :+
+c_dbl:  bvs c_dsl
+.ifdef SWR
+        cmp LO+2,x                 ; two rungs, a level top: s2v (bank 4),
+        bcs c_dlv                  ; unless the floor is above the top
+        ldy mx
+        cpy flr1
+        bcs c_dn
+        jmp s2v
+c_dlv:
+.endif
         tay
         lda mx
         sta mn
@@ -163,7 +172,7 @@ c_dbl:  bvs :+
         sta ys+2
         sta ys+3
         tya
-:       ldy mn
+c_dsl:  ldy mn
         cpy flr1
         bcs c_dn
         cmp LO+2,x
@@ -618,6 +627,41 @@ rpatch: lda HI,x
         sta c_lo+1
         rts
 
+.ifdef SWR
+; sethalf: the half A (0 left, 1 right) of the screen being drawn: scrh, and
+; run's store pages (t = 2 back + A: the even lines' >RUNT + 2t, the odd
+; lines' the next).  The RTSes run planted are put back in the pages being
+; left and rY's operand made t, which no end line matches, so that the next
+; run plants afresh.  Out: V clear, Y = t.  Clobbers A, X.
+        .pushseg
+        .segment "T2"
+sethalf:
+sh_b:   ora #0                     ; (operand: 2 back, setback's)
+        tay
+        lda shs,y
+        sta scrh
+        clv
+        lda #OP_STAY
+        ldx pr0+1
+sh_1:   sta RUNT,x                 ; (page: the last run's even lines')
+        ldx pr1+1
+sh_2:   sta RUNT+$100,x            ; (and odd lines')
+        sty rY+1
+        tya
+        asl a
+        adc #>RUNT                 ; (C clear: no overflow, V stays clear)
+        sta pr0+2
+        sta pp0+2
+        sta je+2
+        sta sh_1+2
+        adc #1
+        sta pr1+2
+        sta pp1+2
+        sta jo+2
+        sta sh_2+2
+        rts
+        .popseg
+.else
 ; sethalf: the half A (0 left, 1 right) of the screen being drawn: scrh, and
 ; run's tables (t = 2 back + A, the STAB page >STAB + t).  The planted RTS is
 ; put back and a new one planted at the table's end slot, so that the next
@@ -648,6 +692,7 @@ sh_b:   ora #0                     ; (operand: 2 back, setback's)
         sbc #>STAB
         tay
         rts
+.endif
         .pushseg
         .segment "TABLES"
 zbt0:   .byte $85, $D0             ; by the strip's kind: STA flr1, BNE +3
@@ -1118,6 +1163,7 @@ sl_h:   lda LAH,x                  ; (C clear)
         ldy bpos
         rts
 
+        TAIL "T7"
 ; mktr: rung X's transitions in the column into TRL (line) and TRB (the mask
 ; of the pixels left of the rung below it) from index A, $FF after.  Out: A
 ; the mask at the top.  Clobbers X, Y, tj, p0, p1, rtp.
@@ -1163,6 +1209,8 @@ mktr:   sta tj
         ldy p0
         lda LM,y
         rts
+
+        ENDTAIL
 
 ; split2: two rungs (ri, ri+1): boxes L, M, R, the boundaries bpos and bpos2
 ; moving at each rung's transitions (TRL, TRB from 0 and 6; kk, kb the next of
@@ -1278,6 +1326,45 @@ bytes2: lda me
 LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF)   ; the n leftmost
         .popseg
 
+.ifdef SWR
+; run: lines X .. Y-1 of the column (X <= Y), ve on even lines and vo on odd,
+; through the store pages (sethalf's): the even lines' holds STA line,Y for
+; each even line from R2OFF, 3 bytes a line, an RTS at $FF; the odd lines'
+; likewise.  EINL,y is the slot of the first even line at or after y, EINL-1,y
+; that of the first odd.  Each pass is entered at line X's slot (je, jo) and
+; ends at an RTS planted over line Y's (pr0, pr1: put back first unless Y is
+; the last run's); the entries stay while X is the last run's.  The odd pass's
+; RTS returns.  Clobbers A, X, Y.
+        .pushseg
+        .segment "T3"
+run:
+rX:     cpx #$FF                   ; (operand: the last X)
+        beq rY
+        stx rX+1
+        lda EINL,x
+        sta je+1
+        lda EINL-1,x
+        sta jo+1
+rY:     cpy #$FF                   ; (operand: the last Y; sethalf's t)
+        beq rv
+        sty rY+1
+        lda #OP_STAY
+pr0:    sta RUNT+$FF               ; (operand: the last even RTS)
+pr1:    sta RUNT+$1FF              ; (the last odd)
+        lda #OP_RTS
+        ldx EINL,y
+        stx pr0+1
+pp0:    sta RUNT,x                 ; (page: sethalf's)
+        ldx EINL-1,y
+        stx pr1+1
+pp1:    sta RUNT+$100,x
+rv:     lda ve
+        ldy coff
+je:     jsr RUNT+$FF               ; (operands: the entry; sethalf's page)
+        lda vo
+jo:     jmp RUNT+$1FF
+        .popseg
+.else
 ; run: lines X .. Y-1 of the column, ve on even lines and vo on odd, through
 ; the parity table (r_e, r_o's page: sethalf's).  One RTS, at entry OL,Y, ends
 ; both passes: the even from OL+1,X (A = ve, Y = coff), then the odd from OL,X
@@ -1317,6 +1404,8 @@ r_e:    jsr $FF00                  ; (operand: the even entry)
 @o:     lda vo
         iny
 r_o:    jmp $FF00                  ; (operand: the odd entry)
+
+.endif
 
 ; recordc: record for a column a rung is in: on to c_srx, or rc_t.
 recordc: tya
@@ -1536,6 +1625,7 @@ PIXM:   .byte PM($88), PM($44), PM($22), PM($11)
 
 ; The parity tables: generated code (init), at the start of four pages in the
 ; code region; the pages' tails hold code (segments T0..T3).
+.ifndef SWR
         .segment "STAB0"
 STAB:   .res PTN
         .segment "STAB1"
@@ -1545,3 +1635,117 @@ STAB:   .res PTN
         .segment "STAB3"
         .res PTN
         .code
+.endif
+
+.ifdef SWR
+; s2v (bank 4): a level-topped column two rungs split, ri and ri+1: boxes L, M,
+; R are ri-1, ri, ri+1.  fsplit first draws the column from mx down as rung
+; ri+1 splits it (M left of it, R right: fs_c, or fs_new first), with c_np an
+; RTS so that its exits return here; then L is written over the pixels left of
+; rung ri a line at a time from mx, its transitions from mktr (TRL, TRB), each
+; stretch read-modify-write in L's bytes (le, lo2).  In: X = ri, mx, flr1,
+; lastri, CE, CO, scrh, coff.  Out: through c_np.  Clobbers A, X, Y, le, lo2,
+; bpos2, kb, tj, zp_, fsplit's and mktr's.
+        .pushseg
+        .segment "B4CODE"
+s2v:    lda CE-1,x                 ; L's bytes
+        sta le
+        lda CO-1,x
+        sta lo2
+        lda #0                     ; rung ri's transitions into TRL, TRB from 0;
+                                   ; A = its mask at the top
+        jsr mktr
+        sta bpos2
+        lda #0
+        sta kb                     ; (TRL's index)
+        lda c_np                   ; c_np an RTS while fsplit runs: its JMP c_np
+                                   ; returns to s2ov
+        pha
+        lda #OP_RTS
+        sta c_np
+        ldx ri
+        inx
+        cpx lastri                 ; rung ri+1: fsplit's tables already its
+                                   ; (fs_c), or made (fs_new)
+        bne :+
+        jsr fs_c
+        jmp s2ov
+:       jsr fs_new
+s2ov:   pla                        ; c_np's opcode back
+        sta c_np
+        lda #0
+        sta zp_                    ; ((zp_),y addresses the line: zp_+1 its
+                                   ; page, Y its offset)
+        ldx mx                     ; from the top, if above the floor
+        cpx flr1
+        bcs s2_d
+        ldy kb
+        jmp s2_c
+s2_d:   jmp c_np
+s2_c:   txa                        ; (X: the line) the mask below the
+                                   ; transitions at or above it
+        cmp TRL,y
+        bcc s2_e
+:       lda TRB,y
+        sta bpos2
+        iny
+        txa
+        cmp TRL,y
+        bcs :-
+s2_e:   sty kb
+        lda TRL,y                  ; it ends at the next transition or the floor
+        cmp flr1
+        bcc :+
+        lda flr1
+:       sta tj
+        lda bpos2
+        beq s2_n                   ; (none left of the rung: nothing to write)
+        jmp s2_l
+s2_n:   ldx tj                     ; on from the stretch's end
+        cpx flr1
+        bcs s2_x
+        ldy kb
+        jmp s2_c
+s2_x:   jmp c_np
+s2_l:   lda LAH,x                  ; lines X..tj-1: L into the mask's pixels
+        clc
+        adc scrh                   ; the line's page: LAH (2 * (y >> 3)) + the
+                                   ; screen's and half's
+        sta zp_+1
+        txa
+        and #7
+        ora coff                   ; Y: the line in its row | 8 * column
+        tay
+        txa
+        lsr a
+        bcs s2_o
+s2_v:   lda (zp_),y                ; an even line
+        eor le
+        and bpos2
+        eor (zp_),y
+        sta (zp_),y
+        iny
+        inx
+        cpx tj
+        beq s2_m
+s2_o:   lda (zp_),y                ; an odd line (a row's last line is odd: the
+                                   ; row test follows)
+        eor lo2
+        and bpos2
+        eor (zp_),y
+        sta (zp_),y
+        iny
+        inx
+        cpx tj
+        beq s2_m
+        txa
+        and #7
+        bne s2_v
+        inc zp_+1                  ; the next character row: two pages on, Y
+                                   ; back to the column
+        inc zp_+1
+        ldy coff
+        jmp s2_v
+s2_m:   jmp s2_n
+        .popseg
+.endif

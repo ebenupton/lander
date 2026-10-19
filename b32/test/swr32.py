@@ -9,7 +9,7 @@ import os
 
 SWR = os.environ.get('SWR') == '1'
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
-B = os.path.join(ROOT, 'buildswr' if SWR else 'build32')
+B = os.path.join(ROOT, os.environ.get('BDIR', 'buildswr') if SWR else 'build32')
 ROMSEL = 0xFE30
 
 

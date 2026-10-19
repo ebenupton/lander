@@ -31,7 +31,13 @@ rg_lft: sta LO,x                   ; leaning left: pixels xb .. xt-1
         sta HI,x
         sbc BX,x                   ; a
         sta dva
+.ifdef SWR
+        tay                        ; (bank 4: by its tables when a <= RFA and
+        jmp rfastl                 ; D < 16, else back to rg_rdl)
+rg_rdl: asl a
+.else
         asl a                      ; 2a
+.endif
         sta ra2
         sta dvx
         lda BY,x                   ; D
@@ -63,6 +69,20 @@ rg_r:   stx tj                     ; rung X
         sta HI,x                   ; leaning right: pixels xt .. xb-1
         sbc TX,x                   ; a
         sta dva
+.ifdef SWR
+        tay
+        lda TX,x
+        sta LO,x
+        eor #$FF                   ; RTPL = alloc - LO - 1
+        clc
+        adc alloc
+        sta RTPL,x
+        jmp rfastr                 ; (bank 4, as rfastl; else back to rg_rdr)
+rg_rdr: tya
+        asl a
+        sta ra2
+        sta dvx
+.else
         asl a                      ; 2a
         sta ra2
         sta dvx
@@ -71,6 +91,7 @@ rg_r:   stx tj                     ; rung X
         eor #$FF                   ; RTPL = alloc - LO - 1 (C clear)
         adc alloc
         sta RTPL,x
+.endif
         lda BY,x                   ; D
         sec
         sbc TY,x
@@ -284,3 +305,81 @@ rg_lbe: .repeat 9, i
         .popseg
         .assert >rg_rb = >rg_rb9 && >rg_lb = >rg_lb9, error, "rg_rf, rg_lf: each body in one page"
         .assert rg_lb - rg_rb = 8*7 + 6, error, "rg_rb: 7-byte steps"
+
+.ifdef SWR
+; rfastr, rfastl (bank 4): rung X leaning right or left by RFA's tables when a
+; <= RFA and D < 16 (a wrapped D, yb < yt, is 16 or more): TRk, TLk (gen32.py)
+; hold pixel k's line less yt at 16 (RFA - a) + D, k counted from LO.  The
+; unrolled bodies store pixels RFA-1 .. 0, entered at pixel a-1; then the
+; sentinel, alloc on, and the next rung.  Otherwise back to rg_rdr, rg_rdl.
+; In: X the rung, Y = dva = a, alloc, tj.  Clobbers A, X, Y, rrem.
+        .pushseg
+        .segment "B4CODE"
+rfastr: cpy #RFA+1                 ; a > RFA: the other ways
+        bcs @sl
+        lda TY,x
+        sta rrem                   ; yt
+        eor #$FF                   ; D = yb - yt (yb + ~yt + 1)
+        sec
+        adc BY,x
+        cmp #16
+        bcs @sl                    ; (C clear after: the bodies' ADCs rely on it)
+        ora B16-1,y                ; X = 16 (RFA - a) + D
+        tax
+        lda DUFR-1,y               ; the entry for a
+        sta @j+1
+        ldy alloc
+@j:     jmp FR0                    ; (operand's low byte patched)
+@sl:    jmp rg_rdr
+rfastl: cpy #RFA+1
+        bcs @sl
+        lda TY,x
+        sta rrem
+        eor #$FF
+        sec
+        adc BY,x
+        cmp #16
+        bcs @sl
+        ora B16-1,y
+        tax
+        lda DUFL-1,y
+        sta @j+1
+        ldy alloc
+@j:     jmp FL0
+@sl:    tya
+        jmp rg_rdl
+B16:    .repeat RFA, i             ; B16[a-1] = 16 (RFA - a)
+        .byte 16 * (RFA - 1 - i)
+        .endrepeat
+DUFR:   .repeat RFA, i             ; the bodies' entries for a (8 bytes a pixel)
+        .byte <(FR0 + 8 * (RFA - 1 - i))
+        .endrepeat
+DUFL:   .repeat RFA, i
+        .byte <(FL0 + 8 * (RFA - 1 - i))
+        .endrepeat
+.macro RFBODY T                    ; pixels RFA-1 .. 0: yt + T<k>[X] to RTBUF +
+        .repeat RFA, i             ; alloc + k
+        lda .ident(.sprintf("%s%d", T, RFA - 1 - i)),x
+        adc rrem                   ; (C stays clear: yt + offset <= yb < 256)
+        sta RTBUF + RFA - 1 - i,y
+        .endrepeat
+        tya                        ; alloc += a + 1; the sentinel at the old
+        sec                        ; alloc + a
+        adc dva
+        sta alloc
+        tay
+        lda #$FF
+        sta RTBUF-1,y
+        ldx tj                     ; the next rung, or done
+        inx
+        cpx #NX+1
+        bcs :+
+        jmp rg_r
+:       rts
+.endmacro
+        .segment "B4BODY"
+FR0:    RFBODY "TR"
+FL0:    RFBODY "TL"
+        .assert >FR0 = >(FR0 + 8 * RFA - 1) && >FL0 = >(FL0 + 8 * RFA - 1), error, "rfast: each body's entries in one page"
+        .popseg
+.endif

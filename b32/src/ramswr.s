@@ -92,6 +92,8 @@ TX:     .res 16                    ; the strip's rows' x's
 BX:     .res 16
 LO:     .res 16                    ; each rung's pixels LO .. HI-1
 HI:     .res 16
+kpp:    .res 2                     ; runk: the RTS it planted last
+kpg:    .res 1                     ; and its table's page (sethalf's)
 .ifdef ARC
 cte:    .res 2                     ; setup: CTE, CTO + the strip's brightness
 cto:    .res 2
@@ -251,12 +253,7 @@ CURB:   .res 64
 EINLB:  .res YGND+4-YSKY           ; EINL,y: run's slot for line y (y from
                                    ; YSKY-1 to YGND+2)
 QOA:    .res 7                     ; div8's rows
-TEN5L:  .res TNB+1                 ; the fills' entries
         .res $1000 - *
-TEN4H:  .res TNB+1
-TEN5H:  .res TNB+1
-TEN4L:  .res TNB+1
-        .res $1100 - *
 QRA:    .res QRAN                  ; div8's table
 .ifdef ARC
         .res $1200 - *             ; (the stored tables' CTE, CTO: setup's
@@ -274,7 +271,7 @@ LAH     = LAHB-YSKY
         .assert <LAHB = YSKY && >EINL = >(EINL+YGND+2), error, "the line tables: indexed within their pages"
         .assert >TOPS = >(BOTS+127) && >CURT = >(CURT+63) && >CURB = >(CURB+63), error, "the column records"
         .assert <RPT = 0 && <RQF = 0, error, "page-aligned tables"
-        .assert >TEN5L = >(TEN5L+TNB) && >TEN4H = >(TEN5H+TNB) && >TEN4L = >(TEN4L+TNB) && >QRA = >(QRA+QRAN-1), error, "TEN4L .. TEN5H, QRA: in their pages"
+        .assert >TEN4L = >(TEN5L+TNB) && >TEN4H = >(TEN5H+TNB) && >QRA = >(QRA+QRAN-1), error, "TEN4L .. TEN5H (bank 4), QRA: in their pages"
 
 RUNT    = $2800                    ; run's store pages (made by init): eight,
                                    ; their first R2OFF bytes code (T0 .. T7)

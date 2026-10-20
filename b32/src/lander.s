@@ -93,7 +93,7 @@ OP_DEX  = $CA
 ; GSEG s: the game's segment s, or bank 5's in the sideways RAM build.
 .macro GSEG s
 .ifdef SWR
-        .segment "B5"
+        .segment "B5CODE"
 .else
         .segment s
 .endif
@@ -143,7 +143,7 @@ loop:   jsr gstep
         .include "columns.s"
 .ifndef COREPAD                    ; the renderer's page phase, tuned by the
 .ifdef SWR                         ; flight's cycles (b32/tools/padscan.sh)
-COREPAD = 80
+COREPAD = 21
 .else
 COREPAD = 4
 .endif
@@ -152,7 +152,7 @@ COREPAD = 4
 .ifdef SWR
         .include "videoswr.s"
         .pushseg
-        .segment "B5"
+        .segment "B5CODE"
         .include "game.s"
         .popseg
         .pushseg

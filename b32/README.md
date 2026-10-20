@@ -75,8 +75,8 @@ top 64 lines.  The only interrupt is the vertical sync's (`videoswr.s`).
 
 | bank | contents                                                                          |
 |------|-----------------------------------------------------------------------------------|
-| 4    | the map's heights and every tile's colour bytes; the rungs' tables; the projection's front, the rungs' fast way (`rfast`), the level two-rung columns (`s2v`), setup's strip |
-| 5    | the game (`game.s`), its tables and the panel's map                               |
+| 4    | the map's heights; the tables the land is drawn by (the rungs', DQT and DRT's divisions, the line pages, CLMP1, DIV4, RSMT, the fills and the black runs' store tables); the projection's front, `rfast`, `s2v`, `runk`, setup's strip |
+| 5    | each tile's colour bytes and the colour window (`pcol5`); the game (`game.s`), its tables and the panel's map |
 | 6    | the ship: every orientation pre-rasterised (`shipb.s`, `shipspan.s`, `tools/shipgen.py`) |
 | 7    | the rows' points (`prow7.s`) and their tables by depth                            |
 
@@ -90,7 +90,7 @@ own banks in and bank 4 back (`pg4` .. `pg7`).
 | `$0E00`   |           | the data, then the stored tables                               |
 |           |           | free                                                           |
 | computed  | `$27FF`   | the code, linked to end exactly here                           |
-| `$2800`   | `$2FFF`   | run's eight store pages (generated), code in their first 111 bytes |
+| `$2800`   | `$2FFF`   | run2's eight store pages (generated), code in their first 111 bytes |
 | `$3000`   | `$7FFF`   | the two screens                                                |
 
 The disc's `LANDER` loads at `$7000` and finds the banks; the bank images `B7` .. `B4` and

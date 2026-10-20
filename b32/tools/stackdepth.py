@@ -85,7 +85,7 @@ def image(lab, seg):
     if swr:
         for n in (4, 5, 6, 7):
             banks[n] = open(os.path.join(B, f'B{n}'), 'rb').read().ljust(0x4000, b'\0')
-        spaces += [(*seg['B4CODE'], 4), (*seg['B5'], 5), (*seg['B7CODE'], 7)]
+        spaces += [(*seg['B4CODE'], 4), (*seg['B5CODE'], 5), (*seg['B7CODE'], 7)]
         for name, (lo, hi) in segments('shipb_map.txt').items():
             if name in ('CODE', 'TAIL'):
                 spaces.append((lo, hi, 6))

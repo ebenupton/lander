@@ -5,9 +5,10 @@
 #   sh b32/build32.sh disc                   all four and a chooser: build32/lander32-all.ssd
 #
 # SWR=1: the sideways RAM build instead, into buildswr/ (BDIR=dir: elsewhere):
-# buildswr/landerswr[-VERSION].ssd, or landerswr-all.ssd (80 tracks; B7 shared).
-# gen32.py also writes the bank images B4, B7, into which mergebank.py puts their
-# code; B5 is linked whole; B6 (the ship) is assembled apart from shipb.s with the
+# buildswr/landerswr[-VERSION].ssd, or landerswr-all.ssd (80 tracks; B7 shared, B4 shared
+# but for arc's).
+# gen32.py also writes the bank images B4, B5, B7, into which mergebank.py puts
+# their code; B6 (the ship) is assembled apart from shipb.s with the
 # main link's labels (landsyms.inc).
 #
 # The versions: mode1 (MODE 1's four colours), cpc (MODE 2: the CPC's 27 colours as
@@ -35,9 +36,11 @@ if [ "$1" = disc ] && [ "$SWR" = 1 ]; then
         done
         X=$(awk '$3 == ".start" {print $2}' $B/labels.txt | sed 's/^00//')
         F="$F ${v#*:}.LANDER:$d/LANDER:7000:$X ${v#*:}.LAND:$d/LAND:3000:3000"
-        F="$F ${v#*:}.B4:$d/B4:3000:3000 ${v#*:}.B5:$d/B5:3000:3000 ${v#*:}.B6:$d/B6:3000:3000"
+        F="$F ${v#*:}.B5:$d/B5:3000:3000 ${v#*:}.B6:$d/B6:3000:3000"
     done
     for d in C N A; do cmp -s $B/disc/$d/B7 $B/disc/M/B7 || { echo "build32.sh: B7 differs" >&2; exit 1; }; done
+    for d in C N; do cmp -s $B/disc/$d/B4 $B/disc/M/B4 || { echo "build32.sh: B4 differs" >&2; exit 1; }; done
+    F="$F B4:$B/disc/M/B4:3000:3000 A.B4:$B/disc/A/B4:3000:3000"
     { printf 'VDU21\rNEW\r'; sed 's/LANDER (32K)/LANDER (sideways RAM)/' b32/src/menu32.bas | tr '\n' '\r'; printf 'RUN\r'; } > $B/BOOTM
     python3 tools/mkdfs.py build $B/landerswr-all.ssd LANDERSWR "!BOOT:$B/BOOTM:0000:FFFF" \
         "B7:$B/disc/M/B7:3000:3000" $F
@@ -74,7 +77,7 @@ if [ "$SWR" = 1 ]; then
     sed "s|\"buildswr/|\"$B/|" b32/src/landerswr.cfg > $B/lander.cfg
     ld65 -C $B/lander.cfg -D __PROG__=$PROG -o $B/x.bin $B/lander.o -m $B/map.txt \
         -Ln $B/labels.txt --dbgfile $B/lander.dbg
-    python3 tools/mergebank.py $B $B/map.txt B4:B4CODE B7:B7CODE
+    python3 tools/mergebank.py $B $B/map.txt B4:B4CODE B5:B5CODE B7:B7CODE
     awk '$3 ~ /^\.(TRL|scrb|back|sidx|setTl|setTh|setBl|setBh|OVL|DBUF|GSHK)$/ \
         {printf "L_%s = $%s\n", substr($3, 2), substr($2, 3)}' $B/labels.txt > $B/landsyms.inc
     python3 tools/shipgen.py $B > /dev/null

@@ -96,7 +96,11 @@ clre:
 
 ; The banks' files: B4 .. B7 (cmdo: each command's offset in cmdb).
 cmdb:
+.ifdef ARC
 cmd4:   .byte "LOAD B4 3000", 13
+.else
+cmd4:   .byte "LOAD $.B4 3000", 13         ; (shared by the other versions)
+.endif
 cmd5:   .byte "LOAD B5 3000", 13
 cmd6:   .byte "LOAD B6 3000", 13
 cmd7:   .byte "LOAD $.B7 3000", 13        ; (shared by the versions)

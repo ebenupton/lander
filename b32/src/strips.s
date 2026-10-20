@@ -330,6 +330,24 @@ t_seg:  cmp BY+1,x                 ; segment X: A = tyv = its y0
         asl a
         bcs t_o
         sta ra2                    ; 2|dy|
+.ifdef SWR
+        ora terr                   ; q2, r2 by DQT, DRT (row |dy|, + dx) when
+        cmp #64                    ; |dy| < 32 and dx < 64, else div8
+        bcs t_dv
+        lda DVH,y
+        sta t_dq+2
+        adc #>(DRT-DQT)
+        sta t_dr+2
+        lda DVL,y
+        ora terr
+        tay
+t_dq:   lda DQT,y                  ; (operands' pages: the row's)
+        sta dvd
+t_dr:   lda DRT,y
+        sta t_rr+1
+        ldy dvd
+t_dj:
+.else
         sty dvx                    ; q2, r2
         lda terr
         sta dvd
@@ -337,6 +355,7 @@ t_seg:  cmp BY+1,x                 ; segment X: A = tyv = its y0
         asl a
         sta t_rr+1
         ldy dvd
+.endif
         cpy #TNB+1
         bcs t_o
         sty rq2                    ; the first step at x0 + q + (rem > 0),
@@ -380,6 +399,17 @@ t_one:  lda terr                   ; |dy| 1: the step at x0 + ceil(dx / 2)
         bcc tf_l
 t_fl1:  ldy dva                    ; a first run longer than TNB
         jmp t_flo
+.ifdef SWR
+t_dv:   sty dvx                    ; (beyond DQT, DRT) q2, r2 by div8
+        lda terr
+        sta dvd
+        jsr div8
+        asl a
+        sta t_rr+1
+        ldy dvd
+        jmp t_dj
+        .assert DRT - DQT = $800 && <DQT = 0, error, "t_dq, t_dr: DRT's rows 8 pages on"
+.endif
 t_fr:   lda #<(t_last-t_bq-2)      ; t_fl's end: t_bq back, and t_fl returns
         sta t_bq+1
         rts
@@ -553,10 +583,41 @@ tfbl:   .byte <TBLK4, <TBLK5
 tfbh:   .byte >TBLK4, >TBLK5
         .popseg
 
-        TAIL "T4"
 ; divs: rq, rrem = D div 2a, D mod 2a, and rq2, rr2 = D div a, 2 (D mod a).
 ; In: dva = a, ra2 = dvx = 2a, dvd = D.  Clobbers A, Y, dvx, dvd.
-divs:   jsr div8
+divs:
+.ifdef SWR
+        lda dva                    ; a < 32 and D < 64: DQT, DRT's row a, + D
+        cmp #32
+        bcs @dv
+        lda dvd
+        cmp #64
+        bcs @dv
+        ldy dva
+        lda DVH,y
+        sta @q+2
+        adc #>(DRT-DQT)            ; (C clear)
+        sta @r+2
+        lda DVL,y
+        ora dvd
+        tay
+@r:     lda DRT,y                  ; rr2 = 2 (D mod a); D mod 2a = D mod a, + a
+        sta rr2                    ; if D div a is odd
+        lsr a
+        sta rrem
+@q:     lda DQT,y                  ; rq2 = D div a, rq = D div 2a
+        sta rq2
+        lsr a
+        sta rq
+        bcc :+
+        lda rrem
+        adc dva                    ; (C set: + a + 1, less the 1)
+        sbc #0
+        sta rrem
+:       rts
+@dv:
+.endif
+        jsr div8
         sta rrem
         cmp dva
         bcc :+
@@ -571,7 +632,6 @@ divs:   jsr div8
         sta rr2
         rts
 
-        ENDTAIL
 
         TAIL "T5"
 ; div8: dvd = dvd div dvx, A = dvd mod dvx (A = dvd in).  Small cases at once
@@ -703,10 +763,12 @@ bcl:    cpx #0                     ; (operand: the last past)
         ENDTAIL
 
 ; The fills: generated code (gfill), in the code region.
+.ifndef SWR                        ; (SWR: in bank 4, swrtab.inc's)
         .segment "FILLS"
 TBLK4:  .res 3*TNB+3
 TBLK5:  .res 3*TNB+3
         .code
+.endif
         .pushseg
         .segment "TABLES"
 tenl:   .byte <TEN4L, <TEN5L, >TEN4L, >TEN5L, <(TEN4L+1), <(TEN5L+1), >(TEN4L+1), >(TEN5L+1)

@@ -49,7 +49,7 @@ def byte_rows(name, values, step=16):
 
 
 def tables_inc():
-    k = dict(TNB=64, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, ZBACK=L.ZBACK, ZSKIP=L.ZSKIP,
+    k = dict(TNB=SWR_TNB if os.environ.get('SWR') == '1' else 64, NDI=G.NDI, NX=G.NXD, XSKIP=L.XSKIP, ZBACK=L.ZBACK, ZSKIP=L.ZSKIP,
              ZCLIP=L.ZCLIP, ZFCLIP=L.ZFCLIP, DI0=G.DI0, ZSHIP=L.ZSHIP, CAMH=L.CAMH,
              EMAX=L.EMAX, PADN=L.PADN, PADH=L.PADH, HORIZON=L.HORIZON, YSKY=G.YSKY,
              YGND=G.YGND, MAPN=L.MAP, QRAN=sum(32 - d for d in range(2, 9)))
@@ -168,16 +168,20 @@ def pal_inc():
     return out
 
 
-B4MAP, B4CE, B4CO, B4TR, B4CODE = 0x8000, 0x9000, 0xA000, 0xB000, 0xB600
 B7CODE = 0xB480
+SWR_TNB = 127                      # the fills' longest (TEN4H, TEN5H share a page)
+B4FIXED = dict(B4MAP=0x8000, DQT=0x9000, DRT=0x9800, CLMP1=0xA000, DIV4=0xA100,
+               LAHS=0xA200, TENH=0xA600, TENL=0xA700, TBLK4=0xA800, TBLK5=0xA980)
+B5CMAPE, B5CMAPO, B5CODE = 0x8000, 0x9000, 0xA000
+BLKT = 0xB800                      # bank 4: the black runs' tables (to $BFFF)
 
 
 def rfast_tables():
-    """landgen's TRk, TLk (rungs' fast way) packed into pages from B4TR: {name: (address,
-    bytes)}.  Entry 16 (RFA - a) + D of TRk is pixel k's transition for a rung of a
-    pixels leaning right, D lines deep: ceil(D (2j - 1) / 2a), j = k + 1 (TLk: j = a - k)."""
+    """landgen's TRk, TLk (the rungs' fast way): {name: bytes}.  Entry 16 (RFA - a) + D
+    of TRk is pixel k's transition for a rung of a pixels leaning right, D lines deep:
+    ceil(D (2j - 1) / 2a), j = k + 1 (TLk: j = a - k)."""
     rfa = G.RFA
-    tabs = []
+    out = {}
     for k in range(rfa):
         for side in 'RL':
             v = bytearray(16 * (rfa - k))
@@ -185,50 +189,123 @@ def rfast_tables():
                 j = k + 1 if side == 'R' else a - k
                 for d in range(16):
                     v[16 * (rfa - a) + d] = -(-d * (2 * j - 1) // (2 * a))
-            tabs.append((f'T{side}{k}', bytes(v)))
-    tabs.sort(key=lambda t: -len(t[1]))
-    pages, out = [], {}
-    for name, v in tabs:                           # first fit, largest first
-        for p in pages:
-            if p[1] + len(v) <= 256:
-                out[name] = (B4TR + 256 * p[0] + p[1], v)
-                p[1] += len(v)
-                break
-        else:
-            out[name] = (B4TR + 256 * len(pages), v)
-            pages.append([len(pages), len(v)])
-    assert B4TR + 256 * len(pages) <= B4CODE, 'bank 4: the rung tables over its code'
+            out[f'T{side}{k}'] = bytes(v)
     return out
 
 
+def bank4_tables():
+    """Bank 4's tables: {name: (address, bytes or None)} (None: made by the loader's init)
+    and the code's start.  Fixed: the map's heights (64 a row), DQT, DRT (D div a, 2 (D
+    mod a), 64 a + D: a 1..31, D 0..63), CLMP1 (d + 1, signed, clamped to 0..4), DIV4 (x
+    >> 2), the four line-page tables LAHSBt (a page each from LAHS, one low byte for all:
+    sethalf patches the page), the fills' entries (TENxH by n in one page, TENxL in the
+    next) and the fills TBLK4, TBLK5 (init's).  Then, first fit into the gaps: RSMT ((y &
+    ~7) - 1), DVH, DVL (DQT's row a: its page, its low byte), the rungs' tables.  The
+    code follows on the next page."""
+    t = {}
+    hm = L.heightmap()
+    t['B4MAP'] = (B4FIXED['B4MAP'], bytes(int(hm[0][z, x]) for z in range(64) for x in range(64)))
+    dq, dr = bytearray(2048), bytearray(2048)
+    for a in range(1, 32):
+        for d in range(64):
+            dq[64 * a + d], dr[64 * a + d] = d // a, 2 * (d % a)
+    t['DQT'], t['DRT'] = (B4FIXED['DQT'], bytes(dq)), (B4FIXED['DRT'], bytes(dr))
+    t['CLMP1'] = (B4FIXED['CLMP1'], bytes(0 if ((d + 1) & 255) >= 128 else min((d + 1) & 255, 4)
+                                          for d in range(256)))
+    t['DIV4'] = (B4FIXED['DIV4'], bytes(x >> 2 for x in range(256)))
+    lines = range(G.YSKY, G.YGND + 2)
+    for q in range(4):                             # q = 2 screen + half
+        page = (0x30 if q < 2 else 0x58) + (q & 1)
+        t[f'LAHS{q}'] = (B4FIXED['LAHS'] + 256 * q, bytes(page + 2 * (y >> 3) for y in lines))
+    t['TENH'] = (B4FIXED['TENH'], None)
+    t['TENL'] = (B4FIXED['TENL'], None)
+    t['TBLK4'] = (B4FIXED['TBLK4'], None)
+    t['TBLK5'] = (B4FIXED['TBLK5'], None)
+    used = [(B4FIXED['B4MAP'], 0x8000 + 0x1000), (0x9000, 0xA200)]
+    used += [(a, a + len(v)) for n, (a, v) in t.items() if n.startswith('LAHS')]
+    used += [(0xA600, 0xAB00)]
+    gaps = []
+    for pg in range(0xA2, 0xC0):                   # free bytes by page
+        lo = pg * 256
+        taken = [(max(a, lo), min(b, lo + 256)) for a, b in used if a < lo + 256 and b > lo]
+        top = max([b for _, b in taken], default=lo)
+        if top < lo + 256:
+            gaps.append([top, lo + 256])
+    items = {'RSMT': bytes(((y & 0xF8) - 1) & 255 for y in range(G.YSKY, G.YGND + 3)),
+             'DVH': bytes(((B4FIXED['DQT'] + 64 * a) >> 8) for a in range(32)),
+             'DVL': bytes((64 * a) & 255 for a in range(32))}
+    items.update(rfast_tables())
+    for name, v in sorted(items.items(), key=lambda kv: -len(kv[1])):
+        g = next(g for g in gaps if g[1] - g[0] >= len(v))
+        t[name] = (g[0], v)
+        g[0] += len(v)
+    end = max(a + (len(v) if v else 0) for a, v in t.values() if a >= 0xAB00)
+    assert end <= 0xB000, 'bank 4: the tables over its code ($B000, landerswr.cfg)'
+    # the black runs' store tables (runk): table q at BLKT + $200 q, a slot of STA
+    # line,Y for each line YSKY .. YGND+1 (line YGND+1's an RTS, the end); KENL, KENH
+    # (the slot's low byte, and its page less the table's) by line, YSKY .. YGND+2
+    # (YGND+2's the end slot too), in the tables' second pages' spare
+    n = G.YGND + 2 - G.YSKY
+    for q in range(4):
+        v = bytearray()
+        for y in range(G.YSKY, G.YGND + 2):
+            a = (0x3000 if q < 2 else 0x5800) + 256 * (q & 1) + 512 * (y >> 3) + (y & 7)
+            v += bytes([0x99, a & 255, a >> 8]) if y <= G.YGND else bytes([0x60, 0, 0])
+        t[f'BLK{q}'] = (BLKT + 0x200 * q, bytes(v))
+    lines = list(range(G.YSKY, G.YGND + 3))
+    slot = [3 * (min(y, G.YGND + 1) - G.YSKY) for y in lines]
+    t['KENL'] = (BLKT + 3 * n, bytes(o & 255 for o in slot))
+    t['KENH'] = (BLKT + 0x200 + 3 * n, bytes(o >> 8 for o in slot))
+    assert 256 <= 3 * n and 3 * n - 256 + len(lines) <= 256, 'KENL, KENH: in the tables\' second pages'
+    return t, 0xB000
+
+
 def bank4():
-    """Bank 4's image: the map's heights (64 a row from B4MAP), each tile's colour bytes
-    (CMAPE, CMAPO; the arc build's CMAPE its class, 9 kind + slope) and the rungs' tables;
-    the code follows at B4CODE."""
+    """Bank 4's image (bank4_tables'); the code follows."""
+    img = bytearray(0x4000)
+    tabs, _ = bank4_tables()
+    for a, v in tabs.values():
+        if v:
+            assert not any(img[a - 0x8000:a - 0x8000 + len(v)]), 'bank 4: tables overlap'
+            img[a - 0x8000:a - 0x8000 + len(v)] = v
+    return img
+
+
+def bank5():
+    """Bank 5's image: each tile's colour bytes (CMAPE, CMAPO; the arc build's CMAPE its
+    class, 9 kind + slope) by 64 z + x; the code (the game, pcol5) follows at B5CODE."""
     img = bytearray(0x4000)
     hm = L.heightmap()
     for z in range(64):
         for x in range(64):
             o = 64 * z + x
-            img[B4MAP - 0x8000 + o] = int(hm[0][z, x])
             if NU.arc():
                 k, s = MG.arc_tile(x, z) if L.GEN else L.arc_tile(hm, x, z)
-                img[B4CE - 0x8000 + o] = 9 * k + s
+                img[B5CMAPE - 0x8000 + o] = 9 * k + s
             else:
                 e, d = G.dither_bytes(L.colour(hm, x, z, 0, 0))
-                img[B4CE - 0x8000 + o] = e
-                img[B4CO - 0x8000 + o] = d
-    for a, v in rfast_tables().values():
-        img[a - 0x8000:a - 0x8000 + len(v)] = v
+                img[B5CMAPE - 0x8000 + o] = e
+                img[B5CMAPO - 0x8000 + o] = d
     return img
 
 
 def swrtab_inc():
-    """The sideways RAM build's addresses and constants: banks 4 and 7's tables."""
+    """The sideways RAM build's addresses and constants: banks 4, 5 and 7's tables."""
     eys = 255 - max(L.HORIZON + (((L.CAMH + L.HMAX) * L.recip((G.DI0 + di) * 16) + L.HSCALE * 128)
                                  // (L.HSCALE * 256)) for di in range(G.NDI))
-    k = dict(B4MAP=B4MAP, CMAPE=B4CE, CMAPO=B4CO, B4CODE=B4CODE, B7CODE=B7CODE)
-    k.update({n: a for n, (a, _) in rfast_tables().items()})
+    tabs, code = bank4_tables()
+    k = {n: a for n, (a, _) in tabs.items()}
+    for q in range(4):                             # (line tables: base + y)
+        k[f'LAHSB{q}'] = k.pop(f'LAHS{q}') - G.YSKY
+    k['RSMT'] -= G.YSKY
+    k['KENL'] -= G.YSKY
+    k['KENH'] -= G.YSKY
+    k['BLKT'] = k.pop('BLK0')
+    for q in (1, 2, 3):
+        k.pop(f'BLK{q}')
+    k['TEN4H'], k['TEN5H'] = k['TENH'], k.pop('TENH') + SWR_TNB + 1
+    k['TEN4L'], k['TEN5L'] = k['TENL'], k.pop('TENL') + SWR_TNB + 1
+    k.update(B4CODE=code, CMAPE=B5CMAPE, CMAPO=B5CMAPO, B5CODE=B5CODE, B7CODE=B7CODE)
     k.update(G.ADDR7)
     out = ['; b32/tools/gen32.py: the sideways RAM banks\' tables']
     out += [f'{n:8s}= ${v:04X}' for n, v in k.items()]
@@ -269,6 +346,7 @@ def main():
     if swr:
         files.update({'swrtab.inc': swrtab_inc(), 'panel.inc': panel_inc()})
         open(os.path.join(out, 'B4'), 'wb').write(bank4())
+        open(os.path.join(out, 'B5'), 'wb').write(bank5())
         open(os.path.join(out, 'B7'), 'wb').write(G.build7())
     else:
         files.update({'mapgen.inc': mapgen_inc(), 'neartab.inc': neartab_inc()})

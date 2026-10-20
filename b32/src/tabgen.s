@@ -445,6 +445,12 @@ init:
         sta BOTS,x
         dex
         bpl :-
+.ifdef SWR
+        lda #<(BLKT+3*(YGND+1-YSKY))   ; runk's first: the end slot's RTS
+        sta kpp
+        lda #>(BLKT+3*(YGND+1-YSKY))
+        sta kpp+1
+.endif
 .ifndef SWR
         lda #<(STAB+PTEND)         ; the first RTS
         sta pp

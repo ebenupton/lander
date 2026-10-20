@@ -185,10 +185,14 @@ c_dn:   jmp c_np
 ; record: a one-box column, new this frame: CURT is its top (mn, or mx when
 ; level); if the land was higher here last time (TOPS), black down to mx-1
 ; first.  In: Y = x4, V, mn, mx.  (pT3, pT5: the sets' operands.)
+.ifdef SWR
+record: ldx DIV4,y
+.else
 record: tya
         lsr a
         lsr a
         tax
+.endif
         lda mx
         bvc :+
         lda mn
@@ -219,7 +223,11 @@ c_split: cmp LO+1,x
         bvs :+
 fsplit: lda mx
         cmp flr1
+.ifdef SWR
+        bcs c_dn                   ; (JMP c_np: run2 between)
+.else
         bcs c_np
+.endif
         cpx lastri
         beq :++
         jmp fs_ns
@@ -249,6 +257,11 @@ rc_t:   tax
         jmp c_rd
 rc_r:   dex
         ldy mx
+.ifdef SWR
+        php
+        jsr runk
+        plp
+.else
         lda ve
         sta svE
         lda vo
@@ -263,6 +276,7 @@ rc_r:   dex
         sta ve
         lda svO
         sta vo
+.endif
         ldy x4
 ; c_rd: the rung tests again after the black: rung ri in the column, or not.
 c_rd:   ldx ri
@@ -277,7 +291,36 @@ c_r1:   ldx mx
 c_r1x:  cpx flr1                   ; (zone1 returns here, X = mx)
         bcs c_next
         ldy flr1
+.ifdef SWR
+run2:
+rX:     cpx #$FF                   ; (operand: the last X)
+        beq rY
+        stx rX+1
+        lda EINL,x
+        sta je+1
+        lda EINL-1,x
+        sta jo+1
+rY:     cpy #$FF                   ; (operand: the last Y; sethalf's t)
+        beq rv
+        sty rY+1
+        lda #OP_STAY
+pr0:    sta RUNT+$FF               ; (operand: the last even RTS)
+pr1:    sta RUNT+$1FF              ; (the last odd)
+        lda #OP_RTS
+        ldx EINL,y
+        stx pr0+1
+pp0:    sta RUNT,x                 ; (page: sethalf's)
+        ldx EINL-1,y
+        stx pr1+1
+pp1:    sta RUNT+$100,x
+rv:     lda ve
+        ldy coff
+je:     jsr RUNT+$FF               ; (operands: the entry; sethalf's page)
+        lda vo
+jo:     jsr RUNT+$1FF              ; (then on into c_next)
+.else
 run2:   jsr run
+.endif
 ; c_next: the column done.  c_np is LDA x4 / CLC on to c_nd1, or in the near
 ; strip JMP nearpost (and an RTS while fr runs).
 c_next:
@@ -476,12 +519,17 @@ zb_n:   stx flr
 ; down to flr-1, and line flr.  Then CURB is the floor, and black from it
 ; down to BOTS.  In: flr, flr1, x4, coff, bota, scrh.  (pB4 .. pB8: the sets'
 ; operands.)  Out: flr 0; on to the next column.
+.ifdef SWR
+np_b:   ldx x4                     ; CURB = A, or YGND below the screen
+        ldy DIV4,x
+.else
 np_b:   pha                        ; CURB = A, or YGND below the screen
         lda x4
         lsr a
         lsr a
         tay
         pla
+.endif
         cmp #YGND+1
         bcc pB4
         lda #YGND
@@ -492,27 +540,42 @@ nearpost:
         lda flr1
         cmp #YGND+1
         bcc np_lv
+.ifdef SWR
+np_hd:  ldx x4                     ; below the screen: nothing to draw
+        ldy DIV4,x
+.else
 np_hd:  lda x4                     ; below the screen: nothing to draw
         lsr a
         lsr a
         tay
+.endif
         lda #YGND
         .assert YGND >= $80, error, "np_hd: BMI pB4 needs YGND >= 128"
         bmi pB4                    ; (always)
 np_lv:  tax                        ; line flr1 black
         and #7
         sta zp_
+.ifdef SWR
+np_h:   lda LAHSB0,x           ; (page: sethalf's)
+.else
 np_h:   lda LAH,x                  ; (C clear)
         adc scrh
+.endif
         sta zp_+1
         ldy coff
         lda #0
         sta (zp_),y
+.ifdef SWR
+        txa
+        ldx x4
+        ldy DIV4,x
+.else
         lda x4
         lsr a
         lsr a
         tay
         txa
+.endif
 pB4:    sta CURB,y
 pB5:    cmp BOTS,y
         bcc np_d
@@ -539,6 +602,9 @@ np_r:
 pB8:    lda BOTS,y                 ; a run
         tay
         iny
+.ifdef SWR
+        jsr runk
+.else
         lda ve
         sta svE
         lda vo
@@ -551,6 +617,7 @@ pB8:    lda BOTS,y                 ; a run
         sta ve
         lda svO
         sta vo
+.endif
         jmp c_nd
 np_z:   ldy x4                     ; the floor slopes: each pixel's line
         lda (bota),y
@@ -577,9 +644,13 @@ np_z:   ldy x4                     ; the floor slopes: each pixel's line
         cpx flr
         bcs np_e
 np_l:                              ; each line, its pixels at or below their
+.ifdef SWR
+np_h2:  lda LAHSB0,x           ; (page: sethalf's)
+.else
 np_h2:  lda LAH,x                  ; bottom-row line black
         clc
         adc scrh
+.endif
         sta zp_+1
         txa
         and #7
@@ -604,9 +675,13 @@ np_h2:  lda LAH,x                  ; bottom-row line black
         bne np_x
 np_e:   cpx #YGND                  ; line flr: masked at YGND (bclip may have
         beq np_l                   ; held pixels below), else whole
+.ifdef SWR
+np_h3:  lda LAHSB0,x           ; (page: sethalf's)
+.else
 np_h3:  lda LAH,x
         clc
         adc scrh
+.endif
         sta zp_+1
         txa
         and #7
@@ -649,7 +724,11 @@ sh_2:   sta RUNT+$100,x            ; (and odd lines')
         sty rY+1
         tya
         asl a
-        adc #>RUNT                 ; (C clear: no overflow, V stays clear)
+        tax
+        adc #>BLKT                 ; runk's table (C clear, V stays clear)
+        sta kpg
+        txa
+        adc #>RUNT
         sta pr0+2
         sta pp0+2
         sta je+2
@@ -659,6 +738,13 @@ sh_2:   sta RUNT+$100,x            ; (and odd lines')
         sta pp1+2
         sta jo+2
         sta sh_2+2
+        lda lahsh,y                ; the line pages' table
+        sta np_h+2
+        sta np_h2+2
+        sta np_h3+2
+        sta fs_h+2
+        sta z1_h+2
+        sta s2_l+2
         rts
         .popseg
 .else
@@ -702,6 +788,10 @@ npt0:   .byte $A5, $4C             ; LDA x4 / CLC, JMP nearpost
 npt1:   .byte x4, <nearpost
 npt2:   .byte $18, >nearpost
 shs:    .byte SCR0, SCR0+1, SCR1, SCR1+1   ; scrh by t
+.ifdef SWR
+lahsh:  .byte >LAHSB0, >LAHSB1, >LAHSB2, >LAHSB3   ; LAHSBt's page by t
+        .assert <LAHSB0 = <LAHSB1 && <LAHSB0 = <LAHSB2 && <LAHSB0 = <LAHSB3, error, "LAHSBt: one low byte (sethalf patches pages)"
+.endif
 MASKB:  .byte PM($00), PM($88), PM($44), PM($CC), PM($22), PM($AA), PM($66), PM($EE)
         .byte PM($11), PM($99), PM($55), PM($DD), PM($33), PM($BB), PM($77), PM($FF)
 MASKN:  .byte PM($FF), PM($77), PM($BB), PM($33), PM($DD), PM($55), PM($99), PM($11)
@@ -722,22 +812,39 @@ rbl     = *-1
         adc x4                     ; (C set: + 1)
         sta fl_e+1
         sta fl_o+1
+.ifdef SWR
+        clc                        ; bpos at the top: CLMP1, d = TX - x4 - 1
+        lda TX,x
+        sbc x4
+        tay
+        ldx CLMP1,y
+.else
         lda TX,x                   ; bpos at the top
         sec
         sbc x4
         CLAMP4
         tax
+.endif
 fs_w:   lda coff
         sta zp_
         ldy mx
+.ifdef SWR
+fs_h:   lda LAHSB0,y           ; (page: sethalf's)
+.else
 fs_h:   lda LAH,y
         clc
         adc scrh
+.endif
         sta zp_+1
+.ifdef SWR
+        lda RSMT,y                 ; the row's first line - 1
+        sta rsm
+.else
         tya
         and #$F8
         sbc #0
         sta rsm
+.endif
         tya
         and #7
         tay
@@ -828,10 +935,15 @@ fr:     stx bpos                   ; far: a run to the transition
         clc
         adc scrh
         sta zp_+1
+.ifdef SWR
+        lda RSMT,y                 ; the row's first line - 1
+        sta rsm
+.else
         tya
         and #$F8
         sbc #0
         sta rsm
+.endif
         tya
         and #7
         tay
@@ -972,8 +1084,12 @@ fs_nj:  jmp fs_c                   ; (patched: fs_c or sp_r)
 zone1:  ldx mn
         cpx flr1
         bcs z1_n
+.ifdef SWR
+z1_h:   lda LAHSB0,x           ; (page: sethalf's)
+.else
 z1_h:   lda LAH,x                  ; (C clear)
         adc scrh
+.endif
         sta zp_+1
         txa
         and #7
@@ -998,6 +1114,20 @@ z1_o:   eor RVO
         cpx mx
         bcc z1_m
         jmp c_r1x
+.ifdef SWR
+z1_m:   ldy x4                     ; each pixel's top, then the next line's
+        lda (topa),y               ; mask
+        sta ys
+        iny
+        lda (topa),y
+        sta ys+1
+        iny
+        lda (topa),y
+        sta ys+2
+        iny
+        lda (topa),y
+        sta ys+3
+.else
 z1_m:   txa                        ; each pixel's top, then the next line's
         pha                        ; mask
         ldy x4
@@ -1009,6 +1139,7 @@ z1_m:   txa                        ; each pixel's top, then the next line's
         bne @yl
         pla
         tax
+.endif
 z1_l:   cpx flr1
         bcs z1_n
         jsr pmask
@@ -1098,11 +1229,19 @@ sp_c:   lda rbl                    ; (C set) rtp, fl_e, fl_o: the transitions
         sta rtp
         sta fl_e+1
         sta fl_o+1
+.ifdef SWR
+        clc                        ; Y = bpos at the top (CLMP1)
+        lda TX,x
+        sbc x4
+        tax
+        ldy CLMP1,x
+.else
         lda TX,x                   ; Y = bpos at the top
         sec
         sbc x4
         CLAMP4
         tay
+.endif
         ldx mn
         lda fst_e
         cmp #OP_INX
@@ -1172,6 +1311,20 @@ mktr:   sta tj
         sec
         adc x4
         sta rtp
+.ifdef SWR
+        clc                        ; p1 at the bottom, p0 at the top (CLMP1)
+        lda BX,x
+        sbc x4
+        tay
+        lda CLMP1,y
+        sta p1
+        clc
+        lda TX,x
+        sbc x4
+        tay
+        lda CLMP1,y
+        sta p0
+.else
         lda BX,x                   ; p1 at the bottom, p0 at the top
         sec
         sbc x4
@@ -1182,6 +1335,7 @@ mktr:   sta tj
         sbc x4
         CLAMP4
         sta p0
+.endif
         ldx tj
         cmp p1
         beq @end
@@ -1333,36 +1487,52 @@ LM:     .byte PM($00), PM($88), PM($CC), PM($EE), PM($FF)   ; the n leftmost
 ; likewise.  EINL,y is the slot of the first even line at or after y, EINL-1,y
 ; that of the first odd.  Each pass is entered at line X's slot (je, jo) and
 ; ends at an RTS planted over line Y's (pr0, pr1: put back first unless Y is
-; the last run's); the entries stay while X is the last run's.  The odd pass's
-; RTS returns.  Clobbers A, X, Y.
+; the last run's); the entries stay while X is the last run's.  (SWR: this is
+; run2, which goes on into c_next; run calls it with c_np an RTS.)  Clobbers
+; A, X, Y.
+; run (SWR): run2 from a subroutine: c_np an RTS meanwhile.
         .pushseg
         .segment "T3"
-run:
-rX:     cpx #$FF                   ; (operand: the last X)
-        beq rY
-        stx rX+1
-        lda EINL,x
-        sta je+1
-        lda EINL-1,x
-        sta jo+1
-rY:     cpy #$FF                   ; (operand: the last Y; sethalf's t)
-        beq rv
-        sty rY+1
-        lda #OP_STAY
-pr0:    sta RUNT+$FF               ; (operand: the last even RTS)
-pr1:    sta RUNT+$1FF              ; (the last odd)
+run:    lda c_np
+        pha
         lda #OP_RTS
-        ldx EINL,y
-        stx pr0+1
-pp0:    sta RUNT,x                 ; (page: sethalf's)
-        ldx EINL-1,y
-        stx pr1+1
-pp1:    sta RUNT+$100,x
-rv:     lda ve
+        sta c_np
+        jsr run2
+        pla
+        sta c_np
+        rts
+        .popseg
+
+; runk (bank 4): lines X .. Y-1 of the column black (X <= Y), in one pass
+; through the half's black store table (kpg's page; gen32.py's): its slot for
+; line Y made an RTS, the last one runk planted put back first (kpp), and the
+; table entered at line X's slot (KENL, KENH: the slot's low byte, its page
+; less the table's).  run's RTSes and its cached entries are not touched.
+; Clobbers A, X, Y.
+        .pushseg
+        .segment "B4CODE"
+runk:   sty @y+1
+        ldy #0
+        lda #OP_STAY               ; the last RTS back
+        sta (kpp),y
+@y:     ldy #0                     ; (operand: Y)
+        lda KENL,y
+        sta kpp
+        lda KENH,y
+        ora kpg
+        sta kpp+1
+        lda #OP_RTS
+        ldy #0
+        sta (kpp),y
+        lda KENL,x
+        sta @j+1
+        lda KENH,x
+        ora kpg
+        sta @j+2
+        lda #0
         ldy coff
-je:     jsr RUNT+$FF               ; (operands: the entry; sethalf's page)
-        lda vo
-jo:     jmp RUNT+$1FF
+@j:     jmp $FFFF                  ; (operand: line X's slot; its RTS returns)
+        .assert (>BLKT & 1) = 0, error, "runk: each black table at an even page (KENH ORs 0 or 1)"
         .popseg
 .else
 ; run: lines X .. Y-1 of the column, ve on even lines and vo on odd, through
@@ -1408,10 +1578,14 @@ r_o:    jmp $FF00                  ; (operand: the odd entry)
 .endif
 
 ; recordc: record for a column a rung is in: on to c_srx, or rc_t.
+.ifdef SWR
+recordc: ldx DIV4,y
+.else
 recordc: tya
         lsr a
         lsr a
         tax
+.endif
         lda mx
         bvc :+
         lda mn
@@ -1479,10 +1653,14 @@ gn_d:   stx tj
         lda (bsp),y
         tay
         iny
+.ifdef SWR
+        jsr runk
+.else
         lda #0
         sta ve
         sta vo
         jsr run
+.endif
         ldx tj
         rts
 
@@ -1707,9 +1885,13 @@ s2_n:   ldx tj                     ; on from the stretch's end
         ldy kb
         jmp s2_c
 s2_x:   jmp c_np
+.ifdef SWR
+s2_l:   lda LAHSB0,x           ; (page: sethalf's)
+.else
 s2_l:   lda LAH,x                  ; lines X..tj-1: L into the mask's pixels
         clc
         adc scrh                   ; the line's page: LAH (2 * (y >> 3)) + the
+.endif
                                    ; screen's and half's
         sta zp_+1
         txa

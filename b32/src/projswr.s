@@ -1,27 +1,25 @@
 ; projswr.s: the projection, sideways RAM build.  As project.s, but the map
-; and every tile's colour bytes are stored whole in bank 4 (gen32.py: B4MAP's
-; heights, 64 a row; CMAPE, CMAPO's bytes, or the arc build's classes in
+; and every tile's colour bytes are stored whole (gen32.py: bank 4's B4MAP,
+; heights, 64 a row; bank 5's CMAPE, CMAPO, or the arc build's classes in
 ; CMAPE), and the rows' points are bank 7's prow7.  The front, proj4, runs in
-; bank 4; only the paging is in main RAM.
+; bank 4, the colour window, pcol5, in bank 5; only the paging is in main RAM.
 
 ; project: the frame's rows of points, PX and PY + 16 k + i, and their boxes'
 ; colours.  In: cxt, cxs, czt, czs, CAME; bank 4 paged.  Out: ZB, RN, FACT,
 ; nr, np, HT, PX, PY, HGV, EYV, CLE, CLO; bank 4 paged.  Clobbers A, X, Y,
 ; tmp, rl, rh, syp, lp, MT0, MT1, the overlay.
-        .pushseg
-        .segment "T2"
 project:
         jsr proj4
+        jsr pg5
+        jsr pcol5
         jsr pg7
         jsr prow7
         jmp pg4
-        .popseg
 
         .pushseg
         .segment "B4CODE"
 ; proj4: ZB, RN, FACT, nr; the heights HT (all anew when the columns change
-; or the rows move more than one, else zsh4's one row for prow7's hsh); then
-; the colour window (pcol5).
+; or the rows move more than one, else zsh4's one row for prow7's hsh).
 proj4:  lda czs                    ; FACT: the far row lerped (czs != 0); ZB
         cmp #1                     ; its map row offset, ZFCLIP + FACT
         lda #0
@@ -41,10 +39,10 @@ proj4:  lda czs                    ; FACT: the far row lerped (czs != 0); ZB
         clc
         adc ZB
         cmp pkz
-        beq pcol5
+        beq @r
         jsr zsh4                   ; a step of one row: the new row only
-        bcs pcol5
-        bcc @hl                    ; (always)
+        bcc @hl
+@r:     rts
 @cx:    sta pkx                    ; CX: the map columns cxt-4 .. cxt+6
         sec
         sbc #5-XSKIP
@@ -79,7 +77,59 @@ proj4:  lda czs                    ; FACT: the far row lerped (czs != 0); ZB
         .endrepeat
         dex
         bpl @hc
-        ; (falls into pcol5)
+        rts
+
+; zsh4: the heights' map rows moved by A - pkz (A = czt + ZB).  For one row on
+; (SHF 1) or back (SHF $FF) the new row's heights go to HTN for hsh, C set;
+; otherwise C clear.  pkz = A.  Clobbers A, X, Y.
+zsh4:   tay
+        sec
+        sbc pkz
+        sty pkz
+        cmp #1
+        beq @ld
+        cmp #$FF
+        bne @no
+        tya                        ; one back: the new row is row 7
+        sbc #7
+        tay
+        lda #$FF
+@ld:    sta SHF
+        tya
+        jsr mrow
+        sta HPZ
+        sty HPZ+1
+        ldx #NX-1
+:       ldy CX,x
+        lda (HPZ),y
+        sta HTN,x
+        dex
+        bpl :-
+        sec
+        rts
+@no:    clc
+        rts
+
+; mrow: map row A & 63's address in B4MAP: A low, Y high; tmp = the row.
+; X kept.
+mrow:   and #63
+        sta tmp
+        lsr a
+        lsr a
+        ora #>B4MAP
+        tay
+        lda tmp
+        lsr a
+        ror a
+        ror a
+        and #$C0
+        rts
+        .assert <B4MAP = 0 && (>B4MAP & 15) = 0, error, "mrow: B4MAP on a 4K boundary"
+
+pkx:    .byte $FF                  ; the cxt and czt + ZB the heights are for
+pkz:    .byte $FF
+
+        .segment "B5CODE"
 
 ; pcol5: the strips' box colours.  Window row m (CLE, CLO + 16 m, m 0..9) holds
 ; map row WK - m's tiles for the columns at cxt = WX.  The strips need rows o ..
@@ -198,53 +248,6 @@ crow:   stx WM
         ldx WM
         rts
 
-; zsh4: the heights' map rows moved by A - pkz (A = czt + ZB).  For one row on
-; (SHF 1) or back (SHF $FF) the new row's heights go to HTN for hsh, C set;
-; otherwise C clear.  pkz = A.  Clobbers A, X, Y.
-zsh4:   tay
-        sec
-        sbc pkz
-        sty pkz
-        cmp #1
-        beq @ld
-        cmp #$FF
-        bne @no
-        tya                        ; one back: the new row is row 7
-        sbc #7
-        tay
-        lda #$FF
-@ld:    sta SHF
-        tya
-        jsr mrow
-        sta HPZ
-        sty HPZ+1
-        ldx #NX-1
-:       ldy CX,x
-        lda (HPZ),y
-        sta HTN,x
-        dex
-        bpl :-
-        sec
-        rts
-@no:    clc
-        rts
-
-; mrow: map row A & 63's address in B4MAP: A low, Y high; tmp = the row.
-; X kept.
-mrow:   and #63
-        sta tmp
-        lsr a
-        lsr a
-        ora #>B4MAP
-        tay
-        lda tmp
-        lsr a
-        ror a
-        ror a
-        and #$C0
-        rts
-        .assert <B4MAP = 0 && (>B4MAP & 15) = 0, error, "mrow: B4MAP on a 4K boundary"
-
 WX:     .byte $FF                  ; the window's cxt ($FF: none yet)
 WK:     .byte 0                    ; its row 0's map row
 WO:     .byte 0                    ; o
@@ -252,8 +255,6 @@ VLO:    .byte 0                    ; the rows made: VLO .. VHI
 VHI:    .byte 0
 WE:     .byte 0                    ; o + 7
 WM:     .byte 0                    ; crow's row
-pkx:    .byte $FF                  ; the cxt and czt + ZB the heights are for
-pkz:    .byte $FF
         .popseg
 .ifdef ARC
         .pushseg

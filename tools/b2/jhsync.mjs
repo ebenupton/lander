@@ -1,7 +1,8 @@
 // tools/b2/jhsync.mjs: the 32K build's video timing in jsbeeb, in both phases of
 // the 1 MHz clock.
 //
-//   [BOOTPRE=N] [JSBEEB=dir] node tools/b2/jhsync.mjs [BUILD] [--version V]
+//   [BOOTPRE=N] [MENUWAIT=N] [MODEL=name] [JSBEEB=dir]
+//   node tools/b2/jhsync.mjs [BUILD] [--version V]
 //                [--secs S] [--ula N] [--inject N] [--skip N] [--lat]
 //
 // Boots BUILD/lander.ssd (BUILD default build: sh build.sh) on jsbeeb's Model B
@@ -49,7 +50,15 @@ const PRE = +(process.env.BOOTPRE || 0);
 const lab = {};
 for (const l of readFileSync(`${BUILD}/base-${VER}/labels.txt`, "utf8").split("\n")) { const p = l.split(" "); if (p.length >= 3) lab[p[2].replace(/^\./, "")] = parseInt(p[1], 16); }
 
-const s = new MachineSession("B-DFS1.2");
+// MODEL is jsbeeb's model (default B-DFS1.2; B-stock, in jsbeeb 2, has no sideways
+// RAM).  MENUWAIT adds 2 MHz cycles to the wait before each of the menu's keys.
+const s = new MachineSession(process.env.MODEL || "B-DFS1.2");
+// jsbeeb 2 names keys by position (KeyboardEvent.code); jsbeeb 1 takes key codes.
+const NAME = { 16: "ShiftLeft", 32: "Space", 49: "Digit1", 50: "Digit2", 51: "Digit3", 52: "Digit4", 66: "KeyB", 75: "KeyK", 77: "KeyM", 88: "KeyX", 90: "KeyZ" };
+const kd0 = s.keyDown.bind(s), ku0 = s.keyUp.bind(s);
+let named = false;
+s.keyDown = k => { if (!named) try { return kd0(k); } catch (e) { named = true; } return kd0(NAME[k]); };
+s.keyUp = k => named ? ku0(NAME[k]) : ku0(k);
 await s.initialise();
 await s.boot(30);
 s.loadDisc(BUILD + "/lander.ssd");
@@ -60,7 +69,7 @@ s.reset(true);
 await s.runFor(2000000);
 s.keyUp(16);
 for (const k of [66, KEY]) {                                // B: the 32K build; the version
-    await s.runFor(6000000);
+    await s.runFor(6000000 + +(process.env.MENUWAIT || 0));
     s.keyDown(k);
     await s.runFor(400000);
     s.keyUp(k);

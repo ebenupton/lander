@@ -1,6 +1,6 @@
 # Lander for the BBC Micro
 
-![The arc version in flight](docs/img/arc.png)
+![The arc version in flight](docs/img/hero.png)
 
 A Lander-style landscape and flight: a filled patchwork of land, a ship, fuel
 and a map. One source tree builds two programs, and one disc carries both:
@@ -30,8 +30,9 @@ Each build comes in four colour versions:
 | **`nula`** | **`arc`** |
 | ![nula](docs/img/nula.png) | ![arc](docs/img/arc.png) |
 
-The same moment of the same flight in each version: the sideways RAM build on
-a Model B with a VideoNuLA, in jsbeeb.
+The sideways RAM build on a Model B with a VideoNuLA, in jsbeeb. Each picture
+is a different place on the map and a different heading; the ship was put
+there by writing its position and direction, then flown.
 
 ## Running
 

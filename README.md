@@ -1,5 +1,7 @@
 # Lander for the BBC Micro
 
+![The arc version in flight](docs/img/arc.png)
+
 A Lander-style landscape and flight: a filled patchwork of land, a ship, fuel
 and a map. One source tree builds two programs, and one disc carries both:
 
@@ -22,12 +24,23 @@ Each build comes in four colour versions:
 | `nula` | MODE 2, the VideoNuLA's sixteen colours |
 | `arc` | MODE 2, Lander's own colours as dithers of the NuLA's |
 
+| `mode1` | `cpc` |
+|---|---|
+| ![mode1](docs/img/mode1.png) | ![cpc](docs/img/cpc.png) |
+| **`nula`** | **`arc`** |
+| ![nula](docs/img/nula.png) | ![arc](docs/img/arc.png) |
+
+The same moment of the same flight in each version: the sideways RAM build on
+a Model B with a VideoNuLA, in jsbeeb.
+
 ## Running
 
 `lander.ssd` boots with SHIFT+BREAK. The loader names the machine, looks for
 sideways RAM (in any four sockets, written through ROMSEL or a Watford or
 Solidisk board) and for a VideoNuLA, and offers what the machine can run. On a
 Model B with sideways RAM, B switches between the two builds.
+
+<img src="docs/img/loader.png" width="480" alt="The loader's menu">
 
 ## Building
 

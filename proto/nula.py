@@ -2,31 +2,33 @@
 """The MODE 2 builds' colours.  Three versions draw the game in MODE 2 in place of
 MODE 1's 2 x 2 dithers of black, cyan, magenta and yellow:
 
-  nula  (NULA=1, build.sh nula): MODE 2's sixteen logical colours, each given its
+  nula  (NULA=1; build.sh's version nula): MODE 2's sixteen logical colours, each given its
         own 12-bit colour through the VideoNULA palette (PAL), flat.
-  cpc   (CPC=1, build.sh cpc): the "Amstrad CPC palette": every colour whose
-        red, green and blue are each off, half or full, 27 of them, made on a
+  cpc   (CPC=1; build.sh's version cpc): the "Amstrad CPC palette": every colour
+        whose red, green and blue are each off, half or full, 27 of them, made on a
         plain BBC Micro as a 1 x 2 dither of MODE 2's eight colours (two MODE 2
         pixels one above the other are about square), its phase toggled on
         alternate columns: a checkerboard, one colour on even lines' left pixels
         and odd lines' right, the other on the rest.  A half channel is on in one
         pixel of the two.
-  arc   (ARC=1, build.sh arc): Lander's own colours (proto/land.py's arc_tile and
-        colour: a tile's kind and slope, brightened by its row), each the
+  arc   (ARC=1; build.sh's version arc): Lander's own colours (proto/land.py's
+        arc_tile and colour: a tile's kind and slope, brightened by its row), each the
         checkerboard of the pair of sixteen VideoNULA colours (ARCPAL, fit()'s)
         nearest it.
 
 variant() names the build the environment asks for (mode1 without any) and
-enabled() is true for the MODE 2 builds; the generators (landgen, gamegen,
-shipgen), proto/land.py and the soak and ship tests ask and, when it is, draw
-through this module.  The renderer is the MODE 1 build's: it works in its pixels, 256 across, four to a byte, at that resolution;
-only its masks and colour bytes differ.  A MODE 2 byte holds two pixels, the
+enabled() is true for the MODE 2 builds; the generators (tools/gen.py, landgen,
+gamegen, shipgen, shipmodel), proto/land.py and the tests (test/rig.py sets the
+environment from VERSION) ask and, when it is, draw through this module.  The renderer
+is the MODE 1 build's: it works in its pixels, 256 across, four to a byte; only its
+masks and colour bytes differ.  A MODE 2 byte holds two pixels, the
 left in bits 7, 5, 3, 1 and the right in bits 6, 4, 2, 0 (colour bit 3 first),
 so each MODE 2 pixel is two of the renderer's: it shows the even one of the
 pair, which is what mask() makes of a MODE 1 mask (MODE 1 pixel 0 decides the
 left pixel, pixel 2 the right).  A mask and its complement stay complements, so
-boxes meeting in a byte still tile it.  Overlays placed by single pixels (game.s's
-dots and map marker) take the MODE 2 pixel their pixel falls in instead (pixel()).
+boxes meeting in a byte still tile it.  What is placed by single pixels (gen.py's
+panel letters, gamegen's map; game.s's dots and marker likewise) takes the MODE 2
+pixel its pixel falls in instead (pixel()).
 
 dither_bytes(e) is the build's even and odd line bytes for entry e.
 NULA: colour(e) is e's logical colour, the entries the game uses given their
@@ -41,7 +43,7 @@ entries go on past swatch35's 35 (entries()): LENT + 16 kind + b is Lander's
 colour kind at brightness b (lrgb), which land.colour gives the tiles and
 shipgen the ship's faces; every entry's bytes are its colour's pick() in a
 checkerboard, as the CPC build's.
-yelb(), magb() (mode2.inc's YELB, MAGB: yellow and magenta, arc's pale yellow
+yelb(), magb() (pal.inc's YELB, MAGB, from tools/gen.py: yellow and magenta, arc's pale yellow
 and orange: the letters, the fuel bar, the dots, the map's marker) are solid
 bytes; the map's colours are entries (MAPSEA, MAPLAND, MAPPAD).  PIXM is the
 build's mask of each MODE 1 pixel.
@@ -82,20 +84,6 @@ def arc():
     return variant() == 'arc'
 
 
-def check_build(b):
-    """Exit unless build directory b holds the build variant() expects (build.sh's
-    b/variant)."""
-    want = variant()
-    try:
-        got = open(os.path.join(b, 'variant')).read().strip()
-    except OSError:
-        got = 'mode1'
-    if got != want:
-        arg = '' if want == 'mode1' else ' ' + want
-        raise SystemExit(f'{b} holds the {got} build, the environment asks for {want} '
-                         f'(sh build.sh{arg}, or set ARC=1 / NULA=1 / CPC=1 to match)')
-
-
 # (swatch35 entry, use), in logical colour order 0..15
 SLOTS = [(34, 'black: the sky, the margins'),
          (0, 'sea'), (15, 'sea'), (17, 'sea'),
@@ -125,7 +113,7 @@ def nib(v):
 
 
 NPAL = [tuple(nib(c) for c in avg(e)) for e, _ in SLOTS]   # 4-bit r, g, b
-PAL = NPAL                                                 # the build's (landgen)
+PAL = NPAL                                                 # the build's (gen.py's NULAPAL)
 YELLOW = ENTS.index(10)                                      # the HUD's and dots'
 MAGENTA = ENTS.index(9)                                      # the marker's, old dots'
 
@@ -234,7 +222,7 @@ ARCPAL = [(0, 0, 0), (1, 5, 2), (0, 10, 2), (4, 8, 4), (4, 12, 4), (6, 6, 10), (
           (11, 15, 11), (14, 14, 10), (15, 8, 0)]
 ARCYEL, ARCORA = 14, 15                                    # the letters', the marker's
 if arc():
-    PAL = ARCPAL                                           # (landgen's NULAPAL)
+    PAL = ARCPAL                                           # (gen.py's NULAPAL)
     MAPSEA, MAPLAND, MAPPAD = 35 + 16 * 5 + 6, 35 + 16 * 2 + 6, 35 + 16 * 4 + 6
 
 
@@ -306,7 +294,8 @@ def pick(rgb):
 
 
 def fit():
-    """ARCPAL afresh: black, orange (15, 8, 0) and fourteen more, chosen to bring the
+    """ARCPAL afresh (nothing in the build runs this: ARCPAL above holds its result,
+    and it needs ref/lander/ship.py): black, orange (15, 8, 0) and fourteen more, chosen to bring the
     colours the game shows nearest their pairs (pick).  The colours: every tile's at
     each row (land.arc_tile; rows 4..10 a weight (20 - j)^-2, near rows' tiles being
     larger, the pad's three times), and the ship's faces' at every pitch, a weight
@@ -380,40 +369,19 @@ def pixel(x):
 PIXM = [mask(m) if enabled() else m for m in (0x88, 0x44, 0x22, 0x11)]
 
 
-# The MODE 2 builds' letters: 3 x 7 pixels in a 4 x 8 cell (a MODE 2 character is two
-# bytes, four pixels), for the characters the game shows (land.s's gchars, lchars).
+# The panel's letters: 3 x 7 pixels in a 4 x 8 cell, for the characters the game
+# shows, FUEL (tools/gen.py: the 32K build's FUELG, the sideways RAM build's FUELI).
 FONT = {
-    '0': ['###', '#.#', '#.#', '#.#', '#.#', '#.#', '###'],
-    '1': ['.#.', '##.', '.#.', '.#.', '.#.', '.#.', '###'],
-    '2': ['###', '..#', '..#', '###', '#..', '#..', '###'],
-    '3': ['###', '..#', '..#', '.##', '..#', '..#', '###'],
-    '4': ['#.#', '#.#', '#.#', '###', '..#', '..#', '..#'],
-    '5': ['###', '#..', '#..', '###', '..#', '..#', '###'],
-    '6': ['###', '#..', '#..', '###', '#.#', '#.#', '###'],
-    '7': ['###', '..#', '..#', '.#.', '.#.', '.#.', '.#.'],
-    '8': ['###', '#.#', '#.#', '###', '#.#', '#.#', '###'],
-    '9': ['###', '#.#', '#.#', '###', '..#', '..#', '###'],
-    '.': ['...', '...', '...', '...', '...', '...', '.#.'],
-    ' ': ['...'] * 7,
     'F': ['###', '#..', '#..', '##.', '#..', '#..', '#..'],
-    'P': ['##.', '#.#', '#.#', '##.', '#..', '#..', '#..'],
-    'S': ['.##', '#..', '#..', '.#.', '..#', '..#', '##.'],
     'U': ['#.#', '#.#', '#.#', '#.#', '#.#', '#.#', '###'],
     'E': ['###', '#..', '#..', '##.', '#..', '#..', '###'],
     'L': ['#..', '#..', '#..', '#..', '#..', '#..', '###'],
-    'A': ['.#.', '#.#', '#.#', '###', '#.#', '#.#', '#.#'],
-    'N': ['#.#', '###', '###', '###', '#.#', '#.#', '#.#'],
-    'D': ['##.', '#.#', '#.#', '#.#', '#.#', '#.#', '##.'],
-    'C': ['.##', '#..', '#..', '#..', '#..', '#..', '.##'],
-    'R': ['##.', '#.#', '#.#', '##.', '#.#', '#.#', '#.#'],
-    'H': ['#.#', '#.#', '#.#', '###', '#.#', '#.#', '#.#'],
 }
 
 
 def font_rows(ch):
-    """Character ch's 8 rows as land.s's glyph code takes a definition: pixel i of
-    the cell (0..3) in bits 7 - 2 i and 6 - 2 i (the two pixels a MODE 2 pixel is
-    made from)."""
+    """Character ch's 8 rows, a byte each: pixel i of the cell (0..3) in bits 7 - 2 i
+    and 6 - 2 i (the two renderer pixels a MODE 2 pixel is made from)."""
     out = []
     for r in FONT[ch] + ['...']:
         v = 0

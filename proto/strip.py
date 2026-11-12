@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A strip: the band between two rows of points, filled by ragged.py's rule, with
-the guarantees land.s relies on, and a random stack of strips to look at them.
+the guarantees the renderer relies on, and a random stack of strips to look at them.
 
 A strip has a top row and a bottom row with the same number of points, n; rung i
 joins top point i to bottom point i; box i (0..n-2) is the pixels between rungs i
@@ -22,8 +22,9 @@ row) overwrites the ragged overhang, and its end rungs leaning out cover the
 overhang at the ends; only the last strip's ragged bottom shows (frame.py's
 ground strip, whose bottom row is on or past the screen's last line).
 
-land.s fills a strip from these points alone, byte column by byte column, and is
-checked pixel for pixel against mask by test/landsoak.py.
+The renderer (src/strips.s, src/rungs.s, src/columns.s) fills a strip from these
+points alone, byte column by byte column, and is checked pixel for pixel against mask
+by test/soak.py (through frame.draw).
 
     python3 proto/strip.py [seed]   writes proto/stack.png and stack_x4.png: a random
                                     stack of strips in perspective over a striped

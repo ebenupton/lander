@@ -1,194 +1,111 @@
 # Lander for the BBC Micro
 
-A port of David Braben's *Lander* (the 1987 Archimedes demo that became *Zarch*) to
-the BBC Micro Model B: a 3D landscape you fly over in Lander's ship, with Lander's
-flight model, a landing pad, fuel, a map and sound, at about ten frames a second on
-a 2 MHz 6502.
+A Lander-style landscape and flight: a filled patchwork of land, a ship, fuel
+and a map. One source tree builds two programs, and one disc carries both:
 
-The disc image is `lander.ssd` (also built to `build/lander.ssd`).  It needs a Model B
-or Master with 64K of sideways RAM (four writable 16K banks in any sockets, written
-through ROMSEL or a Watford or Solidisk write-select board) and a DFS.  In jsbeeb
-choose "BBC B with 8271 (DFS 1.2)" and load the disc; SHIFT+BREAK boots it.
+| build | machine | the frame |
+|---|---|---|
+| `base`, the 32K build | a Model B or B+ with nothing added | about 143,000 cycles in the reference flight |
+| `swr`, the sideways RAM build | a Model B or B+ with four free 16K banks of sideways RAM; a Master 128 | about 120,500 |
 
-The disc boots to a chooser:
+The two are the same game drawn by the same renderer. The sideways RAM build
+keeps in its banks the tables that 32K has no room for, and takes about a
+sixth fewer cycles a frame. [docs/parity.md](docs/parity.md) lists every difference between them
+and why it stands.
 
-| Key | Version |
+Each build comes in four colour versions:
+
+| version | the land |
 |---|---|
-| 1 | MODE 1: four colours, the landscape's shades as 2 x 2 dithers |
-| 2 | MODE 2: the CPC palette, 27 colours as checkerboard dithers |
-| 3 | MODE 2: VideoNULA, sixteen flat 12-bit colours (offered only when a NULA is found) |
-| 4 | MODE 2: VideoNULA, Lander's own colours as 1 x 2 dithers of sixteen (likewise) |
+| `mode1` | MODE 1, four colours as 2 x 2 dithers |
+| `cpc` | MODE 2, the CPC's 27 colours as dithers of the eight |
+| `nula` | MODE 2, the VideoNuLA's sixteen colours |
+| `arc` | MODE 2, Lander's own colours as dithers of the NuLA's |
 
-The NULA test is a timing one (the NULA's registers cannot be read): the ULA's
-CRTC clock is set to 2 MHz, then &44 written to &FE22.  Without a NULA &FE22 is a
-copy of &FE20, so the clock drops back to 1 MHz and the frames take twice as long;
-a NULA takes the write as its own (a reset) and the frames keep their length.
+## Running
 
-## Playing
+`lander.ssd` boots with SHIFT+BREAK. The loader names the machine, looks for
+sideways RAM (in any four sockets, written through ROMSEL or a Watford or
+Solidisk board) and for a VideoNuLA, and offers what the machine can run. On a
+Model B with sideways RAM, B switches between the two builds.
 
-| Key | Action |
+## Building
+
+    sh build.sh                    everything: build/lander.ssd, copied to lander.ssd
+    sh build.sh base|swr VERSION   one program, into build/base-VERSION or build/swr-VERSION
+    sh build.sh loader             the disc's !BOOT
+    sh build.sh disc               the disc, from the builds as they stand
+
+Needs cc65 (ca65, ld65, od65) and Python 3 with numpy. The whole build takes
+about ten seconds. Each program's build ends by printing its free block.
+
+## The source
+
+`src/lander.s` is the root of both programs; `-D SWR` selects the sideways RAM
+build.
+
+| file | contents | build |
+|---|---|---|
+| `ram.s` | the memory map of main RAM below the code: every variable and table, by address | both |
+| `strips.s` | the frame, a strip of land at a time; the rows traced | both |
+| `rungs.s` | each strip's rungs: where each pixel passes from box to box | both |
+| `columns.s` | the strip's byte columns; runs of lines through generated store tables | both |
+| `game.s` | the flight, the dots, the panel's gauge and map marker | both |
+| `tabgen.s` | the tables and code made at start-up | both |
+| `boot.s` | the start-up: takes the machine, puts the program in place | both |
+| `project.s`, `mapgen.s` | the projection by multiplication; the map generated as it comes into view | `base` |
+| `ship.s` | the ship, rasterised from its model | `base` |
+| `video.s` | two 6845 frames a field, the clock switched in mid-line | `base` |
+| `projswr.s`, `prow7.s` | the projection from stored maps and bank 7's tables | `swr` |
+| `shipb.s`, `shipspan.s` | the ship, every orientation pre-rasterised, in bank 6 | `swr` |
+| `videoswr.s` | one frame a field; the banks' paging | `swr` |
+| `loader.s` | the disc's `!BOOT` | the disc |
+
+## Documents
+
+* [docs/memory-map.md](docs/memory-map.md): the rules of the layout, loading,
+  the disc; with the generated maps [map-base.md](docs/map-base.md) and
+  [map-swr.md](docs/map-swr.md), which account for every byte.
+* [docs/video-timing.md](docs/video-timing.md): how the 32K build keeps every
+  horizontal sync 64 µs from the last across two clock changes a field, and
+  the b2 and jsbeeb measurements that prove it.
+* [docs/parity.md](docs/parity.md): the optimisations of each build against
+  the other's.
+
+## Testing
+
+    [SWR=1] [VERSION=mode1|cpc|nula|arc] sh test/gate.sh
+
+builds one program and checks it. It prints `GATE PASS` with the flight's
+cycles a frame, or `GATE FAIL` and the step.
+
+| step | checks |
 |---|---|
-| Z / X (or cursor left / right) | yaw left / right |
-| K / M (or cursor up / down) | pitch nose down / nose up |
-| SPACE or SHIFT | thrust |
-| F | frame-rate readout on / off |
+| the build | no errors or warnings; every assert in the source |
+| `tools/stackdepth.py` | the worst-case stack fits; every bank's code runs with its bank paged in |
+| `test/gametest.py` | a scripted flight under py65, every frame's state against `test/flight.txt`: both builds against the one baseline |
+| `test/soak.py` | the land, byte for byte against the reference renderer in `proto/`, over random pans, a raised camera and jumps |
+| `test/shiptest.py`, `test/shipswr.py` | the ship against its model |
+| `tools/memmap.py check` | the maps in `docs/` are this build's |
 
-Built with `DP11_MOUSE=1 sh build.sh` (it is off by default), a mouse at
-&FCAC-&FCAF (found at start; the movement since the last read, as some Master
-upgrades provide) steers the ship as in Lander, in place of the steering keys
-above.  The pointer's offset from where it was when the
-ship last spawned sets the target heading (its direction) and how far the nose
-tips that way (its distance: level near the centre, the full 60 degrees about
-160 mouse units out).  The ship moves halfway to each target every step.  Left
-button: full thrust.  Middle: hover, a quarter of the thrust for a bit over half
-the fuel (Lander's buttons; the right, Lander's fire, does nothing).
+The video timing is checked on the disc itself, in two emulators:
 
-You start level on the pad, the grey square in the middle of the map.  Thrust pushes
-the ship along its roof, so tip the nose the way you want to go; on the pad the ship
-neither turns nor tips, so lift off first.  Land slowly and
-within one pitch step of level, anywhere on the pad, to refuel; touch the ground
-anywhere else, or the pad too fast or too tilted, and the ship is destroyed and, four
-seconds later, back on the pad.  The engines cut out once the landscape has sunk off
-the bottom of the screen; the ship then coasts up and falls back.
+    sh tools/b2/build.sh     builds the headless b2 driver (once)
+    sh tools/b2/all.sh       every build on every machine, at 20 boot phases each
 
-## The MODE 2 versions
+## Tools
 
-All three are the same game in MODE 2.  The renderer is MODE 1's: it works in MODE 1's
-pixels, 256 across, and each MODE 2 pixel shows the even one of the two it
-covers, which only its masks and colour bytes have to know about.  The palettes, the
-colours' assignments and the 3 x 7 letters are in `proto/nula.py`.
-
-- VideoNULA: sixteen flat 12-bit colours in place of MODE 1's dithers (black, three
-  seas, the pad's grey, seven lands and four for the ship; each the average of the
-  dither it replaces).
-- Archimedes colours (VideoNULA): the colours Lander itself gives each tile (its
-  `GetLandscapeTileColour`): one of four greens and browns picked by bits of the
-  altitude, blue for the sea and grey for the pad, each brightened by the tile's
-  row (nearer rows brighter, as the camera moves a tile the rows step) and by a
-  slope lit from the left, then reduced as Lander's VIDC 256-colour mode reduces
-  them.  Each is shown as the nearest checkerboard of two of sixteen NULA colours,
-  the sixteen fitted to the colours the game shows (`proto/nula.py`'s `fit`; the
-  ship takes Lander's colours too, and the map's marker an orange).  The tiles'
-  kinds and slopes are in the map and the row is added as the strips' colours are
-  made, so the colours can follow the row.
-- CPC palette, no NULA needed: the "Amstrad CPC palette", the 27 colours whose red,
-  green and blue are each off, half or full, made as 1 x 2 dithers of MODE 2's eight
-  colours (two MODE 2 pixels one above the other are about square), the phase
-  toggled on alternate columns so each is a checkerboard, a half channel lit on one
-  pixel of the two.  Every colour the game uses gets a different one of the 27, the
-  nearest assignment overall.
-
-## Building and testing
-
-You need [cc65](https://cc65.github.io) (`ca65`, `ld65`) and Python 3 with `numpy`
-and `scipy`.
-The tests need [`py65`](https://github.com/mnaberez/py65); the optional renders need
-Pillow.
-
-```sh
-sh build.sh                            # build/lander.ssd: every version, MODE 1 left in build/
-sh test/run.sh                         # the test suite on MODE 1 (a few minutes)
-sh build.sh cpc && CPC=1 sh test/run.sh    # one version alone (no disc) and its tests
-sh build.sh nula && NULA=1 sh test/run.sh
-sh build.sh arc && ARC=1 sh test/run.sh
-```
-
-The build is deterministic: the disc it produces is byte for byte the one checked in
-(`test/identical.sh`).  On the disc each version's files are in a directory of their
-own (M, C, N, A), with `$.TABLES7`, the same in all four, and the MODE 2 versions'
-`LAND` and `TABLES`, the same in all three, shared (`S.LAND`, `S.TABLES`).
-
-The tests run the game's own 6502 code in py65; the first two compare its output byte
-for byte with the Python reference model:
-
-- `test/landsoak.py` renders random pans of the landscape (one run with the ship
-  drawn, another with the camera raised at random) and checks every frame's
-  projected rows against `proto/land.py` and every byte of its screen against
-  `proto/frame.py`;
-- `test/shipbtest.py` draws every one of the ship's 416 orientations (13 pitches by
-  32 directions) over a random screen and checks every byte against
-  `tools/shipgen.py`'s reference rasteriser;
-- `test/gametest.py` runs the whole game loop with scripted keys and prints the
-  ship's state each frame: a check that it runs, and a harness for poking at the
-  flight model.
-
-## Layout
-
-| Path | What |
+| tool | use |
 |---|---|
-| `src/land.s` | the renderer, the main loop, start-up and the sideways-RAM loader |
-| `src/game.s` | the game: controls, flight model, pad, dots, camera, map, sound (bank 5) |
-| `src/shipb.s`, `src/shipspan.s` | the ship: the bank's entries, the span walker and the decoder (bank 6) |
-| `src/land.cfg`, `src/shipb.cfg` | ld65 configurations |
-| `tools/landgen.py` | the renderer's tables for banks 4, 5 and 7 |
-| `tools/shipgen.py` | the ship: pre-rotated, pre-rasterised, compressed orientations |
-| `tools/gamegen.py` | the game's tables: thrust, the ship's screen line, the map, the crash's sound |
-| `tools/mergebank.py`, `tools/mkdfs.py` | code segments into the bank images; the DFS disc |
-| `src/menu.bas` | the chooser (typed in by `!BOOT`) |
-| `build.sh`, `lander.ssd` | the build, and the disc image it makes |
-| `proto/` | the Python reference model the 6502 matches pixel for pixel |
-| `proto/nula.py` | the MODE 2 versions' palettes, colours, masks and letters |
-| `test/` | the test suite (`test/run.sh` runs it) |
-| `ref/lander/` | what was taken from Lander: the ship blueprint, the flight model, notes |
-
-## How it works
-
-**The landscape.** Lander's height map (its six-sine altitude formula, rescaled to a
-wrapping 64 x 64 tile map with 16 height units a tile) is seen from a camera 13 tiles
-behind the ship and six tiles above the ground under it, looking along z with no yaw,
-so the grid projects to rows of points at fixed depths.  `tools/landgen.py` bakes the
-projection into tables in sideways bank 7, by a row's depth: its y for every height,
-its corners' x for every fraction of the camera's x, and its ends on the side clip
-planes, so projecting a frame is table lookups and additions with no multiplies.  The
-near and far clip planes replace the rows they cut by interpolated ones, the rows end
-on clip planes 4.5 tiles either side of the line of sight, and a row pushed below the
-screen (the camera raised) is held just off it.
-
-**Filling.** Each pair of adjacent rows bounds a strip, drawn far to near.  A strip's
-rows are traced into a line-per-pixel table, its rungs (the segments joining
-corresponding points) into transition tables, and then each byte column of the strip
-is filled from its top to its floor: as one box (a single tile colour) where no rung
-crosses the column, split at the rung otherwise (two or more rungs in one column take
-slower ways).  Fills are runs through unrolled store tables entered at the first line
-and ended by an RTS planted at the line after the last, so a run costs its stores and
-little else.  The screen is double buffered; for each screen and column, the highest
-and lowest lines the landscape reached the last time that screen was drawn are kept,
-so the next frame on it blacks exactly what has gone.  Tiles are coloured from the 35
-2 x 2 dithers of MODE 1's four colours: ten for land, picked by height and by slope
-(lit from the left) with a per-tile scatter, four for sea and a grey for the pad
-(the NULA version: seven and three, flat; the Archimedes-colours version: Lander's
-rule, by row).
-
-**The ship.** Lander's ship is pre-rotated and pre-projected for 13 pitches (60
-degrees nose up to 60 nose down, 10 apart) by 32 directions, 17 of them stored and
-the rest drawn mirrored.  Each stored orientation is rasterised line by line into the
-boundaries between its faces and compressed, in bands, to 4-bit deltas; bank 6
-decodes the current orientation into a buffer when it changes and draws it with a
-span walker that reads the boundaries forwards or backwards.  The ship is always
-drawn at the same depth, so one view angle serves.
-
-**The game.** Lander's flight model (gravity, thrust along the roof, drag, fuel) runs
-one step per frame, with the constants scaled for ten frames a second; the frame rate
-is held to 12.5 at most.  A frame starts drawing as soon as the screen it draws has
-stopped being shown, timed from each vertical sync by the user VIA's timer 2, rather
-than waiting for the next sync.  The camera rises with the ship once the ship comes within
-79 height units of it, up to a limit past which the landscape is drawn below the
-screen and the ship holds its line.  The exhaust dots are single pixels moved by the
-same rule in coarser units.  Sound is the SN76489's noise channel: a quiet roar while
-thrusting and, for the crash, a crack that drops to a rumble and fades.
-
-**Memory.** The program loads at $1900; the two screens are at $3000 and $5800
-(256 x 160 pixels, with a 64-line panel for the fuel bar, the readout and the map).
-Bank 4 holds the height map, the renderer's tables and some of its code, bank 5 the
-tile colours and the game, bank 6 the ship, bank 7 the projection's tables and code.
-The loader finds four writable banks in whichever sockets hold RAM (free ones first);
-every bank switch in play goes through a map of their sockets, and on a Watford or
-Solidisk board the loader patches the board's write-select store into the paging
-routines.
-
-## Credits
-
-Lander is by David Braben; the source studied is Mark Moxon's annotated reconstruction
-of it at [lander.bbcelite.com](https://lander.bbcelite.com).  The sideways-RAM loader and
-the disc builder come from [beebgame](https://github.com/ebenupton/beebgame).  Built
-with [cc65](https://cc65.github.io); tested with [py65](https://github.com/mnaberez/py65).
+| `gen.py`, `landgen.py`, `gamegen.py` | the generated includes; the sideways RAM build's bank images |
+| `shipmodel.py`, `shipgen.py` | the ship's model; its pre-rasterised orientations |
+| `mergebank.py` | a bank's code into its image |
+| `mkdisc.py` | the disc, and the patch records that turn the shared bank images into each version's |
+| `mkdfs.py` | a DFS disc image from files |
+| `memmap.py` | the memory maps, from the linker's output |
+| `stackdepth.py` | the worst-case stack, from the linked program |
+| `padscan.sh` | the flight's cycles for each value of the renderer's page-phase pad |
+| `zprank.py` | the variables zero page would save most on |
+| `test/flightprof.py`, `test/cruise.py` | cycles by routine over a flight |
+| `swatchdisc.py` | a disc of the 35 dithered colours' arrangements |
+| `tools/b2/` | the video timing harness: b2 (`b2drive.cpp`, `b2sweep.sh`) and jsbeeb (`jhsync.mjs`, `jsweep.sh`) |

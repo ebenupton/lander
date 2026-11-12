@@ -9,8 +9,8 @@ throughout.
 A row of points is traced into a line by pixel: one y for each x from the row's
 first point to its last (trace), each segment by bresenham_ys.  That is only a
 line if every segment is shallow, |dy| < dx (or has no length: the two points the
-same), which land.project's rows are and strip.ok checks; land.s's traceb steps the
-same algorithm, one y a pixel, and relies on it.  A rung (a top row point to the
+same), which land.project's rows are and strip.ok checks; src/strips.s's traceb steps
+the same algorithm, one y a pixel, and relies on it.  A rung (a top row point to the
 bottom row point under it) is stepped the other way, one x a line, by the same
 routine with x and y swapped (ragged.boundary).
 

@@ -10,12 +10,16 @@ box  #{i : B_i(y) <= x} - 1  (so a boundary's own pixel is in the box to its rig
 -1 and the last count are outside), at or below the top row's line where the top
 row has a pixel, and no lower than its byte column's floor: the lowest bottom-row
 pixel in that column (bottoms).  The bottom of the band is therefore ragged, a
-whole byte column at a time, which is what lets land.s fill it with byte stores;
-the next strip down overwrites the overhang since its top row is this bottom row.
+whole byte column at a time, which is what lets src/columns.s fill it with byte
+stores; the next strip down overwrites the overhang since its top row is this bottom
+row.
 
-land.s's rungs do the same stepping by the lines where each pixel the rung crosses
-changes box (transitions, in closed form); tools/landgen.py's TRk, TLk tables hold
-those lines for the short rungs.
+src/rungs.s does the same stepping by the lines where each pixel the rung crosses
+changes box: the first line where `B(y) <= x` differs from its value at yt, which is
+yt + ceil(D (2j - 1) / 2a) for the j'th pixel from xt (j from 1: pixel xt + j - 1
+leaning right, xt - j leaning left), D = yb - yt, a = |xb - xt|.  tools/gen.py's TRk,
+TLk tables (rfast_tables, in bank 4) hold those lines for the sideways RAM build's
+short rungs.
 """
 import numpy as np
 
@@ -30,22 +34,6 @@ def boundary(xt, yt, xb, yb):
     moves several pixels a line."""
     assert yb > yt, 'a rung must go down'
     return {yt + k: x for k, x in enumerate(P.bresenham_ys(yt, xt, yb, xb))}
-
-
-def transitions(xt, yt, xb, yb):
-    """For each pixel x the rung crosses (min(xt, xb) <= x < max(xt, xb)), the first
-    line where `B(y) <= x` differs from its value at yt: the line that pixel changes
-    box.  Equal to yt + ceil(D (2j - 1) / 2a) for the j'th pixel from xt (j from 1,
-    pixel xt + j - 1 leaning right, xt - j leaning left), D = yb - yt, a = |xb - xt|:
-    the form land.s's rungs and tools/landgen.py's TRk, TLk tables use.  Nothing in
-    the tree calls this: it states, in their terms, the rule boundary gives, which
-    test/landsoak.py checks through the pixels land.s and mask produce."""
-    b = boundary(xt, yt, xb, yb)
-    out = {}
-    for x in range(min(xt, xb), max(xt, xb)):
-        at_top = b[yt] <= x
-        out[x] = next(y for y in range(yt, yb + 1) if (b[y] <= x) != at_top)
-    return out
 
 
 def bottoms(bot):

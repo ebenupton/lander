@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The landscape: Lander's height map seen from a camera above and behind the ship,
 projected into rows of screen points that frame.py fills a strip at a time.  Every
-quantity is an integer computed as land.s computes it; tools/landgen.py tabulates
-the functions here for sideways RAM, and test/landsoak.py checks land.s's rows and
-pixels against project and frame.draw.
+quantity is an integer computed as the 6502 computes it (src/project.s; the sideways
+RAM build's src/projswr.s and src/prow7.s); tools/landgen.py tabulates the functions
+here for bank 7, and test/soak.py checks the program's rows and pixels against project
+and frame.draw.
 
 Coordinates and units:
   - the map is MAP x MAP tiles and wraps; corner (x, z) has a height 0..HMAX in
@@ -29,9 +30,9 @@ fixed by fz alone; each row traces to one y a pixel because its segments are
 shallow (the largest height step between adjacent corners on this map is 6 units
 against a corner gap of 16 pixels or more, and an end segment, cut short by its x
 clip plane, keeps its corners' slope); rung i joins point i of a row to point i of
-the next.  land.s relies on strip.py's guarantees holding for every
-consecutive pair of rows (main here and frame.py's report the strips failing them:
-none on this map), and draws nothing outside the strips.
+the next.  The renderer (src/strips.s) relies on strip.py's guarantees holding for
+every consecutive pair of rows (main here and frame.py's report the strips failing
+them: none on this map), and draws nothing outside the strips.
 
     python3 proto/land.py [frames]   pans 3/16 tile across and 5/16 deep a frame,
                                      writes proto/land_000.png .. land_003.png (the
@@ -50,36 +51,39 @@ import swatch35 as SW
 import nula as NU
 
 # The map
-MAP = int(os.environ.get('LAND_MAP', 64))  # tiles a side (wrapping): landgen's MAP
-                          # table, MAP bytes a row (LAND_MAP=32: the 32K build's)
+MAP = int(os.environ.get('LAND_MAP', 64))  # tiles a side (wrapping): tables.inc's MAPN.
+                          # The builds' is 64 (tools/gen.py and test/soak.py set it);
+                          # LAND_MAP=32 is heightmap's 32-tile map, the model's alone
 HSCALE = 16               # height units a tile
-HMAX = int(os.environ.get('LAND_HMAX', 15))     # heights 0..HMAX: the MAP byte's low
-                          # nibble, SYT7's 2 HMAX + 1 entries in a 32-byte row and
-                          # LERPQ7's differences -15..15 (LQOFF) all need HMAX <= 15
-                          # (LAND_HMAX in the environment overrides it; nothing in
-                          # the tree sets it)
+HMAX = int(os.environ.get('LAND_HMAX', 15))     # heights 0..HMAX: a map byte's low
+                          # nibble (src/mapgen.s's slots), landgen's SYT7 (2 HMAX + 1
+                          # entries in a 32-byte row) and its LERPQ7 (differences
+                          # -15..15, LQOFF) all need HMAX <= 15 (LAND_HMAX in the
+                          # environment overrides it; nothing in the tree sets it)
 SEA = 0                   # sea level: corners under SEAS are flattened to it
 SEAS = -10 / 12           # the six-sine sum's sea level: 39% of corners are under it
 # The grid: Lander's 13 x 11 corners (12 x 10 tiles).  Corner i (0..12) of a row is
 # at (i - 5) * 256 - fx - 128 across (8.8 tiles from the line of sight) and corner
 # row j (0..10) at depth (ZBACK - j) * 256 - fz.
-NX, NZ = 13, 11           # corners across and deep (land.s: 16 bytes a row for PX, PY;
-                          # landgen's DI0 is the near row's least depth, from NZ)
+NX, NZ = 13, 11           # corners across and deep (src/ram.s's PX, PY are 16 bytes a
+                          # row; landgen's DI0 is the near row's least depth, from NZ)
 ZBACK = 20                # corner row 0's depth, tiles (at fz 0)
 XSKIP = 1                 # corner columns not drawn either side: columns 1..11 are
-                          # (11 points a row: land.s's np, tables.inc's NX)
+                          # (11 points a row: src/ram.s's np, tables.inc's NX)
 XCLIP = 1152              # the x clip planes, 8.8 tiles either side of the line of
                           # sight (4.5): a row's end points are on them, between
-                          # corners 1 and 2 and corners 10 and 11 (PINL7, PINR7)
+                          # corners 1 and 2 and corners 10 and 11 (landgen's PINL7,
+                          # PINR7)
 ZCLIP = 10                # the near clip plane's depth, tiles: the last row is on it
-                          # (row j = ZBACK - ZCLIP replaced; land.s's RN, PXN7)
+                          # (row j = ZBACK - ZCLIP replaced; project's row RN,
+                          # landgen's PXN7)
 ZFCLIP = 16               # the far clip plane's depth, tiles: the first row is on it
                           # (corner row ZBACK - ZFCLIP at fz 0, else the row before
-                          # it replaced; PXF7)
+                          # it replaced; landgen's PXF7)
 ZSKIP = 3                 # corner rows 0..ZSKIP-1 are never drawn: row ZSKIP is the
-                          # far clip's at fz not 0.  land.s's first row is ZB =
-                          # ZFCLIP or ZFCLIP + 1 from czs; its ZBACK - ZSKIP is the
-                          # far clip off, a case never taken, and its assert on nr
+                          # far clip's at fz not 0.  The 6502's first row is ZB =
+                          # ZFCLIP or ZFCLIP + 1 from czs (src/project.s, projswr.s);
+                          # ZSKIP is in their assert on nr alone
 assert ZSKIP == ZBACK - ZFCLIP - 1
 # The camera
 CAMH = int(os.environ.get('LAND_CAMH', 96))     # its height above the ground under the
@@ -91,14 +95,15 @@ EMAX = 95                 # the most the camera is raised (e, game.s's CAME): at
                           # HMAX) is at line HORIZON + 81 + 95 = 160, past YGND, so
                           # every row is below the screen whatever the ground
 ZSHIP = 13                # the ship's depth, tiles: the ground under it sets the
-                          # camera's height (ground, land.s's hgnd); the clip planes'
-                          # middle; game.s puts the camera ZSHIP behind the ship and
-                          # gamegen's SHYT uses recip(ZSHIP * 256)
+                          # camera's height (ground; hgnd in src/project.s and
+                          # prow7.s); the clip planes' middle; game.s puts the camera
+                          # ZSHIP behind the ship and its GSHYT uses gen.py's RSHIP,
+                          # recip(ZSHIP * 256)
 # The landing pad
 PADN = 6                  # tiles 0..PADN-1 across and deep (corners 0..PADN flat)
 PADH = 4                  # its height, units (game.s spawns the ship on it)
-PADC = 19                 # its colour: swatch35 entry 19, K1C1M1Y1, a grey (gamegen's
-                          # map marker)
+PADC = 19                 # its colour: swatch35 entry 19, K1C1M1Y1, a grey (the pad's
+                          # on gamegen's map too)
 # The projection
 F256 = 65536              # the focal length, 8.8 pixels: 256 pixels (Lander's, there
                           # on a 320-pixel screen: the view here is narrower)
@@ -106,10 +111,8 @@ HORIZON = -16             # the horizon's screen line, above the screen: the far
                           # (depth 16 tiles, R 4096) puts its highest possible corner
                           # (ground 0, height HMAX) at HORIZON + (CAMH - HMAX) = 65,
                           # frame.py's YSKY + 1, so the sky strip is never empty;
-                          # game.s's ship line is HORIZON + SHYT
+                          # game.s's ship line (GSHYT) is measured from HORIZON
 XC = 128                  # the line of sight's screen x (Lander's 160 of 320)
-YLIM = 156                # unused: nothing in the tree reads it and tables.inc does
-                          # not carry it
 XL, XR = 4, 252           # the screen edges rows are clipped to (clip) and frame.py's
                           # margins stop at: the land is drawn in x 4..251.  With
                           # these constants no row reaches them (the near row's ends
@@ -120,19 +123,21 @@ SEAC = [0, 2, 15, 17]
 if NU.nula():             # the NULA build: fewer, flat (proto/nula.py)
     LAND, SEAC = NU.LAND, NU.SEAC
 STEPS = 16                # camera positions a tile: a step is 256 / STEPS in 8.8
-                          # (land.s's cxs, czs are sixteenths)
+                          # (src/ram.s's cxs, czs are sixteenths)
 
 
 SINES32 = [(2, 1, -1), (2, 2, 1), (2, -2, 1), (2, 3, 2), (1, 2, 5), (1, 5, 3)]   # (amplitude,
                           # x and z cycles a wrap): the 32-tile map's formula
 
 
-GEN = os.environ.get('LAND_GEN') == '1'   # the 32K build's generated 64-tile map
-                          # (proto/mapgen.py): heightmap and colour from it
+GEN = os.environ.get('LAND_GEN') == '1'   # the builds' map, generated from tables
+                          # (proto/mapgen.py; tools/gen.py and test/soak.py set it):
+                          # heightmap and colour from it.  Without it, Lander's own
 
 
 def heightmap():
-    """The map: (h, base), each a (MAP, MAP) int array indexed [z, x].
+    """The map: (h, base), each a (MAP, MAP) int array indexed [z, x].  With GEN,
+    mapgen.heightmap's; otherwise:
 
     h is Lander's altitude formula, six sines in x and z summing to +-9.6: a corner
     under SEAS is SEA (0), the rest are 1..HMAX by linear scaling of the sum above
@@ -169,13 +174,14 @@ def heightmap():
 
 def recip(d):
     """Pixels a tile at depth d (8.8 tiles): F256 * 256 / d rounded to the nearest,
-    8.8 (landgen's R7L, R7H by depth)."""
+    8.8 (R7L, R7H by depth: landgen's in bank 7, src/tabgen.s's in the 32K build)."""
     return (F256 * 256 + d // 2) // d
 
 
 def lerp(a, b, f):
-    """a + (b - a) f / 256, rounded half up: the interpolation land.s does by its
-    LERPQ7 table (lerp(0, b - a, f) by f a multiple of 16, -15 <= b - a <= 15)."""
+    """a + (b - a) f / 256, rounded half up: the interpolation src/prow7.s does by
+    landgen's LERPQ7 table (lerp(0, b - a, f) by f a multiple of 16, -15 <= b - a <=
+    15) and src/project.s by its lerp4 and lrow."""
     return a + (((b - a) * f + 128) >> 8)
 
 
@@ -207,7 +213,7 @@ def clip(row):
 def ground(hm, cx, cz):
     """The ground's height under the ship: at map position (cx + 128, cz + ZSHIP *
     256), on the line of sight ZSHIP tiles ahead, lerped across then down between
-    the four corners round it (land.s's hgnd)."""
+    the four corners round it (hgnd in src/project.s and src/prow7.s)."""
     x, z = cx + 128, cz + ZSHIP * 256
     xi, xf, zi, zf = x >> 8, x & 255, z >> 8, z & 255
     g = lambda i, j: int(hm[0][j % MAP, i % MAP])
@@ -232,10 +238,10 @@ def project(hm, cx, cz, e=0):
         heights lerped between corners 1 and 2, and 10 and 11, by fx (at fx 0 the
         ends coincide with corners 1 and 10); corners 2..10 lie between.
     Each y is rounded (half up) as the formula above with ey = (e (R >> 5) + 64) >> 7
-    (land.s's eyrow) and held at 254 at most; the row is clipped to XL..XR; then the near
-    clip's row is held a line or more below the row before it (255 at most) and the
-    far clip's row a line or more above the row after it, so those rungs go down
-    however the heights are interpolated."""
+    (eyrow in src/project.s and src/prow7.s) and held at 254 at most; the row is
+    clipped to XL..XR; then the near clip's row is held a line or more below the row
+    before it (255 at most) and the far clip's row a line or more above the row after
+    it, so those rungs go down however the heights are interpolated."""
     xt, zt, fx, fz = cx >> 8, cz >> 8, cx & 255, cz & 255
     xs = [xt - 5 + i for i in range(XSKIP, NX - XSKIP)]
     hg = ground(hm, cx, cz)
@@ -275,8 +281,9 @@ def project(hm, cx, cz, e=0):
     return xs, rows
 
 
-# The tiles' colours.  Each tile has two 4-bit random picks; TILERND is also the
-# MAP byte's high nibble (landgen).  A land tile's colour is the LAND entry nearest
+# The tiles' colours on Lander's own map (without GEN; the builds' are
+# proto/mapgen.py's, which follows these from tables).  Each tile has two 4-bit
+# random picks, TILERND and TILERND2.  A land tile's colour is the LAND entry nearest
 # a target on two axes, each a weighted mean of a pick and the lighting:
 #   yellow:  LIGHT  of 1 - its mean height (yellow low, green high), the rest TILERND
 #   light:   LIGHTL of how its left corners stand above its right (lit from the
@@ -284,7 +291,6 @@ def project(hm, cx, cz, e=0):
 #            units, dark at +SLOPE1 / 2 and above, light at -SLOPE1 / 2 and below),
 #            the rest TILERND2
 # both spread evenly by rank over the map's land tiles so the whole palette is used.
-# The 6502 sees only the result, bank 5's CMAPE, CMAPO (landgen.build2).
 TILERND = np.random.default_rng(12345).integers(0, 16, (MAP, MAP))
 TILERND2 = np.random.default_rng(54321).integers(0, 16, (MAP, MAP))
 LIGHT = 0.5
@@ -361,7 +367,9 @@ def colour(hm, i, j, row, nrows):
     10 - nrows + row, 4..10: Lander's row brightness, nearer brighter).  Otherwise
     swatch35's, fixed per tile: PADC on the landing pad; for a sea tile (all four
     corners at SEA) the SEAC entry picked by TILERND; for a land tile the LAND entry
-    nearest its _targets point in the plane of LANDAX."""
+    nearest its _targets point in the plane of LANDAX.  With GEN the kind and slope,
+    or the entry, are mapgen's (mapgen.arc_tile, mapgen.colour); tools/gen.py stores
+    them for the sideways RAM build (bank 5's CMAPE, CMAPO)."""
     if NU.arc():
         if GEN:
             import mapgen

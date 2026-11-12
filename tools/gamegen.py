@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""The game's tables (src/game.s, bank 5): OUTDIR/gametab.inc, ca65 data game.s .includes.
+"""The game's tables (src/game.s): OUTDIR/gametab.inc, ca65 data.
 
-    python3 tools/gamegen.py [OUTDIR]       (OUTDIR: build/ by default)
+    python3 tools/gamegen.py OUTDIR
+
+build.sh does not run this: tools/gen.py calls write() and trims the file to what each
+build includes (its gametab_inc).  The map's image is in the version's colours (CPC,
+NULA, ARC in the environment: proto/nula.py's switches).
 
 Labels and constants, in the file's order:
   EXNL, EXNH, EXA + t   the crash's sound, step t of the 40 (game.s's CRASHT) at 10 a
@@ -91,9 +95,8 @@ def mapimg():
     return out
 
 
-def main():
-    """Write gametab.inc to the directory named on the command line, or build/."""
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, '..', 'build')
+def write(out):
+    """Write gametab.inc to the directory out."""
     thx, thz, thy = thrust()
     lines = ['; tools/gamegen.py: the game\'s tables (generated)']
 
@@ -123,4 +126,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) != 2:
+        sys.exit('usage: python3 tools/gamegen.py OUTDIR')
+    write(sys.argv[1])

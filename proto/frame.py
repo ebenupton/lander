@@ -17,17 +17,17 @@ The screen is double buffered and a frame is drawn over what the frame before la
 left in its buffer.  The margins are what make that safe in this model: a frame's
 strips cover everything a frame two steps of the pan away drew, which main checks
 by drawing into two buffers in turn and comparing each with the frame drawn alone
-on black.  land.s draws the same strips with margins only to the byte boundary and
-instead blacks what the same screen's last frame drew outside them, from its TOPS
-and BOTS records: above each column's new top (record), below its new bottom
-(nearpost) and the columns the land has left (gone); on black the two agree, which
-is what test/landsoak.py compares byte for byte.
+on black.  The 6502 (src/strips.s, src/columns.s) draws the same strips with margins
+only to the byte boundary and instead blacks what the same screen's last frame drew
+outside them, from its TOPS and BOTS records: above each column's new top (record),
+below its new bottom (nearpost) and the columns the land has left (gone); on black
+the two agree, which is what test/soak.py compares byte for byte.
 
 A strip wholly below the screen (every point past YGND: the camera raised, the
 rows held at 254) is dropped before it is counted or drawn: it has no pixel on the
 screen, and with both rows held at 254 its rungs do not go down, so it would fail
-strip.ok.  YSKY and YGND are tables.inc's; lines YSKY..YGND are the 96 the land can
-occupy.
+strip.ok.  YSKY and YGND are tables.inc's (tools/gen.py writes it); lines YSKY..YGND
+are the 96 the land can occupy.
 
     python3 proto/frame.py [frames] [M]   pans at random, STEP sixteenths of a tile
                                           at most each way a frame, jumping every 40

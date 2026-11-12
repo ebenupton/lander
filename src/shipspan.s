@@ -1,88 +1,72 @@
-; ============================================================================
-; shipspan.s -- the ship's drawing for LAND's bank 6.  Included by shipb.s:
-; the span walker and its tables go into the bank's CODE segment after keys
-; and ship ($8100-$869E), the decoder spdec into TAIL ($B400-$B57B, the page
-; after the SPANS streams) and the nibble tables DTH, DL4 open DTAB ($B600),
-; where shipspan.inc's tables follow.  tools/shipgen.py writes shipspan.inc:
-; every stored orientation's lines, rasterised by its reference tri() and
-; compressed; test/shipbtest.py runs shipdraw under py65 for every orientation
-; and checks each screen byte against that reference.
-; Addresses quoted here are build/shipb_labels.txt's.
+; shipspan.s: the ship's drawing, swr's bank 6.  Included by shipb.s: the span
+; walker and its tables in CODE, the decoder spdec in TAIL, the nibble tables
+; DTH, DL4 opening DTAB, where shipspan.inc's tables follow.  tools/shipgen.py
+; writes shipspan.inc: every stored orientation's lines, rasterised and
+; compressed; test/shipswr.py checks every screen byte shipdraw leaves against
+; shipgen's rasteriser.
 ;
-; Entry: shipdraw (jsr from shipb.s's ship; the test calls it directly).
-; In: shk the direction (0..31), shp the pitch (0..12), shx, shy the centre,
-; scrb the high byte of the screen to draw on (LAND's zero page).  Out: the
-; ship's pixels on that screen, every other pixel untouched; bxl, bxr, byt,
-; byb its box (first and last pixel column and line, inclusive); DBUF holding
-; the orientation's lines and dlast naming it.  Clobbers A, X, Y, zero page
-; $8E-$9F and TRL+0..15 (shipb.s's names), FCE, FCX, and the patched
-; operands named below.  LAND's own uses of that zero page (project's HPZ,
-; bank 7's CX2.., the strips' BE, BO) and of TRL, TRB (a split column's
-; transitions) are over when B6_SHIP runs and are set afresh before each use.
+; Entry: shipdraw.  In: shk the direction (0..31), shp the pitch (0..12), shx,
+; shy the centre, scrb the screen's page.  Out: the ship's pixels on that
+; screen, every other pixel untouched; bxl, bxr, byt, byb its box (first and
+; last pixel column and line, inclusive); DBUF the orientation's lines, and
+; dlast, dmir, dal naming them.  Clobbers A, X, Y, the overlay (c0+1 .. bl),
+; TRL's 16 bytes, FCE, FCX and the patched operands.
 ;
-; Orientation: entry e = 17 shp + kk, kk the stored direction (shipgen's
-; kmap): (shk + 8) & 31 when that is under 17 (mir 0), else (24 - shk) & 31
-; with mir $FF, the stored picture drawn as its mirror image about shx
-; (pixel shx + d at shx - d) and each face's "normal's x < 0" bit (SNEG + e)
-; inverted, which picks the other shade.
+; Orientation: entry e = 17 shp + kk, kk the stored direction: (shk + 8) & 31
+; where that is under 17 (mir 0), else (24 - shk) & 31 with mir $FF: the
+; stored picture drawn as its mirror image about shx (pixel shx + d at shx -
+; d), each face's "normal's x < 0" bit (SNEG + e) inverted, which picks its
+; other shade.
 ;
-; A line: m = n + 1 boundaries u = pixel offset from shx + SHIP_U0 (20): the
-; first pixel, then where each of the band's n faces ends, left to right on
-; the stored picture (a face the line lacks ends where it starts).  The
-; screen pixel of u is w = u + al (normal) or 41 + al - u (mirrored), al =
-; shx & 3, counted from the column five left of shx's (ptr's column): spdec
-; stores w, and a mirrored line's boundaries are read from its last to its
-; first and the faces' slots are filled from the pattern's end.
+; A line: m = n + 1 boundaries, u = SHIP_U0 (20) + the pixel's offset from
+; shx: the first pixel, then where each of the band's n faces ends, left to
+; right on the stored picture (a face the line lacks ends where it starts).
+; On the screen u is pixel w = u + al, or 41 + al - u mirrored, al = shx & 3,
+; counted from the byte column five left of shx's (ptr's).
 ;
 ; Bands: an orientation's lines run top to bottom in bands, each band's lines
 ; sharing a pattern P (SPATN + P faces: n, 1..6, listed in SPATF from SPATO +
-; P to SPATON + P) and each boundary moving by at most a nibble (-8..7) a
-; line.  The stream (SPANS; ELO, EHI + e): per band P, L (its lines), line
-; 0's m bytes, then lines 1 .. L-1 each as m nibbles, high nibble first, a
-; byte a pair (an odd m's first high nibble zero, unused): each boundary's
-; change from the line before, the high nibble rotated to put its sign bit
-; lowest; $FF after the last band.  spdec expands it
-; into DBUF ($2F00, main RAM): P, L, then the lines in order, each as its w's
-; (below) in the last m bytes of an eight-byte slot; $FF the end.  An
-; orientation's DBUF image is under 256 bytes (shipgen asserts), so it never
-; leaves page $2F: dp and the reads' low bytes alone move.
+; P to SPATON + P), each boundary moving by -8..7 a line.  The stream (SPANS;
+; ELO, EHI + e): per band P, L (its lines), line 0's m bytes, then each of
+; lines 1 .. L-1 as m nibbles, high nibble first, a byte a pair (an odd m's
+; first high nibble unused): each boundary's change from the line before, the
+; high nibble rotated to put its sign bit lowest; $FF after the last band.
+; spdec expands it into DBUF: P, L, then the lines in order, each as its w's
+; in the last m bytes of an eight-byte slot; $FF the end.  The image is under
+; 256 bytes (shipgen asserts) and DBUF is a page, so dp and the reads' low
+; bytes alone move.
 ;
 ; Drawing (band, line, SEG): a band's lines in two passes of alternate lines,
-; A then B (dp stepping two slots a line), each pass with the faces' dithers
-; for its lines' parity (c0+j slot j's byte for this pass, x0+j its even ^
-; odd, to flip for pass B).  A line: Y = the first boundary's byte (its
-; offset from ptr: 8 a column), acc (A) = that screen byte; then for each
-; face in turn acc's pixels from the
-; boundary on become the face's dither (eor c, and KT, eor c: KT the mask of
-; the pixels before w in its byte); when the next boundary lies in a later
-; byte, acc is stored, the whole bytes between are filled with the dither
-; and acc restarts as a byte of it.  The last boundary leaves the pixels from
-; it on as the screen's.  The screen is MODE 1 cut to 64 bytes a line: 4
-; pixels a byte (masks $88, $44, $22, $11; a MODE 2 build: KTN holds
-; proto/nula.py's mask() of these), 8 bytes a column cell, 512 a
-; character row; line y's byte of column c is at base + 512 (y >> 3) + (y &
-; 7) + 8 c.
+; A then B, each with the faces' dithers for its lines' parity (c0+j slot j's
+; byte for the pass, x0+j its even ^ odd, to flip for pass B).  A line: Y the
+; first boundary's byte (its offset from ptr, 8 a column), A that screen
+; byte; for each face in turn A's pixels from the boundary on become the
+; face's dither; where the next boundary lies in a later byte, A is stored,
+; the whole bytes between are filled with the dither and A restarts as a byte
+; of it.  The last boundary leaves the pixels from it on as the screen's.
+; The screen is 64 bytes a line, four pixels a byte: line y's byte of column
+; c is at 256 scrb + 512 (y >> 3) + (y & 7) + 8 c.
 ;
-; Tables for w (shipgen's write(), in DTAB): KTN + w the mask of the pixels
-; before w in its byte, BYN + w the byte's offset from ptr, 8 (w >> 2), LIM +
-; w the first pixel of the byte after, 4 ((w >> 2) + 1): the next boundary
-; is in the same byte when it is under that, read in rising w either way.
+; Tables by w (shipspan.inc, in DTAB): KTN + w the mask of the pixels before
+; w in its byte (MODE 1's $00, $88, $CC, $EE; a MODE 2 build's equivalents),
+; BYN + w the byte's offset from ptr, 8 (w >> 2), LIM + w the first pixel of
+; the byte after, 4 ((w >> 2) + 1): the next boundary is in the same byte
+; when it is under that.  The boundaries are read in rising w, mirrored or
+; not.
 ;
-; Self-modification: shipdraw patches the mirror-dependent opcode and
-; operands (lop; lk's mask mk), band's table bases (bpcl, bccl, bso) and the
-; lines' page (rd_j, in: page).  band patches the first read's offset (lk)
-; and the chains' entries (lj, ij, fj, bcj); each line patches its m reads
-; (in, rd_j) through the pn_j or pm_j chain.  The
-; chains pn_j/pm_j, cn_j/cm_j, seg_j, fl_j are six entries each running on
-; into the next; a band of n faces enters at entry 7 - n (tables PNL, PML,
-; CNL, CML, SGL, SGH, FLL + n), so the faces occupy slots 7 - n .. 6, slot 6
-; is always the last face, and seg6 falls into seg7, the line's end.
-; ============================================================================
+; Self-modification.  A drawing (shipdraw): the mirror's opcode and operand
+; (lop), band's table bases (bpcl, bccl, bso), the lines' page (rd_j, in:
+; page).  A band: the first read's offset (lk) and the chains' entries (lj,
+; ij, fj, bcj).  A line: its m reads (in, rd_j), through the pn_j or pm_j
+; chain.  The chains pn_j/pm_j, cn_j/cm_j, seg_j, fl_j are six entries each
+; running on into the next; a band of n faces enters at entry 7 - n (tables
+; PNL, PML, CNL, CML, SGL, SGH, FLL + n), so the faces take slots 7 - n .. 6,
+; slot 6 is always the last face, and seg6 falls into seg7, the line's end.
 
 ; Zero page (shipb.s's names): c0+j, x0+j (j 1..6) the slots; ptr the line's
-; screen byte, dp its DBUF bytes, lim, bl (lines left in the pass); and in
-; TRL: t, k (scratch), al, wb (spdec's base for w), ee, pm, mk, nb, ptb, dpb
-; (pass B's first line: its screen byte and its DBUF slot).
+; screen byte, dp its DBUF slot, lim, bl (lines left in the pass); and in TRL:
+; t, k (scratch), al, wb (spdec's base for w), ee, pm, mk, nb, ptb, dpb (pass
+; B's first line: its screen byte and its DBUF slot).
 
         .assert SHIP_MAXN <= 6, error, "six slots: no pattern may have more faces"
 
@@ -119,12 +103,12 @@ cm6:    CS SPATF+0, 6
         jmp lnx2
 
 ; ---------------------------------------------------------------- shipdraw
-; shipdraw: draw the ship (shk, shp) centred at (shx, shy) on screen scrb;
-; In, Out and Clobbers as the file header.  Sets mir, ee, the faces' dithers
-; FCE, FCX, the box, al, wb, every per-drawing patch, DBUF (spdec, unless it
-; holds this entry as drawn with this mir and al: dlast, dmir, dal), dp =
-; DBUF and ptr = line byt's byte in column (shx >> 2) - 5, then falls into
-; band; band's rts at the $FF ends the drawing.
+; shipdraw: the ship (shk, shp) centred at (shx, shy) on screen scrb; In, Out
+; and Clobbers as the file's header.  Sets mir, ee, the faces' dithers FCE,
+; FCX, the box, al, wb, every per-drawing patch, DBUF (spdec, unless it holds
+; this entry for this mir and al: dlast, dmir, dal), dp = DBUF and ptr = line
+; byt's byte in column (shx >> 2) - 5, then falls into band; band's rts at
+; the $FF ends the drawing.
 shipdraw:
         lda shk                    ; kk = (shk + 8) & 31 if under 17: as stored
         clc
@@ -202,7 +186,8 @@ shipdraw:
         sta al                     ; al = shx & 3, the centre's pixel in byte
         sta wb                     ; wb = al (normal) or 41 + al (mirrored):
         lda EXB,x                  ; spdec's base for w
-        and #$0F                   ; low nibble: the leftmost pixel's offset + 17
+        and #$0F                   ; low nibble: the leftmost pixel's offset +
+                                   ; 17
         sta t
         lda EXB,x                  ; high nibble: the rightmost's offset - 4
         lsr a
@@ -254,9 +239,9 @@ shipdraw:
         sta bso+1                  ; or SPATO (mirrored: its start)
         lda PSOH,x
         sta bso+2
-        ldx ee                     ; DBUF holds entry dlast's lines as drawn
-        cpx dlast                  ; mirrored dmir at pixel dal: expand ee's
-        bne :+                     ; unless it already does
+        ldx ee                     ; DBUF holds entry dlast's lines for mir
+        cpx dlast                  ; dmir and al dal: ee's expanded unless
+        bne :+                     ; they are these
         lda mir
         cmp dmir
         bne :+
@@ -301,16 +286,15 @@ shipdraw:
         sta ptr+1
 
 ; ---------------------------------------------------------------- a band
-; band: start the band at dp (its P, L), or at $FF return (the rts is
-; shipdraw's: the drawing is done).  In: dp the band's bytes, ptr its first
-; line's screen byte, the per-drawing patches.  Sets lk (the first read's
-; slot byte: 7 - n, or 7 mirrored), lj, ij, fj, bcj (the chains' entries for
-; n), ptr and ptb, dp and dpb (pass A's and pass B's first lines' screen
-; bytes and DBUF slots: the band's first two lines, swapped when L is even),
-; bl and nb (the passes' lines), pm (pass A's parity), then enters the
-; dithers' chain, which runs on to lnx2.
-; Reached by falling in from shipdraw and by pstb's jmp after a band (psrb
-; falls into it).
+; band: the band at dp (its P, L) begun, or at $FF the drawing done (the rts
+; is shipdraw's).  In: dp the band's bytes, ptr its first line's screen byte,
+; the per-drawing patches.  Sets lk (the first read's slot byte: 7 - n, or 7
+; mirrored), lj, ij, fj, bcj (the chains' entries for n), ptr and ptb, dp and
+; dpb (pass A's and pass B's first lines' screen bytes and DBUF slots: the
+; band's first two lines, swapped when L is even), bl and nb (the passes'
+; lines), pm (pass A's parity), then enters the dithers' chain, which runs on
+; to lnx2.  Entered from shipdraw, which falls into it, and from pstb after a
+; band.
 band:   ldy #1
         lda (dp),y                 ; L, the band's lines
         sta bl
@@ -397,7 +381,6 @@ page:   sta dp+1
         sta in+2
         rts
 
-
 ; PC j, op: the reads' chain's entry j: A (a line byte's address, low) into
 ; rd_j's operand, then op #1: adc (normal; C clear from lop) steps to the
 ; next byte, sbc (mirrored; C set from lop's sbc) to the one before.
@@ -423,8 +406,8 @@ pm4:    PC 4, sbc
 pm5:    PC 5, sbc
 pm6:    sta rd6+1
 
-; in: draw the line whose reads are patched.  X = the first boundary u
-; (operand from lk), lim = LIM's for it, Y = its byte's offset from ptr, A =
+; in: the line whose reads are patched, drawn.  X = its first boundary w
+; (the operand lk's), lim = LIM's for it, Y = its byte's offset from ptr, A =
 ; that screen byte (acc); then into seg_(7-n), the first face's slot.
 in:     ldx $FFFF                  ; (operand: the line's first read, lk's)
         lda LIM,x
@@ -436,8 +419,8 @@ ij:     jmp $FFFF                  ; (operand: seg_(7-n), band's)
 ; SEG j: slot j's face, from boundary X (acc A is its byte Y so far) to the
 ; next boundary.  acc's pixels from w on become c0+j (KT: those before w
 ; stay).  rd_j reads the next boundary; if it is in acc's byte (w < lim) the
-; next slot continues with the same acc; else acc is stored, lim becomes the
-; new boundary's, Y steps by 8 a byte, the whole bytes before the boundary's
+; next slot continues with the same acc; else acc is stored, lim becomes
+; that boundary's, Y steps by 8 a byte, the whole bytes before the boundary's
 ; are filled with c0+j (cmp its BY) and acc restarts as c0+j with Y its byte.
 ; Runs into seg_(j+1); seg6 into seg7.  Patched: rd_j's low byte a line, its
 ; high byte a drawing (page).
@@ -452,7 +435,7 @@ ij:     jmp $FFFF                  ; (operand: seg_(7-n), band's)
         cpx lim                    ; or n - 1 - (j - (7 - n)) mirrored): next w
         bcc .ident(.sprintf("seg%d", j + 1))   ; the same byte: the next slot
         sta (ptr),y                ; acc complete
-        lda LIM,x                  ; lim for the new w
+        lda LIM,x                  ; lim for this w
         sta lim
         tya
         adc #7                     ; (C set: the cpx's) Y + 8
@@ -479,9 +462,9 @@ seg7:                              ; the last boundary: acc's pixels before it,
         and KTN,x
         eor (ptr),y
         sta (ptr),y
-lend:   lda ptr                    ; ptr to the pass's next line, y + 2; into a
-        clc                        ; new character row (y & 7 of 6 or 7: the
-        adc #2                     ; sum's bits 1-2 clear) via lrow
+lend:   lda ptr                    ; ptr to the pass's next line, y + 2; into
+        clc                        ; the next character row (y & 7 of 6 or 7:
+        adc #2                     ; the sum's bits 1-2 clear) via lrow
         sta ptr
         and #6
         beq lrow
@@ -491,8 +474,8 @@ lnx:    lda dp                     ; dp to the pass's next line: two slots on
         sta dp
         dec bl                     ; the pass's lines left (C clear, for lk)
         bne line
-        lda nb                     ; pass A done: pass B's lines (0: none left,
-        beq pstb                   ; the band is done; $80: a one-line band)
+        lda nb                     ; the pass done: pass B's lines (0: B done,
+        beq pstb                   ; and the band; $80: a one-line band)
         bmi psrb
         sta bl
         lda #0
@@ -529,8 +512,8 @@ pstb:   jmp band                   ; (pass B's last line is L - 2: ptr is at
                                    ; line L, the next band's first, and dp at
                                    ; the band's end)
 ; ---------------------------------------------------------------- a line
-; line: patch the line's m boundary reads, then draw it (in).  In: A = dp,
-; the line's slot in DBUF, C clear.  in reads slot byte lk (7 - n, or 7
+; line: the line's m boundary reads patched, then the line drawn (in).  In: A
+; = dp, the line's slot in DBUF, C clear.  in reads slot byte lk (7 - n, or 7
 ; mirrored); lop makes the second read's byte and lj's chain patches the
 ; rest.  lnx2 enters with a pass's first line, lnx with A from its adc.
 lnx2:   lda dp
@@ -564,13 +547,15 @@ PPL:    .byte <PNL, <PML           ; bpcl's table
 PCL:    .byte <CNL, <CML           ; bccl's
 PSO:    .byte <SPATON, <SPATO      ; bso's: the pattern's end, or its start
 PSOH:   .byte >SPATON, >SPATO
-SGL:    .byte 0, <seg6, <seg5, <seg4, <seg3, <seg2, <seg1   ; ij: the first slot
+                                   ; ij: the first slot
+SGL:    .byte 0, <seg6, <seg5, <seg4, <seg3, <seg2, <seg1
 SGH:    .byte 0, >seg6, >seg5, >seg4, >seg3, >seg2, >seg1
-FLL:    .byte 0, <fl6, <fl5, <fl4, <fl3, <fl2, <fl1     ; fj: the flips' entry
-SDP:    .byte 0, <pr1, <hf3, <pr2, <hf5, <pr3, <hf7   ; spdec: sd_ln's entry for
-                                   ; m = n + 1
-SDR:    .byte 0, <sd_r6, <sd_r5, <sd_r4, <sd_r3, <sd_r2, <sd_r1   ; and sd_r0's,
-                                   ; RAW 8 - m
+                                   ; fj: the flips' entry
+FLL:    .byte 0, <fl6, <fl5, <fl4, <fl3, <fl2, <fl1
+                                   ; spdec: sd_ln's entry for m = n + 1
+SDP:    .byte 0, <pr1, <hf3, <pr2, <hf5, <pr3, <hf7
+                                   ; and sd_r0's, RAW 8 - m
+SDR:    .byte 0, <sd_r6, <sd_r5, <sd_r4, <sd_r3, <sd_r2, <sd_r1
         .assert >PNL = >PML && >CNL = >CML, error, "PNL, PML and CNL, CML each in one page: bpcl, bccl patch the low byte"
         .assert >pn1 = >pm6 && >cn1 = >(cm6+12) && >fl1 = >fl6, error, "each chain in one page: lj, bcj, fj patch the low byte"
 
@@ -579,28 +564,30 @@ FCX:    .res 9                     ; even-line dither byte, and even ^ odd
 
         .segment "TAIL"
 ; ---------------------------------------------------------------- spdec
-; spdec: expand entry X's stream (ELO, EHI + X, in SPANS) into DBUF as the
-; drawing reads it: per band P, L copied, then its L lines in order, each in
-; an eight-byte slot (X) as its last m = SPATN[P] + 1 bytes, slot bytes 8 - m
-; .. 7, each boundary as its pixel w: line 0's from the stream's u (wb + u
-; normal, wb + (u ^ $FF) + 1 = 41 + al - u mirrored: C, sd_c's, is mir's bit
-; 0 and the adds keep it; the RAW chain, entered at its byte 8 - m: sd_r0's
-; operand, SDR + n, patched a band), each later line's the line before's
-; (the slot before: eight bytes back) plus (normal) or minus (mirrored: the
-; adds' opcodes and sd_c, patched when mir differs from dsg) its nibble, a
-; pair a stream byte: the PAIR chain pr3 (slot bytes 2, 3), pr2 (4, 5), pr1
-; (6, 7), entered at pr(m / 2) for an even m, or through a HALF (hf7: byte
-; 1, hf5: 3, hf3: 5, the first byte's low nibble alone) for an odd one
-; (sd_ln's operand, SDP + n, patched a band).  A nibble's signed value comes
-; from DTH (the high one: the whole byte as the operand's low byte) or DL4
-; (the low one, masked, with the high one's sign bit).  $FF, copied, ends
-; the entry.
-; In: X the entry; mir, wb, dsg.  Out: DBUF.  Clobbers A, X, Y, ptr (the stream
-; pointer, Y indexing it: an entry is under 256 bytes), $8E (dl: a walker
-; slot byte, which it sets after this runs), sd_y, the patched opcodes and
-; operands.  Called by shipdraw when dlast, dmir or dal changes.  TAIL
-; starts a page (shipb.cfg) so that the chains, laid first, each lie in one.
-dl      = $8E                      ; lines left in the band
+; spdec: entry X's stream (ELO, EHI + X, in SPANS) expanded into DBUF as the
+; walker reads it: per band P, L copied, then its L lines in order, each the
+; last m = SPATN[P] + 1 bytes (8 - m .. 7) of an eight-byte slot, each
+; boundary as its pixel w.
+;   Line 0: the RAW chain, entered at byte 8 - m (sd_r0's operand, SDR + n,
+;   patched a band): w = wb + u, or wb + (u ^ $FF) + 1 = 41 + al - u mirrored
+;   (C, sd_c's, is mir's bit 0, and the adds keep it).
+;   Each later line: the line before's w's (eight bytes back) plus, or
+;   mirrored minus, the stream's nibbles, a pair a byte: the PAIR chain pr3
+;   (slot bytes 2, 3), pr2 (4, 5), pr1 (6, 7), entered at pr(m / 2) for an
+;   even m, or through a HALF (hf7: byte 1, hf5: 3, hf3: 5; its byte's low
+;   nibble alone) for an odd one (sd_ln's operand, SDP + n, patched a band).
+;   A nibble's signed value comes from DTH (the high one: the whole byte as
+;   the operand's low byte) or DL4 (the low one, masked, with the high one's
+;   sign bit).  The adds' opcodes and carries are patched for mir when it
+;   differs from dsg.
+; $FF, copied, ends the entry.
+; In: X the entry; mir, wb, dsg.  Out: DBUF.  Clobbers A, X, Y, ptr (the
+; stream's pointer, Y indexing it: an entry is under 256 bytes), dl, sd_y, the
+; patched opcodes and operands.  Called by shipdraw when the entry, mir or al
+; differs from DBUF's.  TAIL starts a page (shipb.cfg) and the chains come
+; first in it, so that each lies in one page (asserted below).
+dl      = c0+1                     ; lines left in the band (slot 1's byte: the
+                                   ; walker sets it after spdec)
 ; RAW k: line 0's slot byte k from the stream's u: wb + u, or wb + (u ^ $FF)
 ; + 1 mirrored (C, mir's bit 0 from sd_c, kept by the add: w is in 3 .. 41).
 .macro RAW k
@@ -674,7 +661,7 @@ hf3:    HALF 5                     ; m = 3: byte 5, then the pair 6, 7
         .assert >hf7 = >hf3 && >sd_r1 = >sd_r7, error, "the PAIR and RAW chains each in one page: sd_ln, sd_r0 patch the low byte"
 spdec:  lda mir                    ; the adds' opcodes for mir: clc, adc
         cmp dsg                    ; (normal) or sec, sbc (mirrored), unless
-        beq :+                     ; they are already
+        beq :+                     ; they are dsg's
         sta dsg
         and #$20
         ora #$18                   ; clc $18, sec $38
@@ -725,9 +712,9 @@ sd_r0:  jmp sd_r1                  ; adds' carry in; (low byte patched: RAW 8
                                    ; - m) line 0
 sd_end: rts
 sd_y:   .byte 0                    ; Y, while Y indexes SPATN
-dlast:  .byte $FF                  ; the entry DBUF holds ($FF: none yet), as
-dmir:   .byte 0                    ; drawn mirrored or not,
-dal:    .byte 0                    ; at al
+dlast:  .byte $FF                  ; the entry DBUF holds ($FF: none), its mir
+dmir:   .byte 0                    ; and its al
+dal:    .byte 0
 dsg:    .byte 0                    ; the mir the adds' opcodes are for
 
         .segment "DTAB"
@@ -744,11 +731,9 @@ DL4:    .repeat 32, b
         .byte <(((b & 15) ^ 8) - 8 - (b >> 4))
         .endrepeat
         .assert <DTH = 0 && <DL4 = 0, error, "DTH, DL4 open pages: spdec patches a byte, a nibble in as the low byte"
-; shipspan.inc's tables follow in this segment, which is left current for
-; it: LIM, SPATN, SPATO, SPATON, SPATF, SNEG, EYS, EXB, SHDE, SHDO, ELO,
-; EHI, and after its SPANS segment KTN, BYN.
+; shipspan.inc's tables follow in this segment, left current for it: LIM,
+; SPATN, SPATO, SPATON, SPATF, SNEG, EYS, EXB, SHDE, SHDO, ELO, EHI, and after
+; its SPANS segment KTN, BYN.
 
-DBUF    = $2F00                    ; main RAM: the page below screen 0 ($3000),
-                                   ; above LAND's end (land.s asserts <= $2F00);
-                                   ; entry dlast's lines, in the order the
-                                   ; walker reads them (under 256 bytes)
+DBUF    = L_DBUF                   ; main RAM, a page: entry dlast's lines as
+                                   ; the walker reads them (under 256 bytes)

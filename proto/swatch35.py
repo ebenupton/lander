@@ -6,7 +6,7 @@ the four positions (cell).
 
 A tile is filled with its entry's cell repeated: pixel (x, y) of the screen takes
 the ink at (x & 1, y & 1), so tools/landgen.py turns an entry into two bytes, one
-for even lines and one for odd (dither_bytes), and land.s fills whole bytes with
+for even lines and one for odd (dither_bytes), and the renderer fills whole bytes with
 them.  Pixels from different cells therefore meet without a seam only if the inks
 they share are in phase, which cell arranges: black at the same positions in
 every colour that has it (one in four at (0, 0); two the checkerboard (0, 0) and

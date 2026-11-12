@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Merge LAND's sideways-bank code segments into the table images they run from.
+"""Merge the sideways RAM build's bank code segments into the bank images.
 
-    python3 tools/mergebank.py BUILDDIR MAPFILE IMAGE[@HHHH]:SEG,SEG,... ...
+    python3 tools/mergebank.py DIR MAPFILE IMAGE:SEG[,SEG...] ...
 
-ld65 writes each bank segment to its own file, BUILDDIR/SEG, placed (src/land.cfg)
-in space the tables leave free.  Each IMAGE (TABLES, TABLES2, TABLES7: 16K, bank
-address $8000) is read, every SEG named for it copied in at its address less $8000
-(the address from MAPFILE, ld65's map), and the image written back.  The bytes a
-segment lands on must all be zero: a segment over a table, or over another
+    e.g. (build.sh)  python3 tools/mergebank.py $B $B/map.txt B4:B4CODE B5:B5CODE B7:B7CODE
+
+ld65 writes each bank's code segment to its own file, DIR/SEG (src/landerswr.cfg),
+linked to run in space the bank's tables leave free.  Each IMAGE (DIR/B4, B5, B7:
+tools/gen.py's tables, 16K at $8000) is read, every SEG named for it copied in at its
+address less $8000 (the address from MAPFILE, ld65's map), and the image written back.
+The bytes a segment lands on must all be zero: a segment over a table, or over another
 segment, is an error.
 """
 import re
@@ -28,15 +30,15 @@ def segments(mapfile):
     return out
 
 
-def merge(build, image, segs, starts, base=BASE):
+def merge(build, image, segs, starts):
     """Copy the segments segs (files in build) into build/image, each at its start
-    address less base (the image's address: BASE, $8000, unless given)."""
+    address less BASE."""
     path = f'{build}/{image}'
     img = bytearray(open(path, 'rb').read())
     assert len(img) == SIZE, f'{image}: {len(img)} bytes, not 16K'
     for seg in segs:
         code = open(f'{build}/{seg}', 'rb').read()
-        off = starts[seg] - base
+        off = starts[seg] - BASE
         assert 0 <= off and off + len(code) <= SIZE, f'{seg}: not within the bank'
         assert not any(img[off:off + len(code)]), f'{image}: {seg} over the tables or another segment'
         img[off:off + len(code)] = code
@@ -48,8 +50,7 @@ def main():
     starts = segments(mapfile)
     for spec in sys.argv[3:]:
         image, segs = spec.split(':')
-        image, _, base = image.partition('@')         # IMAGE@HHHH: the image at $HHHH
-        merge(build, image, segs.split(','), starts, int(base, 16) if base else BASE)
+        merge(build, image, segs.split(','), starts)
 
 
 if __name__ == '__main__':

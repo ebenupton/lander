@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Lander's ship for LAND's bank 6 (src/shipspan.s): every line of every orientation,
-pre-rasterised and compressed, as shipspan.inc.
+"""Lander's ship for the sideways RAM build's bank 6 (src/shipb.s, src/shipspan.s):
+every line of every orientation, pre-rasterised and compressed, as shipspan.inc.
 
-    python3 tools/shipgen.py OUTDIR [--sheet]
+    python3 tools/shipgen.py [OUTDIR] [--sheet]
 
-writes OUTDIR/shipspan.inc (ca65 data; src/shipb.s includes it after shipspan.s) and
-prints a one-line summary; --sheet also writes OUTDIR/ships.png, every orientation as
-the BBC shows it.  test/shipbtest.py and test/landsoak.py check the 6502's pixels
-against draw(); tools/gamegen.py takes NDIR, NPITCH, PFLAT and pitch().
+Writes OUTDIR/shipspan.inc (ca65 data; src/shipb.s includes it after shipspan.s; OUTDIR
+defaults to the current directory) in the version's colours (CPC, NULA, ARC in the
+environment: proto/nula.py's switches; build.sh sets them) and prints a one-line
+summary; --sheet also writes OUTDIR/ships.png, every orientation as the BBC shows it.
+test/shipswr.py checks the 6502's pixels against draw(); tools/gamegen.py takes NDIR,
+NPITCH, PFLAT and pitch(), and tools/shipmodel.py the model, the ramps and draw().
 
 The model is ref/lander/ship.py's (Lander's objectPlayer): nine vertices in model
 tiles (x the nose, y down, +y out through the floor, z the side) and nine triangular
@@ -447,7 +449,7 @@ def stats():
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description="LAND's ship: shipspan.inc for bank 6.")
+    ap = argparse.ArgumentParser(description="The ship's shipspan.inc, for bank 6.")
     ap.add_argument('outdir', nargs='?', default='.', help='where shipspan.inc goes')
     ap.add_argument('--sheet', action='store_true', help='also write OUTDIR/ships.png, every orientation')
     args = ap.parse_args()

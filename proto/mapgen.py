@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""The 64-tile map as the 32K build makes it on the fly, a corner and a tile at a time
-from integer tables (land.py uses it when LAND_GEN=1; b32/src's generator computes the
-same).  It follows land.py's own map (Lander's six sines, the rank-spread colours) as
+"""The builds' 64-tile map, made a corner and a tile at a time from integer tables
+(land.py uses it when LAND_GEN=1, which tools/gen.py and test/soak.py set).  The 32K
+build makes it as it comes into view (src/mapgen.s computes the same, from gen.py's
+mapgen.inc); the sideways RAM build stores it whole (gen.py's banks 4 and 5).  It
+follows land.py's own map (Lander's six sines, the rank-spread colours) as
 closely as tables a few hundred bytes long allow:
 
   - a corner's height: S = the six sines' sum from SIN16 (256 sin, 64 entries: every

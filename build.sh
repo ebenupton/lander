@@ -1,113 +1,91 @@
 #!/bin/sh
-# LAND's build: build/lander.ssd, a DFS disc holding four versions: MODE 1 (directory
-# M), MODE 2 with the CPC palette (C), MODE 2 with the VideoNULA's (N) and MODE 2 in
-# Lander's own colours through the VideoNULA (A, arc); see proto/nula.py.  SHIFT+BREAK
-# runs !BOOT, an EXEC file that types in and runs the chooser (src/menu.bas): it tests
-# for a VideoNULA, offers the versions (the NULA ones only when found), sets the chosen
-# mode with the palette black and the cursor off, selects the version's directory and
-# *RUNs LANDS, LAND's start, which loads LAND, then TABLES, TABLES2, SHIPB and
-# $.TABLES7 (the same in every version) into sideways RAM banks 4, 5, 6 and 7.  The
-# MODE 2 versions' LAND and TABLES are the same, S.LAND and S.TABLES.  Needs ca65 and
-# ld65 (cc65) and Python 3 with numpy and scipy.
+# build.sh: Lander for the BBC Micro.
 #
-#   sh build.sh              the disc: each version built in turn (MODE 1 last, so it is
-#                            what build/ holds after), its files kept in build/disc/
-#   sh build.sh VERSION      one version (mode1, cpc, nula or arc) into build/, no disc:
-#                            for the tests, which need CPC=1, NULA=1 or ARC=1 in the
-#                            environment to match (build/variant says which was built)
-#   DP11_MOUSE=1 sh build.sh with the mouse (src/game.s; off without)
+#   sh build.sh                  everything: the eight builds, the loader and the disc,
+#                                build/lander.ssd, copied to lander.ssd
+#   sh build.sh base VERSION     the 32K Model B build, into build/base-VERSION/
+#   sh build.sh swr VERSION      the sideways RAM build, into build/swr-VERSION/
+#   sh build.sh loader           the disc's !BOOT, into build/loader/
+#   sh build.sh disc             the disc, from the builds as they stand
 #
-# Steps for a version (everything into build/):
-#   1. tools/landgen.py: the renderer's tables, TABLES (bank 4), TABLES2 (bank 5) and
-#      TABLES7 (bank 7), tables.inc (their addresses and the constants) for land.s
-#      and, for MODE 2, mode2.inc (its colour bytes, NULA palette and letters).
-#   2. tools/gamegen.py: gametab.inc, the game's tables (game.s, .included by land.s).
-#   3. ca65/ld65 on src/land.s (src/land.cfg): LAND (the code, at $1900), LANDS (the
-#      start, at $7000), and a file per bank code segment (B4*, B5*, B7*).
-#   4. tools/mergebank.py: each bank code segment into the table image of its bank, at
-#      the address land.cfg gave it less $8000 (from map.txt), where the tables leave
-#      room (below).
-#   5. landsyms.inc: the LAND labels shipb.s uses (back, scrb, TRL in zero page; sidx and
-#      the setTl..setBh tables), as L_name, from ld65's labels.txt.
-#   6. tools/shipgen.py: shipspan.inc, the ship's pre-rasterised spans; then ca65/ld65
-#      on src/shipb.s (src/shipb.cfg): SHIPB (bank 6).
-# then for the disc, !BOOT, and tools/mkdfs.py.
-#
-# The bank code segments and their room (src/land.cfg places them; tools/landgen.py's
-# docstring has every table):
-#   TABLES, bank 4:  B4R $9000, B4L $9100, B4S2 $9200, B4V1 $B600, B4V2 $B700,
-#                    B4V3 $B800, B4Z $B900 -- the first R2OFF ($6F) bytes of run2's
-#                    store-table pages, before their first entry;
-#                    B4S $A081, B4C $A181 -- after TENH4, TENH5 (129 bytes each).
-#   TABLES2, bank 5: B5CODE $A000 (pcol5), B5GAME $A100 (game.s) -- after CMAPO
-#                    ($9000-$9FFF).  The image holds nothing else; land.cfg ends
-#                    B5GAME's room at $BE00, GLY5, where LANDS writes the game's
-#                    letters at start.
-#   TABLES7, bank 7: B7A $80B0, B7B $81B0, B7E $AEB0, B7C $AFB0, B7D $B0B0 -- the
-#                    spare of R7L, R7H, CLP7, PINL7, PINR7 (NDI = 176 = $B0 entries
-#                    of 256); B7CODE $B480 -- between LQHI (ends $B47F) and PXF7 ($BEA0).
+# VERSION: mode1, cpc, nula or arc.  BUILD=dir builds under dir instead of build/;
+# SRC=dir assembles the sources there instead of src/; CAFLAGS adds assembler
+# options (e.g. -D COREPAD=n).  Needs cc65 (ca65, ld65, od65) and Python 3 with numpy.
 set -e
 cd "$(dirname "$0")"
-B=build
-mkdir -p $B
-MOUSE=
-[ "${DP11_MOUSE:-0}" != 0 ] && MOUSE="-D DP11_MOUSE"
-
-one() {                                                                         # the version $1 into build/
-case $1 in
-    arc) export ARC=1 NULA=0 CPC=0; CA="-D MODE2 -D NULA -D ARC" ;;
-    nula) export ARC=0 NULA=1 CPC=0; CA="-D MODE2 -D NULA" ;;
-    cpc) export ARC=0 NULA=0 CPC=1; CA="-D MODE2 -D CPC" ;;
-    mode1) export ARC=0 NULA=0 CPC=0; CA= ;;
-    *) echo "build.sh: no version $1 (mode1, cpc, nula, arc)" >&2; exit 1 ;;
+SRC=${SRC:-src}
+BUILD=${BUILD:-build}
+T=$1
+V=${2:-mode1}
+case $T in
+"")
+    mkdir -p $BUILD
+    for t in base swr; do
+        for v in mode1 cpc nula arc; do
+            sh build.sh $t $v > $BUILD/$t-$v.log 2>&1 &
+        done
+    done
+    wait
+    for t in base swr; do
+        for v in mode1 cpc nula arc; do
+            tail -n 1 $BUILD/$t-$v.log | grep -q 'bytes free' || { echo "build.sh: $t $v failed ($BUILD/$t-$v.log)" >&2; exit 1; }
+            echo "$t-$v: $(tail -n 1 $BUILD/$t-$v.log)"
+        done
+    done
+    sh build.sh loader
+    sh build.sh disc
+    exit 0 ;;
+loader)
+    B=$BUILD/loader
+    mkdir -p $B
+    ca65 -g --cpu 6502 -o $B/loader.o $SRC/loader.s -l $B/loader.lst
+    ld65 -C $SRC/loader.cfg -o $B/BOOT $B/loader.o -m $B/map.txt -Ln $B/labels.txt
+    echo "loader: $(wc -c < $B/BOOT) bytes"
+    exit 0 ;;
+disc)
+    python3 tools/mkdisc.py $BUILD $BUILD/lander.ssd
+    [ "$BUILD" = build ] && cp $BUILD/lander.ssd lander.ssd
+    exit 0 ;;
 esac
-echo $1 > $B/variant
-python3 tools/landgen.py $B                                                     # TABLES, TABLES2, TABLES7, tables.inc
-python3 tools/gamegen.py $B                                                     # gametab.inc
-ca65 -g --cpu 6502 $CA $MOUSE -I src -I $B -o $B/land.o src/land.s -l $B/land.lst   # LAND, LANDS, the bank segments
-ld65 -C src/land.cfg -o $B/LAND $B/land.o -m $B/map.txt -Ln $B/labels.txt --dbgfile $B/land.dbg
-python3 tools/mergebank.py $B $B/map.txt \
-    TABLES:B4R,B4L,B4S2,B4S,B4C,B4V1,B4V2,B4V3,B4Z \
-    TABLES2:B5CODE,B5GAME \
-    TABLES7:B7A,B7B,B7E,B7C,B7D,B7CODE
-python3 - $B <<'PY'                                                             # landsyms.inc: LAND's labels for shipb.s, L_ before each
-import sys
-want = {'TRL', 'scrb', 'back', 'sidx', 'setTl', 'setTh', 'setBl', 'setBh'}
-out = set()
-for ln in open(sys.argv[1] + '/labels.txt'):
-    _, a, n = ln.split()
-    if n.lstrip('.') in want:
-        out.add(f'L_{n.lstrip(".")} = ${int(a, 16):04X}')
-open(sys.argv[1] + '/landsyms.inc', 'w').write('\n'.join(sorted(out)) + '\n')
-PY
-python3 tools/shipgen.py $B                                                     # shipspan.inc
-ca65 -g --cpu 6502 -I src -I $B -o $B/shipb.o src/shipb.s -l $B/shipb.lst       # SHIPB
-ld65 -C src/shipb.cfg -o $B/SHIPB $B/shipb.o -m $B/shipb_map.txt -Ln $B/shipb_labels.txt
-echo "$1: LAND $(wc -c < $B/LAND | tr -d ' ') bytes, LANDS $(wc -c < $B/LANDS | tr -d ' '), SHIPB $(wc -c < $B/SHIPB | tr -d ' ')"
-}
-
-[ $# -le 1 ] || { echo "build.sh: one VERSION at most" >&2; exit 1; }
-if [ -n "$1" ]; then
-    rm -rf $B/disc $B/lander.ssd $B/BOOT                                        # (no disc from one version)
-    one "$1"
-    exit 0
-fi
-rm -rf $B/disc
-for v in cpc:C nula:N arc:A mode1:M; do
-    one ${v%:*}
-    mkdir -p $B/disc/${v#*:}
-    cp $B/LAND $B/LANDS $B/TABLES $B/TABLES2 $B/SHIPB $B/TABLES7 $B/disc/${v#*:}/
-done
-same() { cmp -s $B/disc/$2/$1 $B/disc/$3/$1 || { echo "build.sh: $1 differs in $2 and $3" >&2; exit 1; }; }
-for d in C N A; do same TABLES7 $d M; done                                     # $.TABLES7
-for d in N A; do same LAND $d C; same TABLES $d C; done                         # S.LAND, S.TABLES
-{ printf 'VDU21\rNEW\r'; tr '\n' '\r' < src/menu.bas; printf 'RUN\r'; } > $B/BOOT      # the chooser typed in, unseen
-F="M.LAND:$B/disc/M/LAND:1900:1900 M.TABLES:$B/disc/M/TABLES:3000:3000"
-F="$F S.LAND:$B/disc/C/LAND:1900:1900 S.TABLES:$B/disc/C/TABLES:3000:3000"
-for d in M C N A; do
-    F="$F $d.LANDS:$B/disc/$d/LANDS:7000:7000 $d.TABLES2:$B/disc/$d/TABLES2:3000:3000"
-    F="$F $d.SHIPB:$B/disc/$d/SHIPB:3000:3000"
-done
-python3 tools/mkdfs.py build $B/lander.ssd LANDER \
-    "!BOOT:$B/BOOT:0000:FFFF" "TABLES7:$B/disc/M/TABLES7:3000:3000" $F
-echo "$B/lander.ssd: MODE 1 (M), CPC (C), NULA (N) and arc (A) versions, MODE 2's LAND and TABLES shared (S)"
+case $V in
+    mode1) export NULA=0 CPC=0 ARC=0; CA= ;;
+    cpc)   export NULA=0 CPC=1 ARC=0; CA="-D MODE2 -D CPC" ;;
+    nula)  export NULA=1 CPC=0 ARC=0; CA="-D MODE2 -D NULA" ;;
+    arc)   export NULA=0 CPC=0 ARC=1; CA="-D MODE2 -D NULA -D ARC" ;;
+    *) echo "build.sh: no version $V (mode1, cpc, nula, arc)" >&2; exit 1 ;;
+esac
+B=$BUILD/$T-$V
+mkdir -p $B
+case $T in
+swr)
+    export SWR=1
+    python3 tools/gen.py $B
+    ca65 -g --cpu 6502 -D SWR $CA $CAFLAGS -I $SRC -I $B -o $B/lander.o $SRC/lander.s -l $B/lander.lst
+    PROG=$(od65 --dump-segsize $B/lander.o | awk '$1 ~ /^(FILLS|CODE):$/ {n += $2} END {print 10240 - n}')
+    sed "s|\"BUILD/|\"$B/|" $SRC/landerswr.cfg > $B/lander.cfg
+    ld65 -C $B/lander.cfg -D __PROG__=$PROG -o $B/x.bin $B/lander.o -m $B/map.txt \
+        -Ln $B/labels.txt --dbgfile $B/lander.dbg
+    python3 tools/mergebank.py $B $B/map.txt B4:B4CODE B5:B5CODE B7:B7CODE
+    awk '$3 ~ /^\.(TRL|scrb|back|sidx|setTl|setTh|setBl|setBh|OVL|DBUF|GSHK)$/ \
+        {printf "L_%s = $%s\n", substr($3, 2), substr($2, 3)}' $B/labels.txt > $B/landsyms.inc
+    python3 tools/shipgen.py $B > /dev/null
+    ca65 -g --cpu 6502 -I $SRC -I $B -o $B/shipb.o $SRC/shipb.s -l $B/shipb.lst
+    ld65 -C $SRC/shipb.cfg -o $B/B6 $B/shipb.o -m $B/shipb_map.txt -Ln $B/shipb_labels.txt
+    D=$(awk '$3 == ".__DATA_LAST__" {print $2}' $B/labels.txt)
+    echo "MAIN: data to \$${D#00}, code from \$$(printf %04X $PROG), $((PROG - 0x$D)) bytes free"
+    ;;
+base)
+    export SWR=0
+    python3 tools/gen.py $B
+    python3 tools/shipmodel.py $B
+    ca65 -g --cpu 6502 $CA $CAFLAGS -I $SRC -I $B -o $B/lander.o $SRC/lander.s -l $B/lander.lst
+    PROG=$(od65 --dump-segsize $B/lander.o | awk '$1 ~ /^(FILLS|CODE):$/ {n += $2} END {print 18688 - n}')
+    sed "s|\"BUILD/|\"$B/|" $SRC/lander.cfg > $B/lander.cfg
+    ld65 -C $B/lander.cfg -D __PROG__=$PROG -o $B/x.bin $B/lander.o -m $B/map.txt \
+        -Ln $B/labels.txt --dbgfile $B/lander.dbg
+    D=$(awk '$3 == ".__DATA_LAST__" {print $2}' $B/labels.txt)
+    echo "BASE: data to \$${D#00}, code from \$$(printf %04X $PROG), $((PROG - 0x$D)) bytes free"
+    ;;
+*)
+    echo "build.sh: base, swr, loader or disc" >&2; exit 1 ;;
+esac
